@@ -10,3 +10,4 @@ outputs/
 .logs-*/
 build/
 *records*
+*node_modules*

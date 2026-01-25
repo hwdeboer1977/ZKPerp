@@ -22,6 +22,7 @@ PERP_PROGRAM="zkperp_v1.aleo"
 
 # Addresses
 USER="aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px"
+ORACLE_ADMIN="aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px"  # Same as USER for testing
 
 # Project paths - UPDATE THESE
 MOCK_USDC_DIR=~/ZKPerp/leo/mock_usdc
@@ -112,11 +113,11 @@ sleep 5
 echo "Approval complete"
 
 # ══════════════════════════════════════════════════════════════════
-# STEP 5: Set Oracle Price
+# STEP 5: Set Oracle Price (ADMIN ONLY)
 # ══════════════════════════════════════════════════════════════════
 
 echo ""
-echo "=== STEP 5: Setting Oracle Price (BTC = \$100,000) ==="
+echo "=== STEP 5: Setting Oracle Price - ADMIN ONLY (BTC = \$100,000) ==="
 cd $ZKPERP_DIR
 leo execute update_price 0field 10000000000u64 1u32 $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/update_price.log
 sleep 5
@@ -200,11 +201,11 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════
-# STEP 8: Update Price (simulate profit)
+# STEP 8: Update Price (ADMIN ONLY - simulate profit)
 # ══════════════════════════════════════════════════════════════════
 
 echo ""
-echo "=== STEP 8: Simulating Price Movement (BTC = \$105,000) ==="
+echo "=== STEP 8: Simulating Price Movement - ADMIN ONLY (BTC = \$105,000) ==="
 leo execute update_price 0field 10500000000u64 2u32 $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/update_price2.log
 sleep 5
 

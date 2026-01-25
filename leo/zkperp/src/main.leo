@@ -38,6 +38,9 @@ program zkperp_v1.aleo {
 
     // ============== CONSTANTS ==============
     
+    // ORACLE_ADMIN now updates price manually (will be updated later!)
+    const ORACLE_ADMIN: address = aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px;
+
     const SCALE: u128 = 1_000_000u128;
     const MIN_MARGIN_BPS: u64 = 50_000u64;      // 5% min margin (20x max leverage)
     const LIQUIDATION_THRESHOLD_BPS: u64 = 10_000u64;  // 1% liquidation threshold
@@ -531,6 +534,9 @@ program zkperp_v1.aleo {
         public price: u64,
         public timestamp: u32,
     ) -> Future {
+        // Only admin can update price
+        assert_eq(self.caller, ORACLE_ADMIN);
+        
         return finalize_update_price(asset_id, price, timestamp);
     }
 

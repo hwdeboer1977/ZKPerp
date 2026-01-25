@@ -1,35 +1,23 @@
 // ZKPerp - Privacy-Preserving Perpetual DEX on Aleo
 // With mock_usdc token integration
+// Option D: Dual Record System for Liquidations
 
 import mock_usdc.aleo;
 
 program zkperp_v1.aleo {
 
     // ═══════════════════════════════════════════════════════════════════
-    // SETUP INSTRUCTIONS
+    // LIQUIDATION ARCHITECTURE (Option D - Dual Record)
     // ═══════════════════════════════════════════════════════════════════
     //
-    // Terminal 1: Start devnet
-    // leo devnet --snarkos $(which snarkos) --snarkos-features test_network --consensus-heights 0,1,2,3,4,5,6,7,8,9,10,11 --clear-storage
+    // When a trader opens a position, TWO records are created:
+    //   1. Position → owned by TRADER (for closing their position)
+    //   2. LiquidationAuth → owned by ORCHESTRATOR (for liquidating if needed)
     //
-    // Terminal 2: Deploy and test
-    // 1. Deploy mock_usdc first:
-    //    cd mock_usdc && leo deploy --network testnet --broadcast --consensus-heights 0,1,2,3,4,5,6,7,8,9,10,11
-    //
-    // 2. Deploy zkperp:
-    //    cd ../zkperp_v1 && leo deploy --network testnet --broadcast --consensus-heights 0,1,2,3,4,5,6,7,8,9,10,11
-    //
-    // 3. Mint USDC to user:
-    //    cd ../mock_usdc && leo execute mint_public <USER_ADDRESS> 10000000000u128 --network testnet --broadcast --consensus-heights 0,1,2,3,4,5,6,7,8,9,10,11 --yes
-    //
-    // 4. Approve zkperp to spend USDC:
-    //    leo execute approve zkperp_v1.aleo 10000000000u128 --network testnet --broadcast --consensus-heights 0,1,2,3,4,5,6,7,8,9,10,11 --yes
-    //
-    // 5. Set oracle price:
-    //    cd ../zkperp_v1 && leo execute update_price 0field 10000000000u64 1u32 --network testnet --broadcast --consensus-heights 0,1,2,3,4,5,6,7,8,9,10,11 --yes
-    //
-    // 6. Add liquidity:
-    //    leo execute add_liquidity 100000000u128 <USER_ADDRESS> --network testnet --broadcast --consensus-heights 0,1,2,3,4,5,6,7,8,9,10,11 --yes
+    // This allows:
+    //   - Trader to close their own position anytime
+    //   - Orchestrator to liquidate unhealthy positions
+    //   - Full privacy (no public position data)
     //
     // ═══════════════════════════════════════════════════════════════════
 
@@ -38,18 +26,25 @@ program zkperp_v1.aleo {
 
     // ============== CONSTANTS ==============
     
-    // ORACLE_ADMIN now updates price manually (will be updated later!)
-    const ORACLE_ADMIN: address = aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px;
-
     const SCALE: u128 = 1_000_000u128;
-    const MIN_MARGIN_BPS: u64 = 50_000u64;      // 5% min margin (20x max leverage)
-    const LIQUIDATION_THRESHOLD_BPS: u64 = 10_000u64;  // 1% liquidation threshold
-    const OPENING_FEE_BPS: u64 = 1_000u64;      // 0.1% opening fee
-    const LIQUIDATION_REWARD_BPS: u64 = 5_000u64;  // 0.5% liquidation reward
-    const MAX_OI_RATIO_BPS: u64 = 500_000u64;   // 50% max OI per side
+    const MIN_MARGIN_BPS: u64 = 50_000u64;           // 5% min margin (20x max leverage)
+    const LIQUIDATION_THRESHOLD_BPS: u64 = 10_000u64; // 1% liquidation threshold
+    const OPENING_FEE_BPS: u64 = 1_000u64;           // 0.1% opening fee
+    const LIQUIDATION_REWARD_BPS: u64 = 5_000u64;    // 0.5% liquidation reward
+    const MAX_OI_RATIO_BPS: u64 = 500_000u64;        // 50% max OI per side
+    
+    // Oracle admin - only this address can update prices
+    const ORACLE_ADMIN: address = aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px;
+    
+    // Orchestrator - receives LiquidationAuth records for all positions
+    const ORCHESTRATOR: address = aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px;
+
+    // DEBUG: Store values for inspection
+    mapping debug_liquidation: u8 => i64;
 
     // ============== RECORDS ==============
 
+    // Position record - owned by TRADER (for closing)
     record Position {
         owner: address,
         position_id: field,
@@ -60,6 +55,19 @@ program zkperp_v1.aleo {
         open_block: u32,
     }
 
+    // LiquidationAuth record - owned by ORCHESTRATOR (for liquidating)
+    record LiquidationAuth {
+        owner: address,           // Orchestrator's address
+        trader: address,          // Original trader
+        position_id: field,
+        is_long: bool,
+        size_usdc: u64,
+        collateral_usdc: u64,
+        entry_price: u64,
+        open_block: u32,
+    }
+
+    // LP token record
     record LPToken {
         owner: address,
         amount: u64,
@@ -85,20 +93,21 @@ program zkperp_v1.aleo {
     }
 
     mapping used_nonces: field => bool;
+    
+    // Track closed/liquidated positions to prevent double-spending
+    mapping closed_positions: field => bool;
 
     // ============== LP FUNCTIONS ==============
 
-    // Add liquidity - transfers USDC from user to pool
     async transition add_liquidity(
-        public deposit_amount: u128,  // u128 to match mock_usdc
+        public deposit_amount: u128,
         recipient: address,
     ) -> (LPToken, Future) {
         assert(deposit_amount >= 100u128);
         
-        // Transfer USDC from user to this program
         let transfer_future: Future = mock_usdc.aleo/transfer_from(
-            self.caller,        // owner (user)
-            self.address,       // recipient (pool)
+            self.caller,
+            self.address,
             deposit_amount
         );
         
@@ -116,7 +125,6 @@ program zkperp_v1.aleo {
         transfer_future: Future,
         deposit_amount: u64,
     ) {
-        // Await the USDC transfer
         transfer_future.await();
         
         let state: PoolState = Mapping::get_or_use(
@@ -142,15 +150,13 @@ program zkperp_v1.aleo {
         });
     }
 
-    // Remove liquidity - transfers USDC from pool back to user
     async transition remove_liquidity(
         lp_token: LPToken,
         public amount_to_burn: u64,
-        public expected_usdc: u128,  // User calculates expected return off-chain
+        public expected_usdc: u128,
     ) -> (LPToken, Future) {
         assert(lp_token.amount >= amount_to_burn);
         
-        // Transfer USDC from pool to user
         let transfer_future: Future = mock_usdc.aleo/transfer_public(
             lp_token.owner,
             expected_usdc
@@ -173,11 +179,9 @@ program zkperp_v1.aleo {
         
         let state: PoolState = Mapping::get(pool_state, 0field);
         
-        // Validate expected_usdc doesn't exceed what user is entitled to
         let max_usdc: u64 = (amount_to_burn * state.total_liquidity) / (state.total_lp_tokens + 1u64);
         assert(expected_usdc <= max_usdc);
         
-        // Check pool has enough free liquidity
         let locked_liquidity: u64 = state.long_open_interest + state.short_open_interest;
         assert(state.total_liquidity - expected_usdc >= locked_liquidity);
         
@@ -198,16 +202,16 @@ program zkperp_v1.aleo {
         size: u64,
     }
 
-    // Open position - transfers collateral from user to pool
+    // Open position - creates BOTH Position (for trader) and LiquidationAuth (for orchestrator)
     async transition open_position(
-        public collateral: u128,      // u128 to match mock_usdc
+        public collateral: u128,
         public size: u64,
         public is_long: bool,
         public entry_price: u64,
         public max_slippage: u64,
         nonce: field,
         recipient: address,
-    ) -> (Position, Future) {
+    ) -> (Position, LiquidationAuth, Future) {
         let collateral_u64: u64 = collateral as u64;
         
         // Validate leverage (size / collateral <= 20)
@@ -235,8 +239,21 @@ program zkperp_v1.aleo {
         };
         let position_id: field = BHP256::hash_to_field(id_input);
         
+        // Create Position record for TRADER
         let position: Position = Position {
             owner: recipient,
+            position_id: position_id,
+            is_long: is_long,
+            size_usdc: size,
+            collateral_usdc: collateral_after_fee,
+            entry_price: entry_price,
+            open_block: 0u32,
+        };
+        
+        // Create LiquidationAuth record for ORCHESTRATOR
+        let liq_auth: LiquidationAuth = LiquidationAuth {
+            owner: ORCHESTRATOR,
+            trader: recipient,
             position_id: position_id,
             is_long: is_long,
             size_usdc: size,
@@ -256,7 +273,7 @@ program zkperp_v1.aleo {
             opening_fee
         );
         
-        return (position, f);
+        return (position, liq_auth, f);
     }
 
     async function finalize_open_position(
@@ -269,7 +286,6 @@ program zkperp_v1.aleo {
         nonce: field,
         opening_fee: u64,
     ) {
-        // Await USDC transfer
         transfer_future.await();
         
         // Check nonce
@@ -317,17 +333,15 @@ program zkperp_v1.aleo {
         });
     }
 
-    // Close position - calculates payout and transfers to trader
+    // Close position - called by TRADER using their Position record
     async transition close_position(
         position: Position,
         public min_price: u64,
         public max_price: u64,
-        public expected_payout: u128,  // User calculates expected payout off-chain
+        public expected_payout: u128,
     ) -> Future {
         assert_eq(position.owner, self.signer);
         
-        // Transfer payout from pool to trader (if positive)
-        // We'll validate the amount in finalize
         let transfer_future: Future = mock_usdc.aleo/transfer_public(
             position.owner,
             expected_payout
@@ -361,6 +375,13 @@ program zkperp_v1.aleo {
     ) {
         transfer_future.await();
         
+        // Check position not already closed/liquidated
+        let is_closed: bool = Mapping::get_or_use(closed_positions, position_id, false);
+        assert(!is_closed);
+        
+        // Mark position as closed
+        Mapping::set(closed_positions, position_id, true);
+        
         // Get current price
         let price_data: PriceData = Mapping::get(oracle_prices, 0field);
         let current_price: u64 = price_data.price;
@@ -392,7 +413,6 @@ program zkperp_v1.aleo {
             ? collateral + pnl_abs - borrow_fee
             : (collateral > pnl_abs + borrow_fee ? collateral - pnl_abs - borrow_fee : 0u64);
         
-        // Validate expected_payout
         assert(expected_payout <= max_payout);
         
         // Get pool state
@@ -427,28 +447,28 @@ program zkperp_v1.aleo {
         });
     }
 
-    // ============== LIQUIDATION ==============
+    // ============== LIQUIDATION (Option D) ==============
 
+    // Liquidate - called by ORCHESTRATOR using their LiquidationAuth record
     async transition liquidate(
-        position: Position,
-        public liquidator: address,
+        liq_auth: LiquidationAuth,
         public liquidator_reward: u128,
     ) -> Future {
-        // Transfer reward to liquidator
+        // Orchestrator owns liq_auth, so they can pass it
+        // Transfer reward to the caller (orchestrator/liquidator)
         let transfer_future: Future = mock_usdc.aleo/transfer_public(
-            liquidator,
+            self.caller,
             liquidator_reward
         );
         
         return finalize_liquidate(
             transfer_future,
-            position.position_id,
-            position.is_long,
-            position.size_usdc,
-            position.collateral_usdc,
-            position.entry_price,
-            position.open_block,
-            liquidator,
+            liq_auth.position_id,
+            liq_auth.is_long,
+            liq_auth.size_usdc,
+            liq_auth.collateral_usdc,
+            liq_auth.entry_price,
+            liq_auth.open_block,
             liquidator_reward as u64
         );
     }
@@ -461,10 +481,16 @@ program zkperp_v1.aleo {
         collateral: u64,
         entry_price: u64,
         open_block: u32,
-        liquidator: address,
         liquidator_reward: u64,
     ) {
         transfer_future.await();
+        
+        // Check position not already closed/liquidated
+        let is_closed: bool = Mapping::get_or_use(closed_positions, position_id, false);
+        assert(!is_closed);
+        
+        // Mark position as liquidated
+        Mapping::set(closed_positions, position_id, true);
         
         // Get current price
         let price_data: PriceData = Mapping::get(oracle_prices, 0field);
@@ -490,9 +516,17 @@ program zkperp_v1.aleo {
             ? (collateral as i64 + pnl_abs as i64 - borrow_fee as i64)
             : (collateral as i64 - pnl_abs as i64 - borrow_fee as i64);
         
-        // Margin ratio check - must be below liquidation threshold
+        // Margin ratio check - must be below liquidation threshold to liquidate
         let margin_ratio_bps: i64 = (remaining_margin_signed * 1_000_000i64) / (size as i64 + 1i64);
         assert(margin_ratio_bps < LIQUIDATION_THRESHOLD_BPS as i64);
+        
+
+        // DEBUG: Track liquidation calculation values
+        Mapping::set(debug_liquidation, 0u8, remaining_margin_signed);
+        Mapping::set(debug_liquidation, 1u8, margin_ratio_bps);
+        Mapping::set(debug_liquidation, 2u8, LIQUIDATION_THRESHOLD_BPS as i64);
+        Mapping::set(debug_liquidation, 3u8, pnl_abs as i64);
+        Mapping::set(debug_liquidation, 4u8, collateral as i64);
         
         // Validate liquidator reward
         let max_reward: u64 = (size * LIQUIDATION_REWARD_BPS) / 1_000_000u64;
@@ -501,22 +535,41 @@ program zkperp_v1.aleo {
         // Get pool state
         let state: PoolState = Mapping::get(pool_state, 0field);
         
-        // Calculate what goes to pool (remaining margin minus liquidator reward)
-        let remaining_margin: u64 = remaining_margin_signed > 0i64 ? remaining_margin_signed as u64 : 0u64;
-        let to_pool: u64 = remaining_margin > liquidator_reward ? remaining_margin - liquidator_reward : 0u64;
+        // Calculate what pool receives/loses
+        // Pool already has collateral in total_liquidity from open_position
+        // Now we need to:
+        //   1. Account for trader's PnL (pool gains if trader loses)
+        //   2. Subtract liquidator reward (paid from pool)
+    
+        // If remaining margin is positive, it stays in pool (minus reward)
+        // If remaining margin is negative, pool absorbs the loss
+        // FIX: Use safe subtraction - cap the subtrahend to avoid underflow
+        let capped_pnl: u64 = pnl_abs <= collateral ? pnl_abs : collateral;
+        let margin_if_loss: u64 = collateral - capped_pnl;
+        let margin_after_pnl: u64 = trader_profits ? (collateral + pnl_abs) : margin_if_loss;
         
-        let new_liquidity: u64 = state.total_liquidity - collateral + to_pool;
+        let capped_fee: u64 = borrow_fee <= margin_after_pnl ? borrow_fee : margin_after_pnl;
+        let remaining_margin: u64 = margin_after_pnl - capped_fee;
+                
+        // After liquidation: pool should have (total_liquidity - collateral) + remaining_margin - liquidator_reward
+        // FIX: Use safe subtraction pattern
+        let capped_collateral: u64 = collateral <= state.total_liquidity ? collateral : state.total_liquidity;
+        let liq_after_remove: u64 = state.total_liquidity - capped_collateral;
         
-        // Update OI
+        let liq_after_margin: u64 = liq_after_remove + remaining_margin;
+        
+        let capped_reward: u64 = liquidator_reward <= liq_after_margin ? liquidator_reward : liq_after_margin;
+        let new_liquidity: u64 = liq_after_margin - capped_reward;
+        
+        // Update OI - use safe subtraction
         let long_oi_decrease: u64 = is_long ? size : 0u64;
         let short_oi_decrease: u64 = is_long ? 0u64 : size;
         
-        let new_long_oi: u64 = state.long_open_interest > long_oi_decrease 
-            ? state.long_open_interest - long_oi_decrease 
-            : 0u64;
-        let new_short_oi: u64 = state.short_open_interest > short_oi_decrease 
-            ? state.short_open_interest - short_oi_decrease 
-            : 0u64;
+        let capped_long_dec: u64 = long_oi_decrease <= state.long_open_interest ? long_oi_decrease : state.long_open_interest;
+        let capped_short_dec: u64 = short_oi_decrease <= state.short_open_interest ? short_oi_decrease : state.short_open_interest;
+        
+        let new_long_oi: u64 = state.long_open_interest - capped_long_dec;
+        let new_short_oi: u64 = state.short_open_interest - capped_short_dec;
         
         Mapping::set(pool_state, 0field, PoolState {
             total_liquidity: new_liquidity,
@@ -525,6 +578,7 @@ program zkperp_v1.aleo {
             short_open_interest: new_short_oi,
             accumulated_fees: state.accumulated_fees,
         });
+        
     }
 
     // ============== ORACLE ==============

@@ -1,9 +1,9 @@
 {
-  "program": "zkperp_v1.aleo",
+  "program": "mock_usdc.aleo",
   "version": "0.1.0",
   "description": "",
   "license": "MIT",
-  "leo": "3.4.0",
+  "leo": "3.3.1",
   "dependencies": null,
   "dev_dependencies": null
 }

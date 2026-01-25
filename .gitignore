@@ -1,0 +1,12 @@
+.env
+*.avm
+*.prover
+*.verifier
+outputs/
+*.Identifier
+outputs/
+*ledger*
+*cache*
+.logs-*/
+build/
+*records*

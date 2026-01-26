@@ -5,6 +5,7 @@ interface Props {
   poolLiquidity: bigint;
   longOI: bigint;
   shortOI: bigint;
+  oracleSet?: boolean;
   onPriceChange?: (price: bigint) => void;
 }
 
@@ -13,6 +14,7 @@ export function MarketInfo({
   poolLiquidity,
   longOI,
   shortOI,
+  oracleSet = true,
   onPriceChange,
 }: Props) {
   const totalOI = Number(longOI) + Number(shortOI);
@@ -30,7 +32,9 @@ export function MarketInfo({
       <div className="p-6 border-b border-zkperp-border">
         <div className="flex items-center justify-between mb-2">
           <span className="text-gray-400 text-sm">BTC/USD</span>
-          <span className="text-xs text-gray-500">Oracle Price</span>
+          <span className={`text-xs ${oracleSet ? 'text-zkperp-green' : 'text-yellow-500'}`}>
+            {oracleSet ? '● Oracle Price' : '○ Simulated'}
+          </span>
         </div>
         <div className="flex items-baseline gap-3">
           <span className="text-3xl font-bold text-white">
@@ -38,7 +42,7 @@ export function MarketInfo({
           </span>
         </div>
         
-        {onPriceChange && (
+        {!oracleSet && onPriceChange && (
           <div className="mt-4 pt-4 border-t border-zkperp-border">
             <label className="text-xs text-gray-500 block mb-2">
               Simulated Price (for testing)
@@ -63,9 +67,12 @@ export function MarketInfo({
         <h3 className="text-sm font-medium text-gray-400">Pool Statistics</h3>
         
         <div className="space-y-3">
-          <div className="flex justify-between">
-            <span className="text-gray-500">Total Liquidity</span>
-            <span className="text-white font-medium">${formatUsdc(poolLiquidity)}</span>
+          {/* Total Liquidity - highlighted */}
+          <div className="bg-zkperp-dark rounded-lg p-3">
+            <div className="flex justify-between items-center">
+              <span className="text-gray-400">Total Liquidity</span>
+              <span className="text-xl font-bold text-white">${formatUsdc(poolLiquidity)}</span>
+            </div>
           </div>
           
           <div className="flex justify-between">
@@ -116,7 +123,7 @@ export function MarketInfo({
           <h4 className="text-xs font-medium text-gray-500 uppercase">Contract</h4>
           <div className="flex items-center justify-between">
             <code className="text-xs text-zkperp-accent">zkperp_v1.aleo</code>
-            <span className="text-xs text-gray-600">Localnet</span>
+            <span className="text-xs text-zkperp-green">Testnet</span>
           </div>
         </div>
       </div>

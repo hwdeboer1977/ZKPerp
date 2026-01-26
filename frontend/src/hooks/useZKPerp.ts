@@ -37,19 +37,22 @@ export function useZKPerp() {
       try {
         const nonce = generateNonce();
         
+        // Deployed contract uses u128 for collateral (USDC amount)
         const inputs = [
-          `${collateral}u64`,
-          `${size}u64`,
-          isLong.toString(),
-          `${entryPrice}u64`,
-          `${maxSlippage}u64`,
-          nonce,
-          publicKey,
+          collateral.toString() + 'u128', // collateral: u128 (mock USDC)
+          size.toString() + 'u64',         // size: u64
+          isLong.toString(),               // is_long: bool
+          entryPrice.toString() + 'u64',   // entry_price: u64
+          maxSlippage.toString() + 'u64',  // max_slippage: u64
+          nonce,                           // nonce: field
+          publicKey,                       // recipient: address
         ];
+
+        console.log('Open position inputs:', inputs);
 
         const aleoTransaction = Transaction.createTransaction(
           publicKey,
-          WalletAdapterNetwork.Localnet,
+          WalletAdapterNetwork.TestnetBeta,
           PROGRAM_ID,
           'open_position',
           inputs,
@@ -101,7 +104,7 @@ export function useZKPerp() {
 
         const aleoTransaction = Transaction.createTransaction(
           publicKey,
-          WalletAdapterNetwork.Localnet,
+          WalletAdapterNetwork.TestnetBeta,
           PROGRAM_ID,
           'close_position',
           inputs,
@@ -135,20 +138,25 @@ export function useZKPerp() {
       setError(null);
 
       try {
+        // Format inputs - deployed contract uses u128 for USDC amount
         const inputs = [
-          `${amount}u64`,
-          publicKey,
+          amount.toString() + 'u128',  // deposit_amount: u128 (mock USDC)
+          publicKey,                    // recipient: address
         ];
+
+        console.log('Add liquidity inputs:', inputs);
 
         const aleoTransaction = Transaction.createTransaction(
           publicKey,
-          WalletAdapterNetwork.Localnet,
+          WalletAdapterNetwork.TestnetBeta,
           PROGRAM_ID,
           'add_liquidity',
           inputs,
           5_000_000,
           false
         );
+
+        console.log('Transaction:', aleoTransaction);
 
         const txId = await requestTransaction(aleoTransaction);
         console.log('Add liquidity submitted:', txId);

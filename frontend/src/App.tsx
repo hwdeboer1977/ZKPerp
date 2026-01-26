@@ -13,13 +13,23 @@ import { Header } from '@/components/Header';
 import { TradingWidget } from '@/components/TradingWidget';
 import { PositionDisplay } from '@/components/PositionDisplay';
 import { MarketInfo } from '@/components/MarketInfo';
+import { AddLiquidity } from '@/components/AddLiquidity';
+import { useOnChainData } from '@/hooks/useOnChainData';
 
 function AppContent() {
-  // Simulated state for devnet testing
-  const [currentPrice, setCurrentPrice] = useState<bigint>(BigInt(10000000000000)); // $100,000
-  const [poolLiquidity] = useState<bigint>(BigInt(100000000000)); // $100,000
-  const [longOI] = useState<bigint>(BigInt(25000000000)); // $25,000
-  const [shortOI] = useState<bigint>(BigInt(15000000000)); // $15,000
+  // Fetch real on-chain data
+  const { poolState, priceData, loading: dataLoading, refresh } = useOnChainData();
+  
+  // Allow manual price override for testing (when oracle not set)
+  const [manualPrice, setManualPrice] = useState<bigint | null>(null);
+  
+  // Use oracle price if available, otherwise manual or default
+  const currentPrice = priceData?.price ?? manualPrice ?? BigInt(10000000000000); // $100,000 default
+  
+  // Pool data from chain or defaults
+  const poolLiquidity = poolState?.total_liquidity ?? BigInt(0);
+  const longOI = poolState?.long_open_interest ?? BigInt(0);
+  const shortOI = poolState?.short_open_interest ?? BigInt(0);
 
   return (
     <div className="min-h-screen bg-zkperp-dark">
@@ -34,17 +44,31 @@ function AppContent() {
           <p className="text-gray-400">
             Trade BTC with up to 20x leverage. Your positions stay private.
           </p>
+          
+          {/* Refresh button */}
+          <button
+            onClick={refresh}
+            disabled={dataLoading}
+            className="mt-4 text-sm text-zkperp-accent hover:text-zkperp-accent/80 disabled:opacity-50"
+          >
+            {dataLoading ? 'Refreshing...' : '↻ Refresh on-chain data'}
+          </button>
         </div>
 
         {/* Main Grid */}
         <div className="grid lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-1">
+          <div className="lg:col-span-1 space-y-6">
             <MarketInfo
               currentPrice={currentPrice}
               poolLiquidity={poolLiquidity}
               longOI={longOI}
               shortOI={shortOI}
-              onPriceChange={setCurrentPrice}
+              oracleSet={priceData !== null}
+              onPriceChange={setManualPrice}
+            />
+            <AddLiquidity
+              currentLiquidity={poolLiquidity}
+              onSuccess={refresh}
             />
           </div>
 
@@ -102,17 +126,17 @@ function AppContent() {
           </div>
         </div>
 
-        {/* Devnet Notice */}
-        <div className="mt-8 bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4">
+        {/* Testnet Notice */}
+        <div className="mt-8 bg-zkperp-accent/10 border border-zkperp-accent/30 rounded-xl p-4">
           <div className="flex items-start gap-3">
-            <svg className="w-5 h-5 text-yellow-500 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            <svg className="w-5 h-5 text-zkperp-accent mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <div>
-              <h4 className="font-medium text-yellow-500">Local Development Mode</h4>
+              <h4 className="font-medium text-zkperp-accent">Aleo Testnet Beta</h4>
               <p className="text-sm text-gray-400 mt-1">
-                This app is connected to a local Aleo devnet. Make sure you have the devnet running 
-                and the ZKPerp contract deployed. Pool stats are simulated for testing.
+                This app is connected to Aleo Testnet Beta. Pool statistics are fetched from the live contract.
+                {!priceData && ' Oracle price not set yet — using simulated price.'}
               </p>
             </div>
           </div>
@@ -155,7 +179,7 @@ function App() {
     <WalletProvider
       wallets={wallets}
       decryptPermission={DecryptPermission.UponRequest}
-      network={WalletAdapterNetwork.Localnet}
+      network={WalletAdapterNetwork.TestnetBeta}
       autoConnect
     >
       <WalletModalProvider>

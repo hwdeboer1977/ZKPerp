@@ -23,34 +23,46 @@ export function useBalance() {
 
     try {
       // Fetch ALEO balance
-      const aleoResponse = await fetch(
-        `${API_BASE}/program/credits.aleo/mapping/account/${publicKey}`
-      );
+      try {
+        const aleoResponse = await fetch(
+          `${API_BASE}/program/credits.aleo/mapping/account/${publicKey}`
+        );
 
-      if (aleoResponse.ok) {
-        const data = await aleoResponse.text();
-        const match = data.match(/(\d+)u64/);
-        if (match) {
-          setPublicBalance(BigInt(match[1]));
+        if (aleoResponse.ok) {
+          const data = await aleoResponse.text();
+          const match = data.match(/(\d+)u64/);
+          if (match) {
+            setPublicBalance(BigInt(match[1]));
+          }
+        } else if (aleoResponse.status === 404) {
+          setPublicBalance(BigInt(0));
         }
-      } else if (aleoResponse.status === 404) {
-        setPublicBalance(BigInt(0));
+      } catch (corsError) {
+        // CORS error - set to null, don't break the app
+        console.warn('CORS error fetching ALEO balance:', corsError);
+        setPublicBalance(null);
       }
 
       // Fetch mock USDC balance
-      const usdcResponse = await fetch(
-        `${API_BASE}/program/${MOCK_USDC_PROGRAM}/mapping/balances/${publicKey}`
-      );
+      try {
+        const usdcResponse = await fetch(
+          `${API_BASE}/program/${MOCK_USDC_PROGRAM}/mapping/balances/${publicKey}`
+        );
 
-      if (usdcResponse.ok) {
-        const data = await usdcResponse.text();
-        // Could be u64 or u128 depending on token implementation
-        const match = data.match(/(\d+)u(?:64|128)/);
-        if (match) {
-          setUsdcBalance(BigInt(match[1]));
+        if (usdcResponse.ok) {
+          const data = await usdcResponse.text();
+          // Could be u64 or u128 depending on token implementation
+          const match = data.match(/(\d+)u(?:64|128)/);
+          if (match) {
+            setUsdcBalance(BigInt(match[1]));
+          }
+        } else if (usdcResponse.status === 404) {
+          setUsdcBalance(BigInt(0));
         }
-      } else if (usdcResponse.status === 404) {
-        setUsdcBalance(BigInt(0));
+      } catch (corsError) {
+        // CORS error - set to null, don't break the app
+        console.warn('CORS error fetching USDC balance:', corsError);
+        setUsdcBalance(null);
       }
     } catch (err) {
       console.error('Failed to fetch balance:', err);

@@ -173,6 +173,56 @@ export function useZKPerp() {
     [publicKey, requestTransaction]
   );
 
+  // Remove liquidity from the pool
+  const removeLiquidity = useCallback(
+    async (lpToken: { id: string; amount: bigint; rawRecord?: any }, lpAmountToWithdraw: bigint, expectedUsdc: bigint) => {
+      if (!publicKey || !requestTransaction) {
+        throw new Error('Wallet not connected');
+      }
+
+      setLoading(true);
+      setError(null);
+
+      try {
+        const rawRecord = lpToken.rawRecord;
+        
+        console.log('Raw LP Token record:', rawRecord);
+        
+        // Pass the record object directly - the wallet adapter handles serialization
+        // Inputs for remove_liquidity(lp_token, lp_amount, expected_usdc)
+        const inputs = [
+          rawRecord,                               // LPToken record object (wallet handles this)
+          lpAmountToWithdraw.toString() + 'u64',   // lp_amount to burn
+          expectedUsdc.toString() + 'u128',        // expected USDC to receive
+        ];
+
+        console.log('Remove liquidity inputs:', inputs);
+
+        const aleoTransaction = Transaction.createTransaction(
+          publicKey,
+          WalletAdapterNetwork.TestnetBeta,
+          PROGRAM_ID,
+          'remove_liquidity',
+          inputs,
+          5_000_000,
+          false
+        );
+
+        const txId = await requestTransaction(aleoTransaction);
+        console.log('Remove liquidity submitted:', txId);
+        return txId;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to remove liquidity';
+        console.error('Remove liquidity error:', err);
+        setError(message);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [publicKey, requestTransaction]
+  );
+
   // Fetch user's position records
   const fetchPositions = useCallback(async (): Promise<Position[]> => {
     if (!publicKey || !requestRecords) {
@@ -206,6 +256,7 @@ export function useZKPerp() {
     openPosition,
     closePosition,
     addLiquidity,
+    removeLiquidity,
     fetchPositions,
     loading,
     error,

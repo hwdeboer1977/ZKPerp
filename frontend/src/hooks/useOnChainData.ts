@@ -96,8 +96,9 @@ export function useOnChainData() {
         setPoolState(parsed);
       }
     } catch (err) {
-      console.error('Failed to fetch pool state:', err);
-      setError('Failed to fetch pool state');
+      // Handle CORS or network errors gracefully
+      console.warn('Failed to fetch pool state (may be CORS):', err);
+      // Don't set error state, just leave pool state as is
     }
   }, []);
 
@@ -123,8 +124,9 @@ export function useOnChainData() {
         setPriceData(parsed);
       }
     } catch (err) {
-      console.error('Failed to fetch price data:', err);
-      setError('Failed to fetch oracle price');
+      // Handle CORS or network errors gracefully
+      console.warn('Failed to fetch price data (may be CORS):', err);
+      // Don't set error state, just leave price as is
     }
   }, []);
 

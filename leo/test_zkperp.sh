@@ -270,7 +270,7 @@ for m in matches:
         with open('records/position.txt', 'w') as f:
             f.write(record)
         print("✅ Position record saved")
-        print(f"   {record[:100]}...")
+        print(f"   {record}")  # Remove the [:100] truncation
         break
 PYEOF
 else
@@ -280,122 +280,122 @@ fi
 
 
 
-# ══════════════════════════════════════════════════════════════════
-# STEP 10: Price Movement
-# ══════════════════════════════════════════════════════════════════
+# # ══════════════════════════════════════════════════════════════════
+# # STEP 10: Price Movement
+# # ══════════════════════════════════════════════════════════════════
 
-if [ "$TEST_SCENARIO" -eq 1 ]; then
-    echo ""
-    echo "=== STEP 10: Price UP to \$105,000 (+5%) ==="
-    leo execute update_price 0field 10500000000u64 2u32 $NETWORK $CONSENSUS --yes
-    sleep 5
+# if [ "$TEST_SCENARIO" -eq 1 ]; then
+#     echo ""
+#     echo "=== STEP 10: Price UP to \$105,000 (+5%) ==="
+#     leo execute update_price 0field 10500000000u64 2u32 $NETWORK $CONSENSUS --yes
+#     sleep 5
     
-elif [ "$TEST_SCENARIO" -eq 2 ]; then
-    echo ""
-    echo "=== STEP 10: Price DOWN to \$60,000 (-40%) ==="
-    leo execute update_price 0field 6000000000u64 2u32 $NETWORK $CONSENSUS --yes
-    sleep 5
-fi
+# elif [ "$TEST_SCENARIO" -eq 2 ]; then
+#     echo ""
+#     echo "=== STEP 10: Price DOWN to \$60,000 (-40%) ==="
+#     leo execute update_price 0field 6000000000u64 2u32 $NETWORK $CONSENSUS --yes
+#     sleep 5
+# fi
 
-echo "Checking new oracle price..."
-curl -s "$ENDPOINT/testnet/program/$PERP_PROGRAM/mapping/oracle_prices/0field"
-echo ""
+# echo "Checking new oracle price..."
+# curl -s "$ENDPOINT/testnet/program/$PERP_PROGRAM/mapping/oracle_prices/0field"
+# echo ""
 
-# ══════════════════════════════════════════════════════════════════
-# STEP 11: Close or Liquidate
-# ══════════════════════════════════════════════════════════════════
+# # ══════════════════════════════════════════════════════════════════
+# # STEP 11: Close or Liquidate
+# # ══════════════════════════════════════════════════════════════════
 
-if [ "$TEST_SCENARIO" -eq 1 ]; then
-    echo ""
-    echo "=== STEP 11: TRADER Closes Position (with profit) ==="
+# if [ "$TEST_SCENARIO" -eq 1 ]; then
+#     echo ""
+#     echo "=== STEP 11: TRADER Closes Position (with profit) ==="
     
-    if [ -f "$ZKPERP_DIR/records/position.txt" ]; then
-        POSITION_RECORD=$(cat $ZKPERP_DIR/records/position.txt)
-        echo "Position record loaded"
+#     if [ -f "$ZKPERP_DIR/records/position.txt" ]; then
+#         POSITION_RECORD=$(cat $ZKPERP_DIR/records/position.txt)
+#         echo "Position record loaded"
         
-        # close_position(position, min_price, max_price, expected_payout)
-        # Expected payout: ~$12 ($10 collateral - fee + $2.50 profit - borrow fee)
-        leo execute close_position "$POSITION_RECORD" 10400000000u64 10600000000u64 12000000u128 $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/close_position.log
-        sleep 5
+#         # close_position(position, min_price, max_price, expected_payout)
+#         # Expected payout: ~$12 ($10 collateral - fee + $2.50 profit - borrow fee)
+#         leo execute close_position "$POSITION_RECORD" 10400000000u64 10600000000u64 12000000u128 $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/close_position.log
+#         sleep 5
         
-        if grep -q "Transaction accepted" /tmp/close_position.log; then
-            echo "✅ close_position SUCCESS - Trader closed with profit!"
-            echo "Waiting for mapping updates to finalize..."
-            sleep 3
-        else
-            echo "❌ close_position FAILED"
-            echo "Note: Borrow fee might be higher than expected. Try lower expected_payout."
-        fi
-    else
-        echo "❌ Position record not found"
-    fi
+#         if grep -q "Transaction accepted" /tmp/close_position.log; then
+#             echo "✅ close_position SUCCESS - Trader closed with profit!"
+#             echo "Waiting for mapping updates to finalize..."
+#             sleep 3
+#         else
+#             echo "❌ close_position FAILED"
+#             echo "Note: Borrow fee might be higher than expected. Try lower expected_payout."
+#         fi
+#     else
+#         echo "❌ Position record not found"
+#     fi
 
-elif [ "$TEST_SCENARIO" -eq 2 ]; then
-    echo ""
-    echo "=== STEP 11: LIQUIDATE Position (permissionless) ==="
-    echo ""
-    echo "  In v2, anyone can liquidate unhealthy positions"
-    echo "  No LiquidationAuth record needed!"
+# elif [ "$TEST_SCENARIO" -eq 2 ]; then
+#     echo ""
+#     echo "=== STEP 11: LIQUIDATE Position (permissionless) ==="
+#     echo ""
+#     echo "  In v2, anyone can liquidate unhealthy positions"
+#     echo "  No LiquidationAuth record needed!"
     
-    if [ -f "/tmp/position_id.txt" ]; then
-        POSITION_ID=$(cat /tmp/position_id.txt)
+#     if [ -f "/tmp/position_id.txt" ]; then
+#         POSITION_ID=$(cat /tmp/position_id.txt)
         
-        # liquidate(position_id, is_long, size, collateral, entry_price, liquidator_reward)
-        # Reward: 0.5% of $50 = $0.25 = 250000u128
-        leo execute liquidate "$POSITION_ID" true 50000000u64 9950000u64 10000000000u64 250000u128 $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/liquidate.log
-        sleep 5
+#         # liquidate(position_id, is_long, size, collateral, entry_price, liquidator_reward)
+#         # Reward: 0.5% of $50 = $0.25 = 250000u128
+#         leo execute liquidate "$POSITION_ID" true 50000000u64 9950000u64 10000000000u64 250000u128 $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/liquidate.log
+#         sleep 5
         
-        if grep -q "Transaction accepted" /tmp/liquidate.log; then
-            echo "✅ liquidate SUCCESS - Position liquidated!"
-        else
-            echo "❌ liquidate FAILED"
-        fi
-    else
-        echo "❌ Position ID not found"
-    fi
-fi
+#         if grep -q "Transaction accepted" /tmp/liquidate.log; then
+#             echo "✅ liquidate SUCCESS - Position liquidated!"
+#         else
+#             echo "❌ liquidate FAILED"
+#         fi
+#     else
+#         echo "❌ Position ID not found"
+#     fi
+# fi
 
 # ══════════════════════════════════════════════════════════════════
 # SUMMARY
 # ══════════════════════════════════════════════════════════════════
 
-echo ""
-echo "Waiting for all state updates to finalize..."
-sleep 3
+# echo ""
+# echo "Waiting for all state updates to finalize..."
+# sleep 3
 
-echo ""
-echo "╔════════════════════════════════════════════════════════════════╗"
-echo "║                         Summary                                ║"
-echo "╚════════════════════════════════════════════════════════════════╝"
-echo ""
-echo "Pool state:"
-curl -s "$ENDPOINT/testnet/program/$PERP_PROGRAM/mapping/pool_state/0field"
-echo ""
-echo ""
-echo "Oracle price:"
-curl -s "$ENDPOINT/testnet/program/$PERP_PROGRAM/mapping/oracle_prices/0field"
-echo ""
-echo ""
-echo "User USDC balance:"
-curl -s "$ENDPOINT/testnet/program/$USDC_PROGRAM/mapping/balances/$USER"
-echo ""
+# echo ""
+# echo "╔════════════════════════════════════════════════════════════════╗"
+# echo "║                         Summary                                ║"
+# echo "╚════════════════════════════════════════════════════════════════╝"
+# echo ""
+# echo "Pool state:"
+# curl -s "$ENDPOINT/testnet/program/$PERP_PROGRAM/mapping/pool_state/0field"
+# echo ""
+# echo ""
+# echo "Oracle price:"
+# curl -s "$ENDPOINT/testnet/program/$PERP_PROGRAM/mapping/oracle_prices/0field"
+# echo ""
+# echo ""
+# echo "User USDC balance:"
+# curl -s "$ENDPOINT/testnet/program/$USDC_PROGRAM/mapping/balances/$USER"
+# echo ""
 
-if [ "$TEST_SCENARIO" -eq 1 ]; then
-    echo ""
-    echo "═══════════════════════════════════════════════════════════════"
-    echo "SCENARIO 1 COMPLETE: Trader Closed with Profit"
-    echo "═══════════════════════════════════════════════════════════════"
-elif [ "$TEST_SCENARIO" -eq 2 ]; then
-    echo ""
-    echo "═══════════════════════════════════════════════════════════════"
-    echo "SCENARIO 2 COMPLETE: Position Liquidated"
-    echo "═══════════════════════════════════════════════════════════════"
-fi
+# if [ "$TEST_SCENARIO" -eq 1 ]; then
+#     echo ""
+#     echo "═══════════════════════════════════════════════════════════════"
+#     echo "SCENARIO 1 COMPLETE: Trader Closed with Profit"
+#     echo "═══════════════════════════════════════════════════════════════"
+# elif [ "$TEST_SCENARIO" -eq 2 ]; then
+#     echo ""
+#     echo "═══════════════════════════════════════════════════════════════"
+#     echo "SCENARIO 2 COMPLETE: Position Liquidated"
+#     echo "═══════════════════════════════════════════════════════════════"
+# fi
 
-echo ""
-echo "v2 Features:"
-echo "  ✅ Mapping-based admin (no hardcoded addresses)"
-echo "  ✅ initialize_roles() sets admin on first call"
-echo "  ✅ open_block stored in mapping (correct borrow fee)"
-echo "  ✅ Permissionless liquidation (anyone can liquidate)"
-echo ""
+# echo ""
+# echo "v2 Features:"
+# echo "  ✅ Mapping-based admin (no hardcoded addresses)"
+# echo "  ✅ initialize_roles() sets admin on first call"
+# echo "  ✅ open_block stored in mapping (correct borrow fee)"
+# echo "  ✅ Permissionless liquidation (anyone can liquidate)"
+# echo ""

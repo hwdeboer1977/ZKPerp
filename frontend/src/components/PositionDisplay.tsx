@@ -8,11 +8,15 @@ interface Props {
 }
 
 export function PositionDisplay({ currentPrice }: Props) {
-  const { connected } = useWallet();
+  const { connected, decrypt } = useWallet();
   const { fetchPositions, closePosition, loading, error } = useZKPerp();
   const [positions, setPositions] = useState<Position[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [closingId, setClosingId] = useState<string | null>(null);
+  const [showManualDecrypt, setShowManualDecrypt] = useState(false);
+  const [ciphertextInput, setCiphertextInput] = useState('');
+  const [decryptError, setDecryptError] = useState<string | null>(null);
+  const [decryptLoading, setDecryptLoading] = useState(false);
 
   const loadPositions = useCallback(async () => {
     if (!connected) {
@@ -36,18 +40,85 @@ export function PositionDisplay({ currentPrice }: Props) {
   }, [loadPositions]);
 
   const handleClose = async (position: Position) => {
-    setClosingId(position.position_id);
+  setClosingId(position.position_id);
+  try {
+    // ✅ Calculate 1% slippage using ONLY bigint math
+    const slippageAmount = (currentPrice * 1n) / 100n;  // 1% slippage
+    const minPrice = currentPrice - slippageAmount;
+    const maxPrice = currentPrice + slippageAmount;
+    
+    console.log('Closing with slippage:', {
+      currentPrice: currentPrice.toString(),
+      slippageAmount: slippageAmount.toString(),
+      minPrice: minPrice.toString(),
+      maxPrice: maxPrice.toString(),
+    });
+    
+    await closePosition(position, minPrice, maxPrice);
+    setTimeout(loadPositions, 2000);
+  } catch (err) {
+    console.error('Close failed:', err);
+  } finally {
+    setClosingId(null);
+  }
+};
+
+  // Manual decrypt a position record
+  const handleManualDecrypt = async () => {
+    if (!decrypt || !ciphertextInput.trim()) return;
+    
+    setDecryptLoading(true);
+    setDecryptError(null);
+    
     try {
-      const slippageAmount = BigInt(Math.floor(Number(currentPrice) * 0.01));
-      const minPrice = currentPrice - slippageAmount;
-      const maxPrice = currentPrice + slippageAmount;
+      const decrypted = await decrypt(ciphertextInput.trim());
+      console.log('Decrypted record:', decrypted);
       
-      await closePosition(position, minPrice, maxPrice);
-      setTimeout(loadPositions, 2000);
+      if (!decrypted) {
+        setDecryptError('Could not decrypt - not your record?');
+        return;
+      }
+      
+      // Parse the decrypted record
+      // Format: { owner: aleo1..., position_id: 123field, is_long: true, ... }
+      const ownerMatch = decrypted.match(/owner:\s*(aleo1[a-z0-9]+)/);
+      const positionIdMatch = decrypted.match(/position_id:\s*(\d+field)/);
+      const isLongMatch = decrypted.match(/is_long:\s*(true|false)/);
+      const sizeMatch = decrypted.match(/size_usdc:\s*(\d+)u64/);
+      const collateralMatch = decrypted.match(/collateral_usdc:\s*(\d+)u64/);
+      const entryPriceMatch = decrypted.match(/entry_price:\s*(\d+)u64/);
+      const openBlockMatch = decrypted.match(/open_block:\s*(\d+)u32/);
+      
+      if (!positionIdMatch || !sizeMatch) {
+        setDecryptError('Not a valid Position record');
+        console.log('Decrypted content:', decrypted);
+        return;
+      }
+      
+      const position: Position = {
+        owner: ownerMatch?.[1] || '',
+        position_id: positionIdMatch[1],
+        is_long: isLongMatch?.[1] === 'true',
+        size_usdc: BigInt(sizeMatch[1]),
+        collateral_usdc: BigInt(collateralMatch?.[1] || '0'),
+        entry_price: BigInt(entryPriceMatch?.[1] || '0'),
+        open_block: parseInt(openBlockMatch?.[1] || '0'),
+      };
+      
+      // Add to positions if not already there
+      setPositions(prev => {
+        const exists = prev.some(p => p.position_id === position.position_id);
+        if (exists) return prev;
+        return [...prev, position];
+      });
+      
+      setCiphertextInput('');
+      setShowManualDecrypt(false);
     } catch (err) {
-      console.error('Close failed:', err);
+      console.error('Decrypt failed:', err);
+      setDecryptError(err instanceof Error ? err.message : 'Decryption failed');
     } finally {
-      setClosingId(null);
+      setDecryptLoading(false);
     }
   };
 
@@ -84,6 +155,41 @@ export function PositionDisplay({ currentPrice }: Props) {
           </div>
           <p className="text-gray-500">No open positions</p>
           <p className="text-sm text-gray-600 mt-1">Open a trade to get started</p>
+          
+          {/* Manual decrypt option */}
+          <div className="mt-4 pt-4 border-t border-zkperp-border">
+            <button
+              onClick={() => setShowManualDecrypt(!showManualDecrypt)}
+              className="text-xs text-zkperp-accent hover:underline"
+            >
+              {showManualDecrypt ? 'Hide' : '🔑 Have a position record? Decrypt manually'}
+            </button>
+            
+            {showManualDecrypt && (
+              <div className="mt-3 text-left">
+                <p className="text-xs text-gray-500 mb-2">
+                  Paste the record ciphertext from the transaction explorer:
+                </p>
+                <textarea
+                  value={ciphertextInput}
+                  onChange={(e) => setCiphertextInput(e.target.value)}
+                  placeholder="record1qyqsq..."
+                  rows={3}
+                  className="w-full bg-zkperp-dark border border-zkperp-border rounded-lg px-3 py-2 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-zkperp-accent font-mono"
+                />
+                <button
+                  onClick={handleManualDecrypt}
+                  disabled={decryptLoading || !ciphertextInput.trim()}
+                  className="mt-2 w-full py-2 bg-zkperp-accent hover:bg-zkperp-accent/80 disabled:bg-zkperp-accent/30 rounded-lg text-sm font-medium text-white transition-colors"
+                >
+                  {decryptLoading ? 'Decrypting...' : 'Decrypt Position'}
+                </button>
+                {decryptError && (
+                  <p className="text-xs text-red-400 mt-2">{decryptError}</p>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         <div className="divide-y divide-zkperp-border">

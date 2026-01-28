@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { PROGRAM_ID } from '@/utils/aleo';
+import { NETWORK_CONFIG } from '../utils/config';
 
 // Aleo Testnet API endpoint
-const API_BASE = 'https://api.explorer.provable.com/v1/testnet';
+const API_BASE = NETWORK_CONFIG.EXPLORER_API;
 
 export interface PoolState {
   total_liquidity: bigint;

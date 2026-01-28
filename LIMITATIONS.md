@@ -2,44 +2,29 @@
 
 This document outlines the current limitations of ZKPerp and what would be needed for a production-ready deployment.
 
----
-
-## 1. No Actual Token Transfers
-
-**Current State:** Pool accounting only (numbers in mappings)
-
-**What's Missing:**
-- Integration with `mock_usdc.aleo` for real transfers
-- Traders don't actually receive USDC on close
-- LPs don't actually deposit/withdraw USDC
-- Liquidators don't receive rewards
-
-**Solution:** Integrate token transfers using the `transfer_from` pattern:
-```leo
-// In close_position transition:
-let transfer_future: Future = mock_usdc.aleo/transfer_public(
-    position.owner,
-    payout_amount,
-);
-```
+**Current Version:** zkperp_v4.aleo with mock_usdc_0128.aleo
 
 ---
 
-## 2. Centralized Oracle
+## ✅ RESOLVED: Token Transfers
 
-**Current State:** Anyone can call `update_price()`
+**Status:** ✅ IMPLEMENTED
 
-**Risk:** Malicious price manipulation = instant liquidations or theft
+ZKPerp now integrates with `mock_usdc.aleo` for real token transfers:
+- LPs deposit/withdraw real USDC via `transfer_from`
+- Traders receive USDC payouts on `close_position`
+- Liquidators receive rewards via `transfer_public`
+- Pool holds actual USDC balance
 
-**Solutions:**
-- Admin-only oracle updates with access control
-- Decentralized oracle integration (Pyth, Chainlink equivalent on Aleo)
-- Multi-sig oracle updates
-- Price deviation checks (reject prices >X% different from last)
+---
 
+## ✅ RESOLVED: Oracle Access Control
+
+**Status:** ✅ IMPLEMENTED
+
+Oracle updates are now admin-only:
 ```leo
-// Example: Admin-only oracle
-const ORACLE_ADMIN: address = aleo1...;
+const ORACLE_ADMIN: address = aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px;
 
 async transition update_price(...) {
     assert_eq(self.caller, ORACLE_ADMIN);
@@ -47,51 +32,86 @@ async transition update_price(...) {
 }
 ```
 
----
-
-## 3. No Position Tracking On-Chain
-
-**Current State:** Position exists only as private record held by trader
-
-**Problems:**
-- If user loses record, position is lost forever
-- Orchestrator can't find positions to liquidate
-- No way to enumerate all open positions
-- No position history or analytics
-
-**Solutions:**
-- Optional view key registration with orchestrator
-- Store encrypted position data on-chain
-- Position ID mapping (privacy tradeoff)
-- Client-side record backup/recovery
+**Future improvements:**
+- Decentralized oracle integration (Pyth, Chainlink equivalent on Aleo)
+- Multi-sig oracle updates
+- Price deviation checks (reject prices >X% different from last)
 
 ---
 
-## 4. Liquidation Mechanism is Incomplete
+## ✅ RESOLVED: Liquidation Mechanism
 
-**Current State:** `liquidate()` requires passing the Position record
+**Status:** ✅ IMPLEMENTED (Option D - Dual Record System)
 
-**Problem:** How does a liquidator get someone else's private record?
-
-**Solutions:**
-1. **View Key Registration:** Traders register view keys with trusted orchestrator
-2. **Encrypted Position Storage:** Store encrypted position data on-chain, orchestrator decrypts
-3. **Keeper Network:** Designated keepers with special access
-4. **Self-Liquidation Incentive:** Users can liquidate their own positions for partial reward
+ZKPerp uses a dual-record architecture:
+- `Position` record → owned by TRADER (for closing)
+- `LiquidationAuth` record → owned by ORCHESTRATOR (for liquidating)
+- `closed_positions` mapping prevents double-close/liquidate
 
 ```
-Trader opens position
-    ↓
-Registers view key with orchestrator
-    ↓
-Orchestrator monitors position health
-    ↓
-If margin < 1%, orchestrator calls liquidate()
+open_position() creates TWO records:
+├── Position → Trader can call close_position()
+└── LiquidationAuth → Orchestrator can call liquidate()
+```
+
+See [LIQUIDATION_ARCHITECTURE.md](./LIQUIDATION_ARCHITECTURE.md) for full details.
+
+---
+
+## 1. Limited Position Tracking On-Chain
+
+**Current State:** Position data exists primarily as private record held by trader
+
+**✅ PARTIALLY RESOLVED:** The `position_open_blocks` mapping now tracks when positions were opened:
+```leo
+mapping position_open_blocks: field => u32;
+// Stores: position_id → open_block_height
+```
+
+This enables:
+- ✅ Accurate borrow fee calculations
+- ✅ Frontend can query actual open block via API
+- ✅ No need to estimate blocks open
+
+**Still Missing:**
+- Position size/leverage enumeration
+- Position history or analytics
+- Full position recovery if record is lost
+
+**Note:** The orchestrator CAN track positions via their `LiquidationAuth` records.
+
+**Frontend Implementation:**
+```typescript
+// Query actual open block from on-chain mapping
+const openBlock = await fetchPositionOpenBlock(position.position_id);
+const blocksOpen = currentBlock - openBlock;
+const borrowFee = calculateBorrowFee(size, blocksOpen); // Accurate!
 ```
 
 ---
 
-## 5. Single Asset Only
+## 2. Single Orchestrator
+
+**Current State:** Hardcoded `ORCHESTRATOR` constant
+
+**Risk:** If orchestrator goes offline, positions can't be liquidated
+
+**Solutions:**
+- Multiple orchestrator addresses
+- DAO-controlled orchestrator
+- Orchestrator rotation mechanism
+- Self-liquidation option for traders
+
+```leo
+// Future: Multiple orchestrators
+const ORCHESTRATOR_1: address = aleo1...;
+const ORCHESTRATOR_2: address = aleo1...;
+const ORCHESTRATOR_3: address = aleo1...;
+```
+
+---
+
+## 3. Single Asset Only
 
 **Current State:** Only BTC/USD (asset_id: 0field)
 
@@ -110,7 +130,7 @@ Would also need to track OI per asset.
 
 ---
 
-## 6. No Funding Rate
+## 4. No Funding Rate
 
 **Current State:** Simple borrow fee (flat rate per block)
 
@@ -132,14 +152,16 @@ let funding_rate: i64 = imbalance * FUNDING_FACTOR / total_oi;
 
 ---
 
-## 7. No Admin Controls
+## 5. Limited Admin Controls
+
+**Current Functions:**
+- ✅ `update_price()` - Admin-only oracle updates
 
 **Missing Functions:**
 - `pause_trading()` - Emergency stop
 - `unpause_trading()` - Resume trading
 - `update_fees()` - Adjust fee parameters
 - `withdraw_fees()` - Protocol revenue extraction
-- `set_oracle()` - Whitelist oracle addresses
 - `set_max_leverage()` - Adjust risk parameters
 
 ```leo
@@ -158,7 +180,7 @@ async function finalize_pause() {
 
 ---
 
-## 8. LP Withdrawal Risk
+## 6. LP Withdrawal Risk
 
 **Current State:** LPs can withdraw anytime if liquidity is available
 
@@ -178,7 +200,7 @@ assert(utilization < 80u64); // Max 80% utilization
 
 ---
 
-## 9. No Partial Close
+## 7. No Partial Close
 
 **Current State:** Must close entire position
 
@@ -214,41 +236,47 @@ async transition partial_close(
 
 ---
 
-## 10. Price Precision Mismatch
+## 8. Leo Language Quirks
 
-**Current State:**
-- Prices: 8 decimals ($100,000 = 10,000,000,000)
-- Amounts: 6 decimals ($100 = 100,000,000)
+**Discovered Issue:** Leo evaluates BOTH branches of ternary operators
 
-**Risk:** Rounding errors in PnL calculation, especially for small positions
+This causes underflow errors even in the "false" branch:
+```leo
+// ❌ UNSAFE - Leo evaluates `a - b` even when a <= b
+let result: u64 = a > b ? a - b : 0u64;
 
-**Solution:** Standardize on single decimal precision or use higher precision for intermediate calculations (already using u128).
+// ✅ SAFE - Cap first, then subtract
+let capped_b: u64 = b <= a ? b : a;
+let result: u64 = a - capped_b;
+```
+
+**Implication:** All subtraction operations must use the "safe subtraction" pattern to avoid runtime failures.
 
 ---
 
 ## Priority Matrix
 
-| Priority | Issue | Effort | Impact |
-|----------|-------|--------|--------|
-| 🔴 Critical | Token integration | Medium | Can't actually trade |
-| 🔴 Critical | Oracle access control | Low | Security vulnerability |
-| 🔴 Critical | Liquidation mechanism | High | Protocol insolvency risk |
-| 🟡 High | Admin controls | Low | Operational necessity |
-| 🟡 High | Funding rate | Medium | LP protection |
-| 🟡 Medium | LP withdrawal limits | Low | Bank run protection |
-| 🟢 Low | Multi-asset | Low | Feature expansion |
-| 🟢 Low | Partial close | Low | UX improvement |
-| 🟢 Low | Price precision | Low | Edge case handling |
+| Priority | Issue | Status | Effort | Impact |
+|----------|-------|--------|--------|--------|
+| ✅ Done | Token integration | RESOLVED | - | - |
+| ✅ Done | Oracle access control | RESOLVED | - | - |
+| ✅ Done | Liquidation mechanism | RESOLVED | - | - |
+| 🟡 High | Multi-orchestrator | Open | Medium | Decentralization |
+| 🟡 High | Admin controls | Open | Low | Operational necessity |
+| 🟡 High | Funding rate | Open | Medium | LP protection |
+| 🟡 Medium | LP withdrawal limits | Open | Low | Bank run protection |
+| 🟢 Low | Multi-asset | Open | Low | Feature expansion |
+| 🟢 Low | Partial close | Open | Low | UX improvement |
 
 ---
 
 ## Summary
 
-**For Hackathon/MVP:** ✅ Current implementation demonstrates core perpetual DEX mechanics with privacy.
+**Current Status:** ✅ Core perpetual DEX with privacy, token integration, and liquidation system working!
 
-**For Testnet:** Need token integration + oracle security + basic admin controls.
+**For Testnet:** Need multi-orchestrator support + basic admin controls.
 
-**For Mainnet:** All of the above + liquidation mechanism + funding rates + audits.
+**For Mainnet:** All of the above + funding rates + LP protections + audits.
 
 ---
 

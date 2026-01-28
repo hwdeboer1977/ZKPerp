@@ -107,7 +107,7 @@ function AppContent() {
           </div>
           <div className="mt-4 pt-4 border-t border-zkperp-border">
             <p className="text-center text-xs text-gray-600">
-              Aleo Testnet Beta • Contract: zkperp_v1.aleo
+              Aleo Testnet Beta • Contract: zkperp_v2.aleo
             </p>
           </div>
         </div>

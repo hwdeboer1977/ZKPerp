@@ -26,7 +26,7 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
       // In a real implementation, this would use requestRecords to fetch LiquidationAuth records
       // For now, show placeholder
       console.log('Scanning for LiquidationAuth records...');
-      // const records = await wallet.requestRecords('zkperp_v1.aleo');
+      // const records = await wallet.requestRecords('zkperp_v3.aleo');
       // const auths = records.filter(r => r.type === 'LiquidationAuth');
       setLiquidationAuths([]);
     } catch (err) {

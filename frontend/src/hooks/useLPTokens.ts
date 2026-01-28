@@ -1,7 +1,9 @@
 import { useState, useCallback } from 'react';
 import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
+import { PROGRAM_IDS } from '../utils/config';
 
-const PROGRAM_ID = 'zkperp_v1.aleo';
+
+const PROGRAM_ID = PROGRAM_IDS.ZKPERP;
 
 export interface LPTokenRecord {
   id: string;

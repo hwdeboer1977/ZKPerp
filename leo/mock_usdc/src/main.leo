@@ -1,36 +1,34 @@
-// Mock USDC Token ok with Allowance System
+// Mock USDC Token with Allowance System
 // Supports approve/transferFrom for vault integration
+// UPDATED: Admin stored in mapping (configurable after deploy)
 
-
-// TESTNET
+// DEPLOYMENT STEPS:
 // 1. leo build
 // 2. leo deploy --network testnet --broadcast
-// 3. leo execute mint_public aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0 1000000000u128 --network testnet --broadcast --priority-fees 10000
-// 4. check balance: curl "https://api.explorer.provable.com/v1/testnet/program/mock_usdc_v2.aleo/mapping/balances/aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0"
-// 5. approve: leo execute approve arc4626_vault_ok.aleo 500000000u128 --network testnet --broadcast
+// 3. Initialize admin (first caller becomes admin):
+//    leo execute initialize_admin --network testnet --broadcast
+// 4. Mint tokens:
+//    leo execute mint_public <recipient> <amount>u128 --network testnet --broadcast
 
+program mock_usdc_0128.aleo {
 
-// DEVNET alternative 1
-// 1. leo build
-// 2. leo devnet --snarkos $(which snarkos) --snarkos-features test_network --consensus-heights 0,1,2,3,4,5,6,7,8,9,10,11 --clear-storage
-// 3. leo deploy --broadcast --consensus-heights 0,1,2,3,4,5,6,7,8,9,10,11
-// 4. leo execute mint_public aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px 1000000000u128 --network testnet --broadcast --consensus-heights 0,1,2,3,4,5,6,7,8,9,10,11
-
-// Check: curl "http://localhost:3030/testnet/program/mock_usdc.aleo/mapping/balances/aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px"
-
-program mock_usdc.aleo {
+    // The constructor is configured to prevent upgrades.
+    @noupgrade
+    async constructor() {}
 
     // ──────────────────────────────────────────────
     //  Constants
     // ──────────────────────────────────────────────
 
-    // const ADMIN: address = aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0;
-    const ADMIN: address = aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px;
     const DECIMALS: u8 = 6u8;
 
     // ──────────────────────────────────────────────
     //  State (Mappings)
     // ──────────────────────────────────────────────
+
+    // Admin address - stored in mapping so it can be set after deploy
+    // Key 0u8 = admin address
+    mapping admin: u8 => address;
 
     // Public balances: address => balance
     mapping balances: address => u128;
@@ -60,6 +58,36 @@ program mock_usdc.aleo {
     }
 
     // ──────────────────────────────────────────────
+    //  Admin Functions
+    // ──────────────────────────────────────────────
+
+    /// Initialize admin - can only be called once (when no admin is set)
+    /// First caller becomes the admin
+    async transition initialize_admin() -> Future {
+        return finalize_initialize_admin(self.caller);
+    }
+
+    async function finalize_initialize_admin(caller: address) {
+        // Check if admin already exists by trying to get it
+        // If it doesn't exist, set the caller as admin
+        let admin_exists: bool = Mapping::contains(admin, 0u8);
+        assert(!admin_exists); // Can only initialize once
+        Mapping::set(admin, 0u8, caller);
+    }
+
+    /// Transfer admin role to a new address
+    /// Only current admin can call this
+    async transition transfer_admin(new_admin: address) -> Future {
+        return finalize_transfer_admin(self.caller, new_admin);
+    }
+
+    async function finalize_transfer_admin(caller: address, new_admin: address) {
+        let current_admin: address = Mapping::get(admin, 0u8);
+        assert_eq(caller, current_admin);
+        Mapping::set(admin, 0u8, new_admin);
+    }
+
+    // ──────────────────────────────────────────────
     //  Mint Functions
     // ──────────────────────────────────────────────
 
@@ -67,14 +95,18 @@ program mock_usdc.aleo {
         public recipient: address,
         public amount: u128,
     ) -> Future {
-        assert_eq(self.caller, ADMIN);
-        return finalize_mint_public(recipient, amount);
+        return finalize_mint_public(self.caller, recipient, amount);
     }
 
     async function finalize_mint_public(
+        caller: address,
         recipient: address,
         amount: u128,
     ) {
+        // Check caller is admin
+        let current_admin: address = Mapping::get(admin, 0u8);
+        assert_eq(caller, current_admin);
+
         let current: u128 = Mapping::get_or_use(balances, recipient, 0u128);
         Mapping::set(balances, recipient, current + amount);
 
@@ -82,12 +114,18 @@ program mock_usdc.aleo {
         Mapping::set(total_supply, 0u8, supply + amount);
     }
 
-    transition mint_private(
+    async transition mint_private(
         recipient: address,
         amount: u128,
-    ) -> Token {
-        assert_eq(self.caller, ADMIN);
-        return Token { owner: recipient, amount: amount };
+    ) -> (Token, Future) {
+        let token: Token = Token { owner: recipient, amount: amount };
+        return (token, finalize_mint_private(self.caller));
+    }
+
+    async function finalize_mint_private(caller: address) {
+        // Check caller is admin
+        let current_admin: address = Mapping::get(admin, 0u8);
+        assert_eq(caller, current_admin);
     }
 
     // ──────────────────────────────────────────────
@@ -255,7 +293,4 @@ program mock_usdc.aleo {
         let current: u128 = Mapping::get_or_use(balances, recipient, 0u128);
         Mapping::set(balances, recipient, current + amount);
     }
-    // The constructor is configured to prevent upgrades.
-    @noupgrade
-    async constructor() {}
 }

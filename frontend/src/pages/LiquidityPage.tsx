@@ -1,8 +1,10 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
+import { Transaction, WalletAdapterNetwork } from '@demox-labs/aleo-wallet-adapter-base';
 import { useZKPerp } from '@/hooks/useZKPerp';
 import { useLPTokens, formatLPTokens } from '@/hooks/useLPTokens';
-import { formatUsdc, parseUsdc } from '@/utils/aleo';
+import { formatUsdc, parseUsdc, USDC_PROGRAM_ID } from '@/utils/aleo';
+import { ADDRESS_LIST } from '../utils/config';
 
 interface Props {
   poolLiquidity: bigint;
@@ -12,7 +14,7 @@ interface Props {
 }
 
 export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Props) {
-  const { connected } = useWallet();
+  const { publicKey, requestTransaction, connected } = useWallet();
   const { addLiquidity, removeLiquidity, loading, error, clearError } = useZKPerp();
   const { lpTokens, totalLP, loading: lpLoading, refresh: refreshLP } = useLPTokens();
 
@@ -22,6 +24,51 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
   const [withdrawTxHash, setWithdrawTxHash] = useState<string | null>(null);
   const [withdrawLoading, setWithdrawLoading] = useState(false);
   const [withdrawError, setWithdrawError] = useState<string | null>(null);
+  
+  // Approve state
+  const [approveLoading, setApproveLoading] = useState(false);
+  const [approveSuccess, setApproveSuccess] = useState(false);
+  const [approveError, setApproveError] = useState<string | null>(null);
+
+  // Approve ZKPerp to spend USDC
+  const handleApprove = useCallback(async () => {
+    if (!publicKey || !requestTransaction) return;
+
+    setApproveLoading(true);
+    setApproveError(null);
+    setApproveSuccess(false);
+
+    try {
+      // Approve 50,000 USDC (50000 * 10^6)
+      const approveAmount = '50000000000u128';
+
+      const inputs = [
+        ADDRESS_LIST.ZK_PERP_ADDRESS,     // spender (zkperp contract address)
+        approveAmount,  // amount to approve
+      ];
+
+      console.log('Approving USDC spend:', inputs);
+
+      const aleoTransaction = Transaction.createTransaction(
+        publicKey,
+        WalletAdapterNetwork.TestnetBeta,
+        USDC_PROGRAM_ID,
+        'approve',
+        inputs,
+        1_000_000, // fee
+        false
+      );
+
+      const txId = await requestTransaction(aleoTransaction);
+      console.log('Approve transaction submitted:', txId);
+      setApproveSuccess(true);
+    } catch (err) {
+      console.error('Approve failed:', err);
+      setApproveError(err instanceof Error ? err.message : 'Approval failed');
+    } finally {
+      setApproveLoading(false);
+    }
+  }, [publicKey, requestTransaction]);
 
   // Fetch LP tokens when connected
   useEffect(() => {
@@ -150,6 +197,29 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
         <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-6">
           <h2 className="text-lg font-semibold text-white mb-4">Add Liquidity</h2>
 
+          {/* Approve Section */}
+          <div className="mb-4 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <p className="text-sm font-medium text-blue-400">Step 1: Approve USDC</p>
+                <p className="text-xs text-gray-400">Allow ZKPerp to use your USDC</p>
+              </div>
+              {approveSuccess && (
+                <span className="text-xs bg-zkperp-green/20 text-zkperp-green px-2 py-1 rounded">✓ Approved</span>
+              )}
+            </div>
+            <button
+              onClick={handleApprove}
+              disabled={!connected || approveLoading}
+              className="w-full py-2 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/50 disabled:opacity-50 rounded-lg text-sm font-medium text-blue-400 transition-colors"
+            >
+              {approveLoading ? 'Approving...' : approveSuccess ? 'Approved ✓' : 'Approve USDC (50,000)'}
+            </button>
+            {approveError && (
+              <p className="text-red-400 text-xs mt-2">{approveError}</p>
+            )}
+          </div>
+
           <div className="space-y-4">
             <div>
               <label className="flex justify-between text-sm mb-2">
@@ -209,7 +279,7 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
               disabled={!connected || !isValidAmount || loading}
               className="w-full py-3 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-500/30 rounded-lg font-semibold text-white transition-colors"
             >
-              {loading ? 'Processing...' : !connected ? 'Connect Wallet' : 'Add Liquidity'}
+              {loading ? 'Processing...' : !connected ? 'Connect Wallet' : 'Step 2: Add Liquidity'}
             </button>
           </div>
         </div>

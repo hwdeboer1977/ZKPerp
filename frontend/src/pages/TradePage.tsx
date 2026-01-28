@@ -3,9 +3,7 @@ import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
 import { Transaction, WalletAdapterNetwork } from '@demox-labs/aleo-wallet-adapter-base';
 import { TradingWidget } from '@/components/TradingWidget';
 import { PositionDisplay } from '@/components/PositionDisplay';
-import { formatPrice } from '@/utils/aleo';
-
-const MOCK_USDC_PROGRAM = 'mock_usdc_0126.aleo';
+import { formatPrice, USDC_PROGRAM_ID } from '@/utils/aleo';
 
 interface Props {
   currentPrice: bigint;
@@ -50,7 +48,7 @@ export function TradePage({ currentPrice, oracleSet, onPriceChange }: Props) {
       const aleoTransaction = Transaction.createTransaction(
         publicKey,
         WalletAdapterNetwork.TestnetBeta,
-        MOCK_USDC_PROGRAM,
+        USDC_PROGRAM_ID,
         'mint_public',
         inputs,
         1_000_000, // fee

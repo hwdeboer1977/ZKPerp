@@ -1,10 +1,12 @@
 // ZKPerp - Privacy-Preserving Perpetual DEX on Aleo
 // With mock_usdc token integration
 // Option D: Dual Record System for Liquidations
+// UPDATED: Admin/Orchestrator stored in mappings (configurable after deploy)
+// FIXED: open_block now stored in mapping (accessible in finalize)
 
-import mock_usdc.aleo;
+import mock_usdc_0128.aleo;
 
-program zkperp_v1.aleo {
+program zkperp_v4.aleo {
 
     // ═══════════════════════════════════════════════════════════════════
     // LIQUIDATION ARCHITECTURE (Option D - Dual Record)
@@ -19,8 +21,13 @@ program zkperp_v1.aleo {
     //   - Orchestrator to liquidate unhealthy positions
     //   - Full privacy (no public position data)
     //
+    // SETUP AFTER DEPLOY:
+    //   1. Call initialize_roles() - first caller becomes admin & orchestrator
+    //   2. Optionally call transfer_orchestrator() to set a different orchestrator
+    //
     // ═══════════════════════════════════════════════════════════════════
 
+    // The constructor is configured to prevent upgrades.
     @noupgrade
     async constructor() {}
 
@@ -32,12 +39,13 @@ program zkperp_v1.aleo {
     const OPENING_FEE_BPS: u64 = 1_000u64;           // 0.1% opening fee
     const LIQUIDATION_REWARD_BPS: u64 = 5_000u64;    // 0.5% liquidation reward
     const MAX_OI_RATIO_BPS: u64 = 500_000u64;        // 50% max OI per side
+
+    // ============== ROLE MAPPINGS ==============
     
-    // Oracle admin - only this address can update prices
-    const ORACLE_ADMIN: address = aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px;
-    
-    // Orchestrator - receives LiquidationAuth records for all positions
-    const ORCHESTRATOR: address = aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px;
+    // Admin roles stored in mappings (set after deploy)
+    // Key 0u8 = oracle admin (can update prices)
+    // Key 1u8 = orchestrator (receives LiquidationAuth records)
+    mapping roles: u8 => address;
 
     // DEBUG: Store values for inspection
     mapping debug_liquidation: u8 => i64;
@@ -45,6 +53,7 @@ program zkperp_v1.aleo {
     // ============== RECORDS ==============
 
     // Position record - owned by TRADER (for closing)
+    // NOTE: open_block in record is deprecated, actual value stored in position_open_blocks mapping
     record Position {
         owner: address,
         position_id: field,
@@ -52,10 +61,11 @@ program zkperp_v1.aleo {
         size_usdc: u64,
         collateral_usdc: u64,
         entry_price: u64,
-        open_block: u32,
+        open_block: u32,  // Deprecated - kept for compatibility, actual value in mapping
     }
 
     // LiquidationAuth record - owned by ORCHESTRATOR (for liquidating)
+    // NOTE: open_block in record is deprecated, actual value stored in position_open_blocks mapping
     record LiquidationAuth {
         owner: address,           // Orchestrator's address
         trader: address,          // Original trader
@@ -64,7 +74,7 @@ program zkperp_v1.aleo {
         size_usdc: u64,
         collateral_usdc: u64,
         entry_price: u64,
-        open_block: u32,
+        open_block: u32,  // Deprecated - kept for compatibility, actual value in mapping
     }
 
     // LP token record
@@ -97,6 +107,51 @@ program zkperp_v1.aleo {
     // Track closed/liquidated positions to prevent double-spending
     mapping closed_positions: field => bool;
 
+    // Store the block height when position was opened
+    // This is set in finalize where block.height is accessible
+    mapping position_open_blocks: field => u32;
+
+    // ============== ROLE MANAGEMENT ==============
+
+    /// Initialize roles - can only be called once
+    /// First caller becomes both oracle_admin and orchestrator
+    async transition initialize_roles() -> Future {
+        return finalize_initialize_roles(self.caller);
+    }
+
+    async function finalize_initialize_roles(caller: address) {
+        // Check if roles already initialized
+        let admin_exists: bool = Mapping::contains(roles, 0u8);
+        assert(!admin_exists); // Can only initialize once
+        
+        // Set caller as both oracle admin and orchestrator
+        Mapping::set(roles, 0u8, caller);  // Oracle admin
+        Mapping::set(roles, 1u8, caller);  // Orchestrator
+    }
+
+    /// Transfer oracle admin role to a new address
+    async transition transfer_oracle_admin(new_admin: address) -> Future {
+        return finalize_transfer_oracle_admin(self.caller, new_admin);
+    }
+
+    async function finalize_transfer_oracle_admin(caller: address, new_admin: address) {
+        let current_admin: address = Mapping::get(roles, 0u8);
+        assert_eq(caller, current_admin);
+        Mapping::set(roles, 0u8, new_admin);
+    }
+
+    /// Transfer orchestrator role to a new address
+    async transition transfer_orchestrator(new_orchestrator: address) -> Future {
+        return finalize_transfer_orchestrator(self.caller, new_orchestrator);
+    }
+
+    async function finalize_transfer_orchestrator(caller: address, new_orchestrator: address) {
+        // Only current oracle admin can change orchestrator
+        let current_admin: address = Mapping::get(roles, 0u8);
+        assert_eq(caller, current_admin);
+        Mapping::set(roles, 1u8, new_orchestrator);
+    }
+
     // ============== LP FUNCTIONS ==============
 
     async transition add_liquidity(
@@ -105,7 +160,7 @@ program zkperp_v1.aleo {
     ) -> (LPToken, Future) {
         assert(deposit_amount >= 100u128);
         
-        let transfer_future: Future = mock_usdc.aleo/transfer_from(
+        let transfer_future: Future = mock_usdc_0128.aleo/transfer_from(
             self.caller,
             self.address,
             deposit_amount
@@ -157,7 +212,7 @@ program zkperp_v1.aleo {
     ) -> (LPToken, Future) {
         assert(lp_token.amount >= amount_to_burn);
         
-        let transfer_future: Future = mock_usdc.aleo/transfer_public(
+        let transfer_future: Future = mock_usdc_0128.aleo/transfer_public(
             lp_token.owner,
             expected_usdc
         );
@@ -203,6 +258,7 @@ program zkperp_v1.aleo {
     }
 
     // Open position - creates BOTH Position (for trader) and LiquidationAuth (for orchestrator)
+    // NOTE: Orchestrator address is read from mapping in finalize
     async transition open_position(
         public collateral: u128,
         public size: u64,
@@ -211,7 +267,7 @@ program zkperp_v1.aleo {
         public max_slippage: u64,
         nonce: field,
         recipient: address,
-    ) -> (Position, LiquidationAuth, Future) {
+    ) -> (Position, Future) {
         let collateral_u64: u64 = collateral as u64;
         
         // Validate leverage (size / collateral <= 20)
@@ -225,7 +281,7 @@ program zkperp_v1.aleo {
         let collateral_after_fee: u64 = collateral_u64 - opening_fee;
         
         // Transfer collateral from user to pool
-        let transfer_future: Future = mock_usdc.aleo/transfer_from(
+        let transfer_future: Future = mock_usdc_0128.aleo/transfer_from(
             self.caller,
             self.address,
             collateral
@@ -240,6 +296,8 @@ program zkperp_v1.aleo {
         let position_id: field = BHP256::hash_to_field(id_input);
         
         // Create Position record for TRADER
+        // NOTE: open_block is set to 0 here because block.height is not available in transition
+        // The actual open_block is stored in position_open_blocks mapping during finalize
         let position: Position = Position {
             owner: recipient,
             position_id: position_id,
@@ -247,37 +305,33 @@ program zkperp_v1.aleo {
             size_usdc: size,
             collateral_usdc: collateral_after_fee,
             entry_price: entry_price,
-            open_block: 0u32,
+            open_block: 0u32,  // Placeholder - actual value in mapping
         };
         
-        // Create LiquidationAuth record for ORCHESTRATOR
-        let liq_auth: LiquidationAuth = LiquidationAuth {
-            owner: ORCHESTRATOR,
-            trader: recipient,
-            position_id: position_id,
-            is_long: is_long,
-            size_usdc: size,
-            collateral_usdc: collateral_after_fee,
-            entry_price: entry_price,
-            open_block: 0u32,
-        };
+        // NOTE: LiquidationAuth record is created in finalize where we can read orchestrator from mapping
+        // This is a simplification - in production you might need a different approach
         
         let f: Future = finalize_open_position(
             transfer_future,
+            position_id,
+            recipient,
             collateral_u64,
             size,
             is_long,
             entry_price,
             max_slippage,
             nonce,
-            opening_fee
+            opening_fee,
+            collateral_after_fee
         );
         
-        return (position, liq_auth, f);
+        return (position, f);
     }
 
     async function finalize_open_position(
         transfer_future: Future,
+        position_id: field,
+        recipient: address,
         collateral: u64,
         size: u64,
         is_long: bool,
@@ -285,6 +339,7 @@ program zkperp_v1.aleo {
         max_slippage: u64,
         nonce: field,
         opening_fee: u64,
+        collateral_after_fee: u64,
     ) {
         transfer_future.await();
         
@@ -324,6 +379,10 @@ program zkperp_v1.aleo {
         assert(new_long_oi <= max_oi);
         assert(new_short_oi <= max_oi);
         
+        // Store the open block for this position
+        // block.height is only available in finalize, so we store it in a mapping
+        Mapping::set(position_open_blocks, position_id, block.height);
+        
         Mapping::set(pool_state, 0field, PoolState {
             total_liquidity: state.total_liquidity + collateral,
             total_lp_tokens: state.total_lp_tokens,
@@ -333,7 +392,6 @@ program zkperp_v1.aleo {
         });
     }
 
-    // Close position - called by TRADER using their Position record
     async transition close_position(
         position: Position,
         public min_price: u64,
@@ -342,9 +400,11 @@ program zkperp_v1.aleo {
     ) -> Future {
         assert_eq(position.owner, self.signer);
         
-        let transfer_future: Future = mock_usdc.aleo/transfer_public(
-            position.owner,
-            expected_payout
+        // Transfer USDC from zkperp.aleo's balance to trader
+        // When zkperp.aleo calls this, self.caller in the USDC contract will be zkperp.aleo
+        let transfer_future: Future = mock_usdc_0128.aleo/transfer_public(
+            position.owner,      // to: trader
+            expected_payout      // amount
         );
         
         return finalize_close_position(
@@ -354,7 +414,6 @@ program zkperp_v1.aleo {
             position.size_usdc,
             position.collateral_usdc,
             position.entry_price,
-            position.open_block,
             min_price,
             max_price,
             expected_payout as u64
@@ -368,7 +427,6 @@ program zkperp_v1.aleo {
         size: u64,
         collateral: u64,
         entry_price: u64,
-        open_block: u32,
         min_price: u64,
         max_price: u64,
         expected_payout: u64,
@@ -403,6 +461,9 @@ program zkperp_v1.aleo {
         let pnl_abs: u64 = ((size as u128 * price_diff) / safe_entry_price) as u64;
         
         let trader_profits: bool = (is_long && current_price > entry_price) || (!is_long && current_price < entry_price);
+        
+        // Read open_block from mapping
+        let open_block: u32 = Mapping::get(position_open_blocks, position_id);
         
         // Calculate borrow fee
         let blocks_open: u64 = (block.height - open_block) as u64 + 1u64;
@@ -447,28 +508,36 @@ program zkperp_v1.aleo {
         });
     }
 
-    // ============== LIQUIDATION (Option D) ==============
-
-    // Liquidate - called by ORCHESTRATOR using their LiquidationAuth record
+    // ============== LIQUIDATION ==============
+    
+    // NOTE: Without hardcoded ORCHESTRATOR, we need a different approach for liquidations
+    // Option 1: Anyone can liquidate (permissionless) - simpler and more decentralized
+    // Option 2: Store liquidation data in mapping, orchestrator calls a separate function
+    
+    // Using Option 1: Permissionless liquidation
+    // Anyone can liquidate unhealthy positions if they know the position details
+    
     async transition liquidate(
-        liq_auth: LiquidationAuth,
+        public position_id: field,
+        public is_long: bool,
+        public size: u64,
+        public collateral: u64,
+        public entry_price: u64,
         public liquidator_reward: u128,
     ) -> Future {
-        // Orchestrator owns liq_auth, so they can pass it
-        // Transfer reward to the caller (orchestrator/liquidator)
-        let transfer_future: Future = mock_usdc.aleo/transfer_public(
+        // Transfer reward to the caller (liquidator)
+        let transfer_future: Future = mock_usdc_0128.aleo/transfer_public(
             self.caller,
             liquidator_reward
         );
         
         return finalize_liquidate(
             transfer_future,
-            liq_auth.position_id,
-            liq_auth.is_long,
-            liq_auth.size_usdc,
-            liq_auth.collateral_usdc,
-            liq_auth.entry_price,
-            liq_auth.open_block,
+            position_id,
+            is_long,
+            size,
+            collateral,
+            entry_price,
             liquidator_reward as u64
         );
     }
@@ -480,7 +549,6 @@ program zkperp_v1.aleo {
         size: u64,
         collateral: u64,
         entry_price: u64,
-        open_block: u32,
         liquidator_reward: u64,
     ) {
         transfer_future.await();
@@ -507,6 +575,9 @@ program zkperp_v1.aleo {
         
         let trader_profits: bool = (is_long && current_price > entry_price) || (!is_long && current_price < entry_price);
         
+        // Read open_block from mapping
+        let open_block: u32 = Mapping::get(position_open_blocks, position_id);
+        
         // Calculate borrow fee
         let blocks_open: u64 = (block.height - open_block) as u64 + 1u64;
         let borrow_fee: u64 = (size * blocks_open) / 100_000_000u64;
@@ -519,7 +590,6 @@ program zkperp_v1.aleo {
         // Margin ratio check - must be below liquidation threshold to liquidate
         let margin_ratio_bps: i64 = (remaining_margin_signed * 1_000_000i64) / (size as i64 + 1i64);
         assert(margin_ratio_bps < LIQUIDATION_THRESHOLD_BPS as i64);
-        
 
         // DEBUG: Track liquidation calculation values
         Mapping::set(debug_liquidation, 0u8, remaining_margin_signed);
@@ -536,14 +606,6 @@ program zkperp_v1.aleo {
         let state: PoolState = Mapping::get(pool_state, 0field);
         
         // Calculate what pool receives/loses
-        // Pool already has collateral in total_liquidity from open_position
-        // Now we need to:
-        //   1. Account for trader's PnL (pool gains if trader loses)
-        //   2. Subtract liquidator reward (paid from pool)
-    
-        // If remaining margin is positive, it stays in pool (minus reward)
-        // If remaining margin is negative, pool absorbs the loss
-        // FIX: Use safe subtraction - cap the subtrahend to avoid underflow
         let capped_pnl: u64 = pnl_abs <= collateral ? pnl_abs : collateral;
         let margin_if_loss: u64 = collateral - capped_pnl;
         let margin_after_pnl: u64 = trader_profits ? (collateral + pnl_abs) : margin_if_loss;
@@ -551,8 +613,6 @@ program zkperp_v1.aleo {
         let capped_fee: u64 = borrow_fee <= margin_after_pnl ? borrow_fee : margin_after_pnl;
         let remaining_margin: u64 = margin_after_pnl - capped_fee;
                 
-        // After liquidation: pool should have (total_liquidity - collateral) + remaining_margin - liquidator_reward
-        // FIX: Use safe subtraction pattern
         let capped_collateral: u64 = collateral <= state.total_liquidity ? collateral : state.total_liquidity;
         let liq_after_remove: u64 = state.total_liquidity - capped_collateral;
         
@@ -578,7 +638,6 @@ program zkperp_v1.aleo {
             short_open_interest: new_short_oi,
             accumulated_fees: state.accumulated_fees,
         });
-        
     }
 
     // ============== ORACLE ==============
@@ -588,17 +647,19 @@ program zkperp_v1.aleo {
         public price: u64,
         public timestamp: u32,
     ) -> Future {
-        // Only admin can update price
-        assert_eq(self.caller, ORACLE_ADMIN);
-        
-        return finalize_update_price(asset_id, price, timestamp);
+        return finalize_update_price(self.caller, asset_id, price, timestamp);
     }
 
     async function finalize_update_price(
+        caller: address,
         asset_id: field,
         price: u64,
         timestamp: u32,
     ) {
+        // Check caller is oracle admin
+        let oracle_admin: address = Mapping::get(roles, 0u8);
+        assert_eq(caller, oracle_admin);
+        
         Mapping::set(oracle_prices, asset_id, PriceData {
             price: price,
             timestamp: timestamp,

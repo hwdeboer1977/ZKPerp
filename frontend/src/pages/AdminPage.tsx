@@ -2,9 +2,11 @@ import { useState, useCallback } from 'react';
 import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
 import { Transaction, WalletAdapterNetwork } from '@demox-labs/aleo-wallet-adapter-base';
 import { formatPrice, formatUsdc } from '@/utils/aleo';
+import { PROGRAM_IDS, ADDRESS_LIST } from '../utils/config';
 
-const PROGRAM_ID = 'zkperp_v1.aleo';
-const ADMIN_ADDRESS = 'aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0';
+const PROGRAM_ID = PROGRAM_IDS.ZKPERP;
+
+const ADMIN_ADDRESS = ADDRESS_LIST.ADMIN_ADDRESS;
 
 interface Props {
   currentPrice: bigint;
@@ -257,11 +259,11 @@ export function AdminPage({ currentPrice, oracleSet, poolLiquidity, longOI, shor
           <div className="space-y-3 text-sm">
             <div>
               <p className="text-gray-400 mb-1">ZKPerp Contract</p>
-              <code className="text-xs text-zkperp-accent break-all">zkperp_v1.aleo</code>
+              <code className="text-xs text-zkperp-accent break-all">zkperp_v3.aleo</code>
             </div>
             <div>
               <p className="text-gray-400 mb-1">Mock USDC</p>
-              <code className="text-xs text-zkperp-accent break-all">mock_usdc_0126.aleo</code>
+              <code className="text-xs text-zkperp-accent break-all">mock_usdc_0128.aleo</code>
             </div>
             <div>
               <p className="text-gray-400 mb-1">Admin/Orchestrator</p>

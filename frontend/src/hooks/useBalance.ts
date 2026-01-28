@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
+import { USDC_PROGRAM_ID } from '@/utils/aleo';
+import { NETWORK_CONFIG } from '../utils/config';
 
-const API_BASE = 'https://api.explorer.provable.com/v1/testnet';
-const MOCK_USDC_PROGRAM = 'mock_usdc_0126.aleo';
+const API_BASE = NETWORK_CONFIG.EXPLORER_API;
 
 export function useBalance() {
   const { publicKey, connected } = useWallet();
@@ -46,7 +47,7 @@ export function useBalance() {
       // Fetch mock USDC balance
       try {
         const usdcResponse = await fetch(
-          `${API_BASE}/program/${MOCK_USDC_PROGRAM}/mapping/balances/${publicKey}`
+          `${API_BASE}/program/${USDC_PROGRAM_ID}/mapping/balances/${publicKey}`
         );
 
         if (usdcResponse.ok) {

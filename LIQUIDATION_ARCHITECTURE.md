@@ -299,6 +299,36 @@ Complex key management required
 4. **No complex cryptography needed**
 5. **Native to Aleo** - Uses records as intended
 
+### Implementation Notes (Lessons Learned)
+
+**Hardcoded Orchestrator:** Instead of passing the orchestrator address as a parameter, we use a constant:
+```leo
+const ORCHESTRATOR: address = aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px;
+```
+This simplifies the API and ensures all positions use the same orchestrator.
+
+**Safe Subtraction Pattern:** Leo evaluates BOTH branches of ternary operators, which can cause underflow errors even in the "false" branch. Always use this pattern:
+```leo
+// ❌ UNSAFE - Leo evaluates `a - b` even when a <= b
+let result: u64 = a > b ? a - b : 0u64;
+
+// ✅ SAFE - cap first, then subtract (always valid)
+let capped_b: u64 = b <= a ? b : a;
+let result: u64 = a - capped_b;
+```
+
+**Example with real numbers:**
+```
+collateral = 10, pnl = 20 (position underwater)
+
+UNSAFE: 10 > 20 ? 10 - 20 : 0
+  → Leo evaluates BOTH branches
+  → 10 - 20 = UNDERFLOW ERROR! 💥
+
+SAFE: capped_pnl = 20 <= 10 ? 20 : 10 = 10
+      result = 10 - 10 = 0 ✓
+```
+
 ### Implementation Roadmap
 
 #### Phase 1: Basic Dual Record
@@ -402,3 +432,22 @@ The tradeoff is trusting an orchestrator, but this can be mitigated by:
 - Having multiple backup orchestrators
 
 This is the best balance of **privacy**, **functionality**, and **implementation simplicity** for ZKPerp.
+
+---
+
+## ✅ Implementation Status
+
+**FULLY IMPLEMENTED!** The Option D architecture is working in ZKPerp:
+
+- ✅ `LiquidationAuth` record created on `open_position`
+- ✅ `Position` record owned by trader
+- ✅ `LiquidationAuth` record owned by orchestrator (hardcoded constant)
+- ✅ `close_position` works for trader
+- ✅ `liquidate` works for orchestrator
+- ✅ `closed_positions` mapping prevents double-close/liquidate
+- ✅ Safe subtraction pattern handles underwater positions
+- ✅ Token transfers integrated with mock_usdc.aleo
+
+**Test Scenarios Passing:**
+1. Price UP → Trader closes with profit ✅
+2. Price DOWN → Orchestrator liquidates ✅

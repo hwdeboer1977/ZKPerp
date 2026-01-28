@@ -31,44 +31,58 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
   const [approveError, setApproveError] = useState<string | null>(null);
 
   // Approve ZKPerp to spend USDC
-  const handleApprove = useCallback(async () => {
-    if (!publicKey || !requestTransaction) return;
+ const handleApprove = useCallback(async () => {
+  if (!publicKey || !requestTransaction) {
+    console.error('Missing wallet connection:', { publicKey, requestTransaction: !!requestTransaction });
+    return;
+  }
 
-    setApproveLoading(true);
-    setApproveError(null);
-    setApproveSuccess(false);
+  setApproveLoading(true);
+  setApproveError(null);
+  setApproveSuccess(false);
 
-    try {
-      // Approve 50,000 USDC (50000 * 10^6)
-      const approveAmount = '50000000000u128';
+  try {
+    // Approve 50,000 USDC (50000 * 10^6)
+    const approveAmount = '50000000000u128';
 
-      const inputs = [
-        ADDRESS_LIST.ZK_PERP_ADDRESS,     // spender (zkperp contract address)
-        approveAmount,  // amount to approve
-      ];
+    const inputs = [
+      ADDRESS_LIST.ZK_PERP_ADDRESS,     // spender (zkperp contract address)
+      approveAmount,  // amount to approve
+    ];
 
-      console.log('Approving USDC spend:', inputs);
+    console.log('=== APPROVE DEBUG ===');
+    console.log('Public Key:', publicKey);
+    console.log('USDC Program ID:', USDC_PROGRAM_ID);
+    console.log('Spender (ZKPerp):', ADDRESS_LIST.ZK_PERP_ADDRESS);
+    console.log('Amount:', approveAmount);
+    console.log('Inputs array:', inputs);
 
-      const aleoTransaction = Transaction.createTransaction(
-        publicKey,
-        WalletAdapterNetwork.TestnetBeta,
-        USDC_PROGRAM_ID,
-        'approve',
-        inputs,
-        1_000_000, // fee
-        false
-      );
+    const aleoTransaction = Transaction.createTransaction(
+      publicKey,
+      WalletAdapterNetwork.TestnetBeta,
+      USDC_PROGRAM_ID,
+      'approve',
+      inputs,
+      1_000_000, // fee
+      false
+    );
 
-      const txId = await requestTransaction(aleoTransaction);
-      console.log('Approve transaction submitted:', txId);
-      setApproveSuccess(true);
-    } catch (err) {
-      console.error('Approve failed:', err);
-      setApproveError(err instanceof Error ? err.message : 'Approval failed');
-    } finally {
-      setApproveLoading(false);
-    }
-  }, [publicKey, requestTransaction]);
+    console.log('Transaction object:', JSON.stringify(aleoTransaction, null, 2));
+
+    const txId = await requestTransaction(aleoTransaction);
+    console.log('Approve transaction submitted:', txId);
+    setApproveSuccess(true);
+  } catch (err) {
+    console.error('=== APPROVE ERROR ===');
+    console.error('Error object:', err);
+    console.error('Error type:', typeof err);
+    console.error('Error message:', err instanceof Error ? err.message : String(err));
+    console.error('Error stack:', err instanceof Error ? err.stack : 'N/A');
+    setApproveError(err instanceof Error ? err.message : 'Approval failed');
+  } finally {
+    setApproveLoading(false);
+  }
+}, [publicKey, requestTransaction]);
 
   // Fetch LP tokens when connected
   useEffect(() => {

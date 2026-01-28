@@ -225,6 +225,7 @@ export function useZKPerp() {
         ];
 
         console.log('Open position inputs:', inputs);
+        console.log('PROGRAM_ID:', PROGRAM_ID);
 
         const aleoTransaction = Transaction.createTransaction(
           publicKey,

@@ -27,7 +27,15 @@ export function PositionDisplay({ currentPrice }: Props) {
     setRefreshing(true);
     try {
       const records = await fetchPositions();
-      setPositions(records);
+      
+      // ✅ Filter out locally closed positions
+      const closedIds = JSON.parse(localStorage.getItem('zkperp_closed_positions') || '[]');
+      const openRecords = records.filter(p => {
+        const id = String(p.position_id);
+        return !closedIds.some((closedId: string) => id.includes(closedId));
+      });
+      
+      setPositions(openRecords);
     } catch (err) {
       console.error('Failed to load positions:', err);
     } finally {
@@ -35,33 +43,34 @@ export function PositionDisplay({ currentPrice }: Props) {
     }
   }, [connected, fetchPositions]);
 
-  useEffect(() => {
-    loadPositions();
-  }, [loadPositions]);
-
   const handleClose = async (position: Position) => {
-  setClosingId(position.position_id);
-  try {
-    // ✅ Calculate 1% slippage using ONLY bigint math
-    const slippageAmount = (currentPrice * 1n) / 100n;  // 1% slippage
-    const minPrice = currentPrice - slippageAmount;
-    const maxPrice = currentPrice + slippageAmount;
-    
-    console.log('Closing with slippage:', {
-      currentPrice: currentPrice.toString(),
-      slippageAmount: slippageAmount.toString(),
-      minPrice: minPrice.toString(),
-      maxPrice: maxPrice.toString(),
-    });
-    
-    await closePosition(position, minPrice, maxPrice);
-    setTimeout(loadPositions, 2000);
-  } catch (err) {
-    console.error('Close failed:', err);
-  } finally {
-    setClosingId(null);
-  }
-};
+    setClosingId(position.position_id);
+    try {
+      const slippageAmount = (currentPrice * 1n) / 100n;
+      const minPrice = currentPrice - slippageAmount;
+      const maxPrice = currentPrice + slippageAmount;
+      
+      const result = await closePosition(position, minPrice, maxPrice);
+      
+      // ✅ Save closed position ID to localStorage
+      const closedIds: string[] = JSON.parse(localStorage.getItem('zkperp_closed_positions') || '[]');
+      const posId = String(position.position_id).replace('.private', '').replace('.public', '');
+      if (!closedIds.includes(posId)) {
+        closedIds.push(posId);
+        localStorage.setItem('zkperp_closed_positions', JSON.stringify(closedIds));
+      }
+      
+      // Remove from local state immediately
+      setPositions(prev => prev.filter(p => p.position_id !== position.position_id));
+      
+      console.log('Position closed successfully:', result);
+      
+    } catch (err) {
+      console.error('Close failed:', err);
+    } finally {
+      setClosingId(null);
+    }
+  };
 
   // Manual decrypt a position record
   const handleManualDecrypt = async () => {

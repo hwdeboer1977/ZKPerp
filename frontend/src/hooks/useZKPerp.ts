@@ -494,11 +494,14 @@ export function useZKPerp() {
         })
         .map((r: any) => {
           console.log('Parsing position record:', r);
-          const isLongStr = String(r.data.is_long).replace('.private', '').replace('.public', '');
+          const isLongStr = String(r.data.is_long)
+            .replace('.private', '')
+            .replace('.public', '');
+
           return {
             owner: r.owner,
             position_id: r.data.position_id,
-            is_long: isLongStr === 'true' || isLongStr === true,
+            is_long: isLongStr.trim().toLowerCase() === "true",
             size_usdc: BigInt(String(r.data.size_usdc).replace('u64', '').replace('.private', '')),
             collateral_usdc: BigInt(String(r.data.collateral_usdc).replace('u64', '').replace('.private', '')),
             entry_price: BigInt(String(r.data.entry_price).replace('u64', '').replace('.private', '')),

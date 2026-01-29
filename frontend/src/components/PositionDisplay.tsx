@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
 import { useZKPerp, Position } from '@/hooks/useZKPerp';
 import { formatUsdc, formatPrice, calculatePnL, calculateLeverage } from '@/utils/aleo';
@@ -6,6 +6,9 @@ import { formatUsdc, formatPrice, calculatePnL, calculateLeverage } from '@/util
 interface Props {
   currentPrice: bigint;
 }
+
+const PROGRAM_ID = 'zkperp_v4.aleo';
+const ALEO_API = 'https://api.explorer.provable.com/v1/testnet';
 
 export function PositionDisplay({ currentPrice }: Props) {
   const { connected, decrypt } = useWallet();
@@ -18,6 +21,37 @@ export function PositionDisplay({ currentPrice }: Props) {
   const [decryptError, setDecryptError] = useState<string | null>(null);
   const [decryptLoading, setDecryptLoading] = useState(false);
 
+  // Check if a position is closed on-chain
+  const checkPositionClosedOnChain = async (positionId: string): Promise<boolean> => {
+    try {
+      // Clean the position ID - remove .private/.public suffix if present
+      const cleanId = positionId.replace('.private', '').replace('.public', '');
+      
+      // Query the closed_positions mapping
+      const response = await fetch(
+        `${ALEO_API}/program/${PROGRAM_ID}/mapping/closed_positions/${cleanId}`
+      );
+      
+      if (!response.ok) {
+        // If 404, position is not in mapping (not closed)
+        if (response.status === 404) {
+          return false;
+        }
+        console.warn('Failed to check closed status:', response.status);
+        return false;
+      }
+      
+      const data = await response.text();
+      console.log(`Position ${cleanId.slice(0, 20)}... closed status:`, data);
+      
+      // The mapping returns "true" if closed, or 404/null if not
+      return data.includes('true');
+    } catch (err) {
+      console.error('Error checking position closed status:', err);
+      return false;
+    }
+  };
+
   const loadPositions = useCallback(async () => {
     if (!connected) {
       setPositions([]);
@@ -28,14 +62,36 @@ export function PositionDisplay({ currentPrice }: Props) {
     try {
       const records = await fetchPositions();
       
-      // ✅ Filter out locally closed positions
+      // Get locally closed positions
       const closedIds = JSON.parse(localStorage.getItem('zkperp_closed_positions') || '[]');
-      const openRecords = records.filter(p => {
+      
+      // Filter out locally closed positions first
+      const locallyOpen = records.filter(p => {
         const id = String(p.position_id);
         return !closedIds.some((closedId: string) => id.includes(closedId));
       });
       
-      setPositions(openRecords);
+      // Now check on-chain for each remaining position
+      const openPositions: Position[] = [];
+      
+      for (const position of locallyOpen) {
+        const positionId = String(position.position_id);
+        const isClosedOnChain = await checkPositionClosedOnChain(positionId);
+        
+        if (isClosedOnChain) {
+          console.log('Position was liquidated/closed on-chain:', positionId.slice(0, 30) + '...');
+          // Also add to local storage so we don't check again
+          const cleanId = positionId.replace('.private', '').replace('.public', '');
+          if (!closedIds.includes(cleanId)) {
+            closedIds.push(cleanId);
+            localStorage.setItem('zkperp_closed_positions', JSON.stringify(closedIds));
+          }
+        } else {
+          openPositions.push(position);
+        }
+      }
+      
+      setPositions(openPositions);
     } catch (err) {
       console.error('Failed to load positions:', err);
     } finally {
@@ -52,7 +108,7 @@ export function PositionDisplay({ currentPrice }: Props) {
       
       const result = await closePosition(position, minPrice, maxPrice);
       
-      // ✅ Save closed position ID to localStorage
+      // Save closed position ID to localStorage
       const closedIds: string[] = JSON.parse(localStorage.getItem('zkperp_closed_positions') || '[]');
       const posId = String(position.position_id).replace('.private', '').replace('.public', '');
       if (!closedIds.includes(posId)) {
@@ -89,7 +145,6 @@ export function PositionDisplay({ currentPrice }: Props) {
       }
       
       // Parse the decrypted record
-      // Format: { owner: aleo1..., position_id: 123field, is_long: true, ... }
       const ownerMatch = decrypted.match(/owner:\s*(aleo1[a-z0-9]+)/);
       const positionIdMatch = decrypted.match(/position_id:\s*(\d+field)/);
       const isLongMatch = decrypted.match(/is_long:\s*(true|false)/);
@@ -113,6 +168,13 @@ export function PositionDisplay({ currentPrice }: Props) {
         entry_price: BigInt(entryPriceMatch?.[1] || '0'),
         open_block: parseInt(openBlockMatch?.[1] || '0'),
       };
+      
+      // Check if this position is closed on-chain before adding
+      const isClosedOnChain = await checkPositionClosedOnChain(position.position_id);
+      if (isClosedOnChain) {
+        setDecryptError('This position has already been closed or liquidated');
+        return;
+      }
       
       // Add to positions if not already there
       setPositions(prev => {
@@ -151,7 +213,7 @@ export function PositionDisplay({ currentPrice }: Props) {
           disabled={refreshing}
           className="text-sm text-zkperp-accent hover:text-zkperp-accent/80 disabled:opacity-50"
         >
-          {refreshing ? 'Loading...' : 'Refresh'}
+          {refreshing ? 'Checking...' : 'Refresh'}
         </button>
       </div>
 

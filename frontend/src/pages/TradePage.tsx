@@ -1,9 +1,8 @@
-import { useState, useCallback } from 'react';
-import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
-import { Transaction, WalletAdapterNetwork } from '@demox-labs/aleo-wallet-adapter-base';
+import { useState } from 'react';
+import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import { TradingWidget } from '@/components/TradingWidget';
 import { PositionDisplay } from '@/components/PositionDisplay';
-import { formatPrice, USDC_PROGRAM_ID } from '@/utils/aleo';
+import { formatPrice } from '@/utils/aleo';
 
 interface Props {
   currentPrice: bigint;
@@ -12,62 +11,16 @@ interface Props {
 }
 
 export function TradePage({ currentPrice, oracleSet, onPriceChange }: Props) {
-  const { publicKey, requestTransaction, connected } = useWallet();
+  useWallet();
   const [manualPriceInput, setManualPriceInput] = useState('100000');
-  const [mintLoading, setMintLoading] = useState(false);
-  const [mintSuccess, setMintSuccess] = useState(false);
-  const [mintError, setMintError] = useState<string | null>(null);
 
   const handlePriceChange = (value: string) => {
     setManualPriceInput(value);
     const num = parseFloat(value);
     if (!isNaN(num) && num > 0) {
-      // Convert to 8 decimal format
       onPriceChange(BigInt(Math.floor(num * 100000000)));
     }
   };
-
-  const handleMintUsdc = useCallback(async () => {
-    if (!publicKey || !requestTransaction) return;
-
-    setMintLoading(true);
-    setMintError(null);
-    setMintSuccess(false);
-
-    try {
-      // Mint 1000 USDC (with 6 decimals = 1000000000)
-      const mintAmount = '1000000000u128';
-
-      const inputs = [
-        publicKey,    // recipient address
-        mintAmount,   // amount to mint
-      ];
-
-      console.log('Minting USDC:', inputs);
-
-      const aleoTransaction = Transaction.createTransaction(
-        publicKey,
-        WalletAdapterNetwork.TestnetBeta,
-        USDC_PROGRAM_ID,
-        'mint_public',
-        inputs,
-        1_000_000, // fee
-        false
-      );
-
-      const txId = await requestTransaction(aleoTransaction);
-      console.log('Mint USDC submitted:', txId);
-      setMintSuccess(true);
-      
-      // Clear success message after 5 seconds
-      setTimeout(() => setMintSuccess(false), 5000);
-    } catch (err) {
-      console.error('Mint USDC failed:', err);
-      setMintError(err instanceof Error ? err.message : 'Failed to mint USDC');
-    } finally {
-      setMintLoading(false);
-    }
-  }, [publicKey, requestTransaction]);
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -80,29 +33,24 @@ export function TradePage({ currentPrice, oracleSet, onPriceChange }: Props) {
         </p>
       </div>
 
-      {/* Testnet Faucet Banner */}
+      {/* USDCx Bridge Banner */}
       <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4 mb-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h3 className="font-semibold text-blue-400 mb-1">🚰 Testnet Faucet</h3>
+            <h3 className="font-semibold text-blue-400 mb-1">🌉 Get USDCx</h3>
             <p className="text-sm text-gray-400">
-              Need test USDC? Mint 1,000 mock USDC to your wallet for free.
+              Bridge USDC from Sepolia to Aleo testnet to get USDCx for trading.
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <button
-              onClick={handleMintUsdc}
-              disabled={!connected || mintLoading}
-              className="px-6 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-500/30 rounded-lg font-medium text-white transition-colors whitespace-nowrap"
+            <a
+              href="https://usdcx.aleo.dev/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-6 py-2 bg-blue-500 hover:bg-blue-600 rounded-lg font-medium text-white transition-colors whitespace-nowrap text-center"
             >
-              {mintLoading ? 'Minting...' : 'Mint 1,000 USDC'}
-            </button>
-            {mintSuccess && (
-              <span className="text-zkperp-green text-sm">✓ Minted!</span>
-            )}
-            {mintError && (
-              <span className="text-red-400 text-sm">✗ Failed</span>
-            )}
+              Bridge USDCx →
+            </a>
           </div>
         </div>
       </div>

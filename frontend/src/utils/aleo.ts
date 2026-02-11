@@ -1,6 +1,6 @@
-// ZKPerp v2 contract constants
-export const PROGRAM_ID = 'zkperp_v4.aleo';
-export const USDC_PROGRAM_ID = 'mock_usdc_0128.aleo';
+// ZKPerp v5 contract constants (USDCx migration)
+export const PROGRAM_ID = 'zkperp_v6.aleo';
+export const USDC_PROGRAM_ID = 'test_usdcx_stablecoin.aleo';
 export const SCALE = 1_000_000; // 6 decimals for amounts
 export const PRICE_SCALE = 100_000_000; // 8 decimals for prices
 

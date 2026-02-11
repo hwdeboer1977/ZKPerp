@@ -1,14 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { WalletProvider } from '@demox-labs/aleo-wallet-adapter-react';
-import { WalletModalProvider } from '@demox-labs/aleo-wallet-adapter-reactui';
-import { LeoWalletAdapter } from '@demox-labs/aleo-wallet-adapter-leo';
-import {
-  DecryptPermission,
-  WalletAdapterNetwork,
-} from '@demox-labs/aleo-wallet-adapter-base';
+import { AleoWalletProvider } from '@provablehq/aleo-wallet-adaptor-react';
+import { WalletModalProvider } from '@provablehq/aleo-wallet-adaptor-react-ui';
+import { ShieldWalletAdapter } from '@provablehq/aleo-wallet-adaptor-shield';
+import { Network } from '@provablehq/aleo-types';
+import { DecryptPermission } from '@provablehq/aleo-wallet-adaptor-core';
 
-import '@demox-labs/aleo-wallet-adapter-reactui/styles.css';
+import '@provablehq/aleo-wallet-adaptor-react-ui/dist/styles.css';
 
 import { Header } from '@/components/Header';
 import { Navigation } from '@/components/Navigation';
@@ -107,7 +105,7 @@ function AppContent() {
           </div>
           <div className="mt-4 pt-4 border-t border-zkperp-border">
             <p className="text-center text-xs text-gray-600">
-              Aleo Testnet Beta • Contract: zkperp_v2.aleo
+              Aleo Testnet Beta • Contract: zkperp_v6.aleo
             </p>
           </div>
         </div>
@@ -117,27 +115,20 @@ function AppContent() {
 }
 
 function App() {
-  const wallets = useMemo(
-    () => [
-      new LeoWalletAdapter({
-        appName: 'ZKPerp',
-      }),
-    ],
-    []
-  );
-
   return (
     <BrowserRouter>
-      <WalletProvider
-        wallets={wallets}
+      <AleoWalletProvider
+        wallets={[new ShieldWalletAdapter()]}
+        autoConnect={false}
+        network={Network.TESTNET}
         decryptPermission={DecryptPermission.UponRequest}
-        network={WalletAdapterNetwork.TestnetBeta}
-        autoConnect
+        programs={['zkperp_v6.aleo', 'test_usdcx_stablecoin.aleo', 'credits.aleo']}
+        onError={(error) => console.error(error.message)}
       >
         <WalletModalProvider>
           <AppContent />
         </WalletModalProvider>
-      </WalletProvider>
+      </AleoWalletProvider>
     </BrowserRouter>
   );
 }

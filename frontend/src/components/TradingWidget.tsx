@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
+import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import { useZKPerp } from '@/hooks/useZKPerp';
 import {
   parseUsdc,
@@ -56,7 +56,7 @@ export function TradingWidget({ currentPrice }: Props) {
         maxSlippage
       );
       
-      setTxHash(hash);
+      setTxHash(hash ?? null);
       setCollateralInput('');
       setSizeInput('');
     } catch (err) {

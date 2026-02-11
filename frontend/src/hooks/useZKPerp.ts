@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
-import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
-import { Transaction, WalletAdapterNetwork } from '@demox-labs/aleo-wallet-adapter-base';
+import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
+import type { TransactionOptions } from '@provablehq/aleo-types';
 import { PROGRAM_ID, generateNonce } from '@/utils/aleo';
 import { PROGRAM_IDS, NETWORK_CONFIG } from '../utils/config';
 
@@ -91,7 +91,7 @@ async function fetchCurrentBlockHeight(): Promise<number> {
 }
 
 /**
- * ✅ NEW: Fetch actual open block from on-chain mapping
+ * Fetch actual open block from on-chain mapping
  */
 async function fetchPositionOpenBlock(positionId: string): Promise<number> {
   try {
@@ -191,7 +191,7 @@ function calculateExpectedPayout(
 // ============================================================================
 
 export function useZKPerp() {
-  const { publicKey, requestTransaction, requestRecords } = useWallet();
+  const { address, executeTransaction, requestRecords } = useWallet();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -204,7 +204,7 @@ export function useZKPerp() {
       entryPrice: bigint,
       maxSlippage: bigint
     ) => {
-      if (!publicKey || !requestTransaction) {
+      if (!address || !executeTransaction) {
         throw new Error('Wallet not connected');
       }
 
@@ -221,23 +221,21 @@ export function useZKPerp() {
           entryPrice.toString() + 'u64',
           maxSlippage.toString() + 'u64',
           nonce,
-          publicKey,
+          address,
         ];
 
         console.log('Open position inputs:', inputs);
         console.log('PROGRAM_ID:', PROGRAM_ID);
 
-        const aleoTransaction = Transaction.createTransaction(
-          publicKey,
-          WalletAdapterNetwork.TestnetBeta,
-          PROGRAM_ID,
-          'open_position',
+        const options: TransactionOptions = {
+          program: PROGRAM_ID,
+          function: 'open_position',
           inputs,
-          5_000_000,
-          false
-        );
+          fee: 5_000_000,
+        };
 
-        const txId = await requestTransaction(aleoTransaction);
+        const result = await executeTransaction(options);
+        const txId = result?.transactionId;
         console.log('Transaction submitted:', txId);
         return txId;
       } catch (err) {
@@ -249,13 +247,13 @@ export function useZKPerp() {
         setLoading(false);
       }
     },
-    [publicKey, requestTransaction]
+    [address, executeTransaction]
   );
 
-  // ✅ FIXED: Close position with accurate block calculation
+  // Close position with accurate block calculation
   const closePosition = useCallback(
     async (position: Position, minPrice: bigint, maxPrice: bigint) => {
-      if (!publicKey || !requestTransaction) {
+      if (!address || !executeTransaction) {
         throw new Error('Wallet not connected');
       }
 
@@ -278,23 +276,23 @@ export function useZKPerp() {
           entryPrice: entryPrice.toString(),
         });
         
-        // ✅ Step 1: Fetch current price
+        // Step 1: Fetch current price
         const currentPrice = await fetchCurrentPrice();
         console.log('Current price:', currentPrice.toString());
         
-        // ✅ Step 2: Fetch ACTUAL open block from on-chain mapping
+        // Step 2: Fetch ACTUAL open block from on-chain mapping
         const actualOpenBlock = await fetchPositionOpenBlock(position.position_id);
         console.log('Actual open block:', actualOpenBlock);
         
-        // ✅ Step 3: Fetch current block height
+        // Step 3: Fetch current block height
         const currentBlock = await fetchCurrentBlockHeight();
         console.log('Current block:', currentBlock);
         
-        // ✅ Step 4: Calculate ACTUAL blocks open
+        // Step 4: Calculate ACTUAL blocks open
         const actualBlocksOpen = currentBlock - actualOpenBlock + 5; // +5 buffer for tx time
         console.log('Actual blocks open:', actualBlocksOpen);
         
-        // ✅ Step 5: Calculate expected payout with 5% safety buffer
+        // Step 5: Calculate expected payout with 5% safety buffer
         const expectedPayout = calculateExpectedPayout(
           collateral,
           size,
@@ -342,25 +340,19 @@ export function useZKPerp() {
           expectedPayout: expectedPayout.toString(),
         });
 
-        // ❌ COMMENTED OUT FOR TESTING (no gas cost!)
-        
-        const aleoTransaction = Transaction.createTransaction(
-          publicKey,
-          WalletAdapterNetwork.TestnetBeta,
-          PROGRAM_ID,
-          'close_position',
+        const options: TransactionOptions = {
+          program: PROGRAM_ID,
+          function: 'close_position',
           inputs,
-          5_000_000,
-          false
-        );
+          fee: 5_000_000,
+        };
 
-        const txId = await requestTransaction(aleoTransaction);
+        const result = await executeTransaction(options);
+        const txId = result?.transactionId;
         console.log('Close position submitted:', txId);
         
-        
-        // ✅ FAKE SUCCESS FOR TESTING
         return {
-          txId: 'debug-mode-no-tx-sent',
+          txId: txId ?? 'debug-mode-no-tx-sent',
           expectedPayout,
         };
         
@@ -373,13 +365,13 @@ export function useZKPerp() {
         setLoading(false);
       }
     },
-    [publicKey, requestTransaction]
+    [address, executeTransaction]
   );
 
   // Add liquidity to the pool
   const addLiquidity = useCallback(
     async (amount: bigint) => {
-      if (!publicKey || !requestTransaction) {
+      if (!address || !executeTransaction) {
         throw new Error('Wallet not connected');
       }
 
@@ -389,22 +381,20 @@ export function useZKPerp() {
       try {
         const inputs = [
           amount.toString() + 'u128',
-          publicKey,
+          address,
         ];
 
         console.log('Add liquidity inputs:', inputs);
 
-        const aleoTransaction = Transaction.createTransaction(
-          publicKey,
-          WalletAdapterNetwork.TestnetBeta,
-          PROGRAM_ID,
-          'add_liquidity',
+        const options: TransactionOptions = {
+          program: PROGRAM_ID,
+          function: 'add_liquidity',
           inputs,
-          5_000_000,
-          false
-        );
+          fee: 5_000_000,
+        };
 
-        const txId = await requestTransaction(aleoTransaction);
+        const result = await executeTransaction(options);
+        const txId = result?.transactionId;
         console.log('Add liquidity submitted:', txId);
         return txId;
       } catch (err) {
@@ -416,7 +406,7 @@ export function useZKPerp() {
         setLoading(false);
       }
     },
-    [publicKey, requestTransaction]
+    [address, executeTransaction]
   );
 
   // Remove liquidity from the pool
@@ -426,7 +416,7 @@ export function useZKPerp() {
       lpAmountToWithdraw: bigint,
       expectedUsdc: bigint
     ) => {
-      if (!publicKey || !requestTransaction) {
+      if (!address || !executeTransaction) {
         throw new Error('Wallet not connected');
       }
 
@@ -444,17 +434,15 @@ export function useZKPerp() {
 
         console.log('Remove liquidity inputs:', inputs);
 
-        const aleoTransaction = Transaction.createTransaction(
-          publicKey,
-          WalletAdapterNetwork.TestnetBeta,
-          PROGRAM_ID,
-          'remove_liquidity',
+        const options: TransactionOptions = {
+          program: PROGRAM_ID,
+          function: 'remove_liquidity',
           inputs,
-          5_000_000,
-          false
-        );
+          fee: 5_000_000,
+        };
 
-        const txId = await requestTransaction(aleoTransaction);
+        const result = await executeTransaction(options);
+        const txId = result?.transactionId;
         console.log('Remove liquidity submitted:', txId);
         return txId;
       } catch (err) {
@@ -466,12 +454,12 @@ export function useZKPerp() {
         setLoading(false);
       }
     },
-    [publicKey, requestTransaction]
+    [address, executeTransaction]
   );
 
   // Fetch user's position records
   const fetchPositions = useCallback(async (): Promise<Position[]> => {
-    if (!publicKey || !requestRecords) {
+    if (!address || !requestRecords) {
       return [];
     }
 
@@ -516,7 +504,7 @@ export function useZKPerp() {
       console.error('Fetch positions error:', err);
       return [];
     }
-  }, [publicKey, requestRecords]);
+  }, [address, requestRecords]);
 
   return {
     openPosition,

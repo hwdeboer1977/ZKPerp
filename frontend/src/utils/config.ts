@@ -8,8 +8,9 @@
 // ============================================================================
 
 export const PROGRAM_IDS = {
-  ZKPERP: 'zkperp_v4.aleo',
-  USDC: 'mock_usdc_0128.aleo',
+  ZKPERP: 'zkperp_v6.aleo',
+  USDC: 'test_usdcx_stablecoin.aleo',
+  USDCX_BRIDGE: 'test_usdcx_bridge.aleo',
 } as const;
 
 // ============================================================================
@@ -37,6 +38,7 @@ export const NETWORK_CONFIG = {
 
 export const ADDRESS_LIST = {
   ADMIN_ADDRESS: 'aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0',
+  // TODO: Update this after deploying zkperp_v6.aleo - this is the program's on-chain address
   ZK_PERP_ADDRESS: 'aleo1nxzhwc6y2cw6ymlaq80xaqem25mkltn37lpzr9mjf6gplmjcjq8qnrefmc',
   MOCK_USDC_ADDRESS: '',
 } as const;

@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
+import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import { useZKPerp } from '@/hooks/useZKPerp';
 import { parseUsdc, formatUsdc } from '@/utils/aleo';
 
@@ -27,7 +27,7 @@ export function AddLiquidity({ currentLiquidity, onSuccess }: Props) {
       setTxHash(null);
 
       const hash = await addLiquidity(parsedAmount);
-      setTxHash(hash);
+      setTxHash(hash ?? null);
       setAmount('');
       
       // Trigger refresh after a delay

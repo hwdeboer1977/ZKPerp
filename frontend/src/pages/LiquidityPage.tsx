@@ -1,10 +1,12 @@
 import { useState, useCallback, useEffect } from 'react';
-import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
-import { Transaction, WalletAdapterNetwork } from '@demox-labs/aleo-wallet-adapter-base';
+import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
+import type { TransactionOptions } from '@provablehq/aleo-types';
 import { useZKPerp } from '@/hooks/useZKPerp';
 import { useLPTokens, formatLPTokens } from '@/hooks/useLPTokens';
 import { formatUsdc, parseUsdc, USDC_PROGRAM_ID } from '@/utils/aleo';
 import { ADDRESS_LIST } from '../utils/config';
+import { useTransaction } from '@/hooks/useTransaction';
+import { TransactionStatus } from '@/components/TransactionStatus';
 
 interface Props {
   poolLiquidity: bigint;
@@ -14,9 +16,10 @@ interface Props {
 }
 
 export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Props) {
-  const { publicKey, requestTransaction, connected } = useWallet();
+  const { address, connected } = useWallet();
   const { addLiquidity, removeLiquidity, loading, error, clearError } = useZKPerp();
   const { lpTokens, totalLP, loading: lpLoading, refresh: refreshLP } = useLPTokens();
+  const approveTx = useTransaction();
 
   const [depositAmount, setDepositAmount] = useState('');
   const [withdrawAmount, setWithdrawAmount] = useState('');
@@ -24,65 +27,39 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
   const [withdrawTxHash, setWithdrawTxHash] = useState<string | null>(null);
   const [withdrawLoading, setWithdrawLoading] = useState(false);
   const [withdrawError, setWithdrawError] = useState<string | null>(null);
-  
-  // Approve state
-  const [approveLoading, setApproveLoading] = useState(false);
-  const [approveSuccess, setApproveSuccess] = useState(false);
-  const [approveError, setApproveError] = useState<string | null>(null);
 
-  // Approve ZKPerp to spend USDC
- const handleApprove = useCallback(async () => {
-  if (!publicKey || !requestTransaction) {
-    console.error('Missing wallet connection:', { publicKey, requestTransaction: !!requestTransaction });
-    return;
-  }
+  // Approve ZKPerp to spend USDCx
+  const handleApprove = useCallback(async () => {
+    if (!address) return;
 
-  setApproveLoading(true);
-  setApproveError(null);
-  setApproveSuccess(false);
+    try {
+      // Approve 50,000 USDCx (50000 * 10^6)
+      const approveAmount = '50000000000u128';
 
-  try {
-    // Approve 50,000 USDC (50000 * 10^6)
-    const approveAmount = '50000000000u128';
+      const inputs = [
+        ADDRESS_LIST.ZK_PERP_ADDRESS,     // spender (zkperp contract address)
+        approveAmount,  // amount to approve
+      ];
 
-    const inputs = [
-      ADDRESS_LIST.ZK_PERP_ADDRESS,     // spender (zkperp contract address)
-      approveAmount,  // amount to approve
-    ];
+      console.log('=== APPROVE DEBUG ===');
+      console.log('Public Key:', address);
+      console.log('USDC Program ID:', USDC_PROGRAM_ID);
+      console.log('Spender (ZKPerp):', ADDRESS_LIST.ZK_PERP_ADDRESS);
+      console.log('Amount:', approveAmount);
 
-    console.log('=== APPROVE DEBUG ===');
-    console.log('Public Key:', publicKey);
-    console.log('USDC Program ID:', USDC_PROGRAM_ID);
-    console.log('Spender (ZKPerp):', ADDRESS_LIST.ZK_PERP_ADDRESS);
-    console.log('Amount:', approveAmount);
-    console.log('Inputs array:', inputs);
+      const options: TransactionOptions = {
+        program: USDC_PROGRAM_ID,
+        function: 'approve_public',
+        inputs,
+        fee: 1_000_000,
+      };
 
-    const aleoTransaction = Transaction.createTransaction(
-      publicKey,
-      WalletAdapterNetwork.TestnetBeta,
-      USDC_PROGRAM_ID,
-      'approve',
-      inputs,
-      1_000_000, // fee
-      false
-    );
-
-    console.log('Transaction object:', JSON.stringify(aleoTransaction, null, 2));
-
-    const txId = await requestTransaction(aleoTransaction);
-    console.log('Approve transaction submitted:', txId);
-    setApproveSuccess(true);
-  } catch (err) {
-    console.error('=== APPROVE ERROR ===');
-    console.error('Error object:', err);
-    console.error('Error type:', typeof err);
-    console.error('Error message:', err instanceof Error ? err.message : String(err));
-    console.error('Error stack:', err instanceof Error ? err.stack : 'N/A');
-    setApproveError(err instanceof Error ? err.message : 'Approval failed');
-  } finally {
-    setApproveLoading(false);
-  }
-}, [publicKey, requestTransaction]);
+      await approveTx.execute(options);
+    } catch (err) {
+      console.error('=== APPROVE ERROR ===');
+      console.error('Error:', err);
+    }
+  }, [address, approveTx]);
 
   // Fetch LP tokens when connected
   useEffect(() => {
@@ -106,7 +83,7 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
       clearError();
       setTxHash(null);
       const hash = await addLiquidity(parsedAmount);
-      setTxHash(hash);
+      setTxHash(hash ?? null);
       setDepositAmount('');
       setTimeout(() => {
         onRefresh();
@@ -138,7 +115,7 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
       const expectedUsdc = (lpAmountToWithdraw * poolLiquidity) / (totalLP + BigInt(1));
 
       const hash = await removeLiquidity(lpToken, lpAmountToWithdraw, expectedUsdc);
-      setWithdrawTxHash(hash);
+     setWithdrawTxHash(hash ?? null);
       setWithdrawAmount('');
       
       setTimeout(() => {
@@ -215,23 +192,27 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
           <div className="mb-4 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
             <div className="flex items-center justify-between mb-2">
               <div>
-                <p className="text-sm font-medium text-blue-400">Step 1: Approve USDC</p>
-                <p className="text-xs text-gray-400">Allow ZKPerp to use your USDC</p>
+                <p className="text-sm font-medium text-blue-400">Step 1: Approve USDCx</p>
+                <p className="text-xs text-gray-400">Allow ZKPerp to use your USDCx</p>
               </div>
-              {approveSuccess && (
+              {approveTx.status === 'accepted' && (
                 <span className="text-xs bg-zkperp-green/20 text-zkperp-green px-2 py-1 rounded">✓ Approved</span>
               )}
             </div>
             <button
               onClick={handleApprove}
-              disabled={!connected || approveLoading}
+              disabled={!connected || approveTx.status === 'submitting' || approveTx.status === 'pending'}
               className="w-full py-2 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/50 disabled:opacity-50 rounded-lg text-sm font-medium text-blue-400 transition-colors"
             >
-              {approveLoading ? 'Approving...' : approveSuccess ? 'Approved ✓' : 'Approve USDC (50,000)'}
+              {approveTx.status === 'submitting' ? 'Submitting...' : approveTx.status === 'pending' ? 'Pending...' : approveTx.status === 'accepted' ? 'Approved ✓' : 'Approve USDCx (50,000)'}
             </button>
-            {approveError && (
-              <p className="text-red-400 text-xs mt-2">{approveError}</p>
-            )}
+            <TransactionStatus
+              status={approveTx.status}
+              tempTxId={approveTx.tempTxId}
+              onChainTxId={approveTx.onChainTxId}
+              error={approveTx.error}
+              onDismiss={approveTx.reset}
+            />
           </div>
 
           <div className="space-y-4">

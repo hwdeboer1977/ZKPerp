@@ -1,8 +1,10 @@
 import { useState, useCallback } from 'react';
-import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
-import { Transaction, WalletAdapterNetwork } from '@demox-labs/aleo-wallet-adapter-base';
+import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
+import type { TransactionOptions } from '@provablehq/aleo-types';
 import { formatPrice, formatUsdc } from '@/utils/aleo';
 import { PROGRAM_IDS, ADDRESS_LIST } from '../utils/config';
+import { useTransaction } from '@/hooks/useTransaction';
+import { TransactionStatus } from '@/components/TransactionStatus';
 
 const PROGRAM_ID = PROGRAM_IDS.ZKPERP;
 
@@ -18,22 +20,16 @@ interface Props {
 }
 
 export function AdminPage({ currentPrice, oracleSet, poolLiquidity, longOI, shortOI, onRefresh }: Props) {
-  const { publicKey, requestTransaction, connected } = useWallet();
+  const { address, connected } = useWallet();
+  const tx = useTransaction();
   
   const [priceInput, setPriceInput] = useState('100000');
-  const [loading, setLoading] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
-  const isAdmin = publicKey === ADMIN_ADDRESS;
+  const isAdmin = address === ADMIN_ADDRESS;
 
   // Update Oracle Price
   const handleUpdatePrice = useCallback(async () => {
-    if (!publicKey || !requestTransaction) return;
-
-    setLoading('price');
-    setError(null);
-    setSuccess(null);
+    if (!address) return;
 
     try {
       const priceValue = parseFloat(priceInput);
@@ -52,28 +48,19 @@ export function AdminPage({ currentPrice, oracleSet, poolLiquidity, longOI, shor
 
       console.log('Update price inputs:', inputs);
 
-      const aleoTransaction = Transaction.createTransaction(
-        publicKey,
-        WalletAdapterNetwork.TestnetBeta,
-        PROGRAM_ID,
-        'update_price',
+      const options: TransactionOptions = {
+        program: PROGRAM_ID,
+        function: 'update_price',
         inputs,
-        1_000_000,
-        false
-      );
+        fee: 1_000_000,
+      };
 
-      const txId = await requestTransaction(aleoTransaction);
-      console.log('Update price submitted:', txId);
-      setSuccess(`Price updated to $${priceValue.toLocaleString()}`);
-      
-      setTimeout(onRefresh, 5000);
+      await tx.execute(options);
+      setTimeout(onRefresh, 10000);
     } catch (err) {
       console.error('Update price failed:', err);
-      setError(err instanceof Error ? err.message : 'Failed to update price');
-    } finally {
-      setLoading(null);
     }
-  }, [publicKey, requestTransaction, priceInput, onRefresh]);
+  }, [address, priceInput, onRefresh, tx]);
 
   // Quick price buttons
   const quickPrices = [
@@ -158,10 +145,10 @@ export function AdminPage({ currentPrice, oracleSet, poolLiquidity, longOI, shor
               </div>
               <button
                 onClick={handleUpdatePrice}
-                disabled={!connected || loading === 'price'}
+                disabled={!connected || tx.status === 'submitting' || tx.status === 'pending'}
                 className="px-6 py-3 bg-zkperp-accent hover:bg-zkperp-accent/80 disabled:bg-zkperp-accent/30 rounded-lg font-medium text-white transition-colors whitespace-nowrap"
               >
-                {loading === 'price' ? 'Updating...' : 'Update Price'}
+                {tx.status === 'submitting' ? 'Submitting...' : tx.status === 'pending' ? 'Pending...' : 'Update Price'}
               </button>
             </div>
           </div>
@@ -213,18 +200,14 @@ export function AdminPage({ currentPrice, oracleSet, poolLiquidity, longOI, shor
         </div>
       </div>
 
-      {/* Success/Error Messages */}
-      {success && (
-        <div className="bg-zkperp-green/10 border border-zkperp-green/30 rounded-xl p-4 mb-6">
-          <p className="text-zkperp-green">✓ {success}</p>
-        </div>
-      )}
-      
-      {error && (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 mb-6">
-          <p className="text-red-400">✗ {error}</p>
-        </div>
-      )}
+      {/* Transaction Status */}
+      <TransactionStatus
+        status={tx.status}
+        tempTxId={tx.tempTxId}
+        onChainTxId={tx.onChainTxId}
+        error={tx.error}
+        onDismiss={tx.reset}
+      />
 
       {/* Protocol Info */}
       <div className="grid md:grid-cols-2 gap-6">
@@ -259,11 +242,11 @@ export function AdminPage({ currentPrice, oracleSet, poolLiquidity, longOI, shor
           <div className="space-y-3 text-sm">
             <div>
               <p className="text-gray-400 mb-1">ZKPerp Contract</p>
-              <code className="text-xs text-zkperp-accent break-all">zkperp_v3.aleo</code>
+              <code className="text-xs text-zkperp-accent break-all">zkperp_v6.aleo</code>
             </div>
             <div>
               <p className="text-gray-400 mb-1">Mock USDC</p>
-              <code className="text-xs text-zkperp-accent break-all">mock_usdc_0128.aleo</code>
+              <code className="text-xs text-zkperp-accent break-all">test_usdcx_stablecoin.aleo</code>
             </div>
             <div>
               <p className="text-gray-400 mb-1">Admin/Orchestrator</p>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
-import { Transaction, WalletAdapterNetwork } from '@demox-labs/aleo-wallet-adapter-base';
+import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
+import type { TransactionOptions } from '@provablehq/aleo-types';
 import { formatUsdc, formatPrice } from '@/utils/aleo';
 
 interface Props {
@@ -13,8 +13,8 @@ interface Props {
 // Contract constants
 const LIQUIDATION_THRESHOLD_PERCENT = 1; // 1%
 const LIQUIDATION_REWARD_BPS = 5000n; // 0.5%
-const PROGRAM_ID = 'zkperp_v4.aleo';
-const NETWORK = WalletAdapterNetwork.TestnetBeta;
+const PROGRAM_ID = 'zkperp_v6.aleo';
+
 const ALEO_API = 'https://api.explorer.provable.com/v1/testnet';
 
 interface PositionData {
@@ -26,7 +26,7 @@ interface PositionData {
 }
 
 export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: Props) {
-  const { connected, publicKey, requestTransaction } = useWallet();
+ const { connected, executeTransaction } = useWallet();
   
   // Input state
   const [txId, setTxId] = useState('');
@@ -357,7 +357,7 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
 
   // Execute liquidation
   const handleLiquidate = async () => {
-    if (!connected || !requestTransaction || !calculation?.isLiquidatable || !position) {
+    if (!connected || !executeTransaction || !calculation?.isLiquidatable || !position) {
       return;
     }
 
@@ -383,17 +383,15 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
 
       console.log('Liquidation inputs:', inputs);
 
-      const aleoTransaction = Transaction.createTransaction(
-        publicKey!,
-        NETWORK,
-        PROGRAM_ID,
-        'liquidate',
+      const options: TransactionOptions = {
+        program: PROGRAM_ID,
+        function: 'liquidate',
         inputs,
-        Math.floor(2_000_000),
-        false
-      );
+        fee: 2_000_000,
+      };
 
-      const resultTxId = await requestTransaction(aleoTransaction);
+      const result = await executeTransaction(options);
+      const resultTxId = result?.transactionId;
       console.log('Liquidation submitted:', resultTxId);
       
       setSuccess(`Liquidation submitted! TX: ${resultTxId}`);

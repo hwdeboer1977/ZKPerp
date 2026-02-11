@@ -1,19 +1,19 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
+import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import { USDC_PROGRAM_ID } from '@/utils/aleo';
 import { NETWORK_CONFIG } from '../utils/config';
 
 const API_BASE = NETWORK_CONFIG.EXPLORER_API;
 
 export function useBalance() {
-  const { publicKey, connected } = useWallet();
+  const { address, connected } = useWallet();
   const [publicBalance, setPublicBalance] = useState<bigint | null>(null);
   const [usdcBalance, setUsdcBalance] = useState<bigint | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchBalance = useCallback(async () => {
-    if (!publicKey || !connected) {
+    if (!address || !connected) {
       setPublicBalance(null);
       setUsdcBalance(null);
       return;
@@ -26,7 +26,7 @@ export function useBalance() {
       // Fetch ALEO balance
       try {
         const aleoResponse = await fetch(
-          `${API_BASE}/program/credits.aleo/mapping/account/${publicKey}`
+          `${API_BASE}/program/credits.aleo/mapping/account/${address}`
         );
 
         if (aleoResponse.ok) {
@@ -47,7 +47,7 @@ export function useBalance() {
       // Fetch mock USDC balance
       try {
         const usdcResponse = await fetch(
-          `${API_BASE}/program/${USDC_PROGRAM_ID}/mapping/balances/${publicKey}`
+          `${API_BASE}/program/${USDC_PROGRAM_ID}/mapping/balances/${address}`
         );
 
         if (usdcResponse.ok) {
@@ -71,7 +71,7 @@ export function useBalance() {
     } finally {
       setLoading(false);
     }
-  }, [publicKey, connected]);
+  }, [address, connected]);
 
   // Fetch on connect/address change
   useEffect(() => {

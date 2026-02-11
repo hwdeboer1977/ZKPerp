@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
+import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import { PROGRAM_IDS, NETWORK_CONFIG } from '../utils/config';
 
 
@@ -62,14 +62,14 @@ function parsePositionPlaintext(plaintext: string): Omit<ScannedPosition, 'ciphe
 }
 
 export function usePositionScanner() {
-  const { publicKey, decrypt } = useWallet();
+  const { address, decrypt } = useWallet();
   const [positions, setPositions] = useState<ScannedPosition[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Scan for Position records by looking at recent transactions
   const scanPositions = useCallback(async () => {
-    if (!publicKey || !decrypt) {
+    if (!address || !decrypt) {
       setError('Wallet not connected or decrypt not available');
       return [];
     }
@@ -90,7 +90,7 @@ export function usePositionScanner() {
       // For now, we'll try to get the transaction history for the user's address
       // and look for open_position transactions
       const txResponse = await fetch(
-        `${API_URL}/address/${publicKey}/transactions?page=0&limit=50`
+        `${API_URL}/address/${address}/transactions?page=0&limit=50`
       );
 
       if (!txResponse.ok) {
@@ -108,7 +108,7 @@ export function usePositionScanner() {
       // Look for open_position transactions and extract record ciphertexts
       for (const tx of transactions) {
         if (tx.type === 'execute') {
-          // Look for zkperp_v3.aleo/open_position transitions
+          // Look for zkperp_v6.aleo/open_position transitions
           for (const transition of tx.execution?.transitions || []) {
             if (transition.program === PROGRAM_ID && 
                 transition.function === 'open_position') {
@@ -123,7 +123,7 @@ export function usePositionScanner() {
                     // Check if it's a Position record (has position_id field)
                     if (decrypted && decrypted.includes('position_id')) {
                       const parsed = parsePositionPlaintext(decrypted);
-                      if (parsed && parsed.owner === publicKey) {
+                      if (parsed && parsed.owner === address) {
                         foundPositions.push({
                           ...parsed,
                           ciphertext: output.value,
@@ -151,11 +151,11 @@ export function usePositionScanner() {
     } finally {
       setLoading(false);
     }
-  }, [publicKey, decrypt]);
+  }, [address, decrypt]);
 
   // Manual decrypt function for a specific ciphertext
   const decryptPosition = useCallback(async (ciphertext: string): Promise<ScannedPosition | null> => {
-    if (!decrypt || !publicKey) {
+    if (!decrypt || !address) {
       setError('Wallet not connected');
       return null;
     }
@@ -179,7 +179,7 @@ export function usePositionScanner() {
       setError(err instanceof Error ? err.message : 'Failed to decrypt');
       return null;
     }
-  }, [decrypt, publicKey]);
+  }, [decrypt, address]);
 
   return {
     positions,

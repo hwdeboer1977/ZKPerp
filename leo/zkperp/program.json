@@ -1,12 +1,12 @@
 {
-  "program": "zkperp_v4.aleo",
+  "program": "zkperp_v6.aleo",
   "version": "0.1.0",
   "description": "",
   "license": "MIT",
   "leo": "3.4.0",
      "dependencies": [
         {
-            "name": "mock_usdc_0128.aleo",
+            "name": "test_usdcx_stablecoin.aleo",
             "location": "network",
             "network": "testnet",
             "path": null,

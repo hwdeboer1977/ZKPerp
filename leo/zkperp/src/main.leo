@@ -1,12 +1,11 @@
 // ZKPerp - Privacy-Preserving Perpetual DEX on Aleo
-// With mock_usdc token integration
+// Migrated to USDCx (test_usdcx_stablecoin.aleo) - Circle's official stablecoin on Aleo
 // Option D: Dual Record System for Liquidations
-// UPDATED: Admin/Orchestrator stored in mappings (configurable after deploy)
-// FIXED: open_block now stored in mapping (accessible in finalize)
+// Admin set via constructor (program_owner at deploy time)
 
-import mock_usdc_0128.aleo;
+import test_usdcx_stablecoin.aleo;
 
-program zkperp_v4.aleo {
+program zkperp_v6.aleo {
 
     // ═══════════════════════════════════════════════════════════════════
     // LIQUIDATION ARCHITECTURE (Option D - Dual Record)
@@ -21,15 +20,18 @@ program zkperp_v4.aleo {
     //   - Orchestrator to liquidate unhealthy positions
     //   - Full privacy (no public position data)
     //
-    // SETUP AFTER DEPLOY:
-    //   1. Call initialize_roles() - first caller becomes admin & orchestrator
-    //   2. Optionally call transfer_orchestrator() to set a different orchestrator
+    // ADMIN SETUP:
+    //   Admin is set automatically at deploy via constructor.
+    //   Admin can transfer roles via transfer_oracle_admin() / transfer_orchestrator().
     //
     // ═══════════════════════════════════════════════════════════════════
 
-    // The constructor is configured to prevent upgrades.
-    @noupgrade
-    async constructor() {}
+    // Set admin at deployment - program_owner becomes admin & orchestrator
+    @custom
+    async constructor() {
+        Mapping::set(roles, 0u8, self.program_owner);  // Oracle admin
+        Mapping::set(roles, 1u8, self.program_owner);  // Orchestrator
+    }
 
     // ============== CONSTANTS ==============
     
@@ -42,7 +44,7 @@ program zkperp_v4.aleo {
 
     // ============== ROLE MAPPINGS ==============
     
-    // Admin roles stored in mappings (set after deploy)
+    // Admin roles stored in mappings (set via constructor)
     // Key 0u8 = oracle admin (can update prices)
     // Key 1u8 = orchestrator (receives LiquidationAuth records)
     mapping roles: u8 => address;
@@ -113,7 +115,7 @@ program zkperp_v4.aleo {
 
     // ============== ROLE MANAGEMENT ==============
 
-    /// Initialize roles - can only be called once
+    /// Initialize roles - fallback if constructor didn't set them
     /// First caller becomes both oracle_admin and orchestrator
     async transition initialize_roles() -> Future {
         return finalize_initialize_roles(self.caller);
@@ -160,7 +162,8 @@ program zkperp_v4.aleo {
     ) -> (LPToken, Future) {
         assert(deposit_amount >= 100u128);
         
-        let transfer_future: Future = mock_usdc_0128.aleo/transfer_from(
+        // USDCx: transfer_from_public(from, to, amount)
+        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_from_public(
             self.caller,
             self.address,
             deposit_amount
@@ -212,7 +215,8 @@ program zkperp_v4.aleo {
     ) -> (LPToken, Future) {
         assert(lp_token.amount >= amount_to_burn);
         
-        let transfer_future: Future = mock_usdc_0128.aleo/transfer_public(
+        // USDCx: transfer_public(to, amount) - sends from program's balance
+        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(
             lp_token.owner,
             expected_usdc
         );
@@ -281,7 +285,8 @@ program zkperp_v4.aleo {
         let collateral_after_fee: u64 = collateral_u64 - opening_fee;
         
         // Transfer collateral from user to pool
-        let transfer_future: Future = mock_usdc_0128.aleo/transfer_from(
+        // USDCx: transfer_from_public(from, to, amount)
+        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_from_public(
             self.caller,
             self.address,
             collateral
@@ -307,9 +312,6 @@ program zkperp_v4.aleo {
             entry_price: entry_price,
             open_block: 0u32,  // Placeholder - actual value in mapping
         };
-        
-        // NOTE: LiquidationAuth record is created in finalize where we can read orchestrator from mapping
-        // This is a simplification - in production you might need a different approach
         
         let f: Future = finalize_open_position(
             transfer_future,
@@ -380,7 +382,6 @@ program zkperp_v4.aleo {
         assert(new_short_oi <= max_oi);
         
         // Store the open block for this position
-        // block.height is only available in finalize, so we store it in a mapping
         Mapping::set(position_open_blocks, position_id, block.height);
         
         Mapping::set(pool_state, 0field, PoolState {
@@ -400,9 +401,9 @@ program zkperp_v4.aleo {
     ) -> Future {
         assert_eq(position.owner, self.signer);
         
-        // Transfer USDC from zkperp.aleo's balance to trader
-        // When zkperp.aleo calls this, self.caller in the USDC contract will be zkperp.aleo
-        let transfer_future: Future = mock_usdc_0128.aleo/transfer_public(
+        // Transfer USDCx from zkperp's balance to trader
+        // USDCx: transfer_public(to, amount)
+        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(
             position.owner,      // to: trader
             expected_payout      // amount
         );
@@ -510,12 +511,7 @@ program zkperp_v4.aleo {
 
     // ============== LIQUIDATION ==============
     
-    // NOTE: Without hardcoded ORCHESTRATOR, we need a different approach for liquidations
-    // Option 1: Anyone can liquidate (permissionless) - simpler and more decentralized
-    // Option 2: Store liquidation data in mapping, orchestrator calls a separate function
-    
-    // Using Option 1: Permissionless liquidation
-    // Anyone can liquidate unhealthy positions if they know the position details
+    // Permissionless liquidation - anyone can liquidate unhealthy positions
     
     async transition liquidate(
         public position_id: field,
@@ -526,7 +522,8 @@ program zkperp_v4.aleo {
         public liquidator_reward: u128,
     ) -> Future {
         // Transfer reward to the caller (liquidator)
-        let transfer_future: Future = mock_usdc_0128.aleo/transfer_public(
+        // USDCx: transfer_public(to, amount)
+        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(
             self.caller,
             liquidator_reward
         );

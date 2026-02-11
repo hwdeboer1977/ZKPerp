@@ -1,7 +1,6 @@
 import { useState, useCallback } from 'react';
-import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
+import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import { PROGRAM_IDS } from '../utils/config';
-
 
 const PROGRAM_ID = PROGRAM_IDS.ZKPERP;
 
@@ -10,18 +9,18 @@ export interface LPTokenRecord {
   owner: string;
   amount: bigint;
   spent: boolean;
-  rawRecord: any; // Keep the raw record for transaction building
+  rawRecord: any;
 }
 
 export function useLPTokens() {
-  const { publicKey, requestRecords } = useWallet();
+  const { address, requestRecords } = useWallet();
   const [lpTokens, setLpTokens] = useState<LPTokenRecord[]>([]);
   const [totalLP, setTotalLP] = useState<bigint>(BigInt(0));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchLPTokens = useCallback(async () => {
-    if (!publicKey || !requestRecords) {
+    if (!address || !requestRecords) {
       setLpTokens([]);
       setTotalLP(BigInt(0));
       return;
@@ -31,29 +30,25 @@ export function useLPTokens() {
     setError(null);
 
     try {
-      // Request all records from the zkperp program
       const records = await requestRecords(PROGRAM_ID);
-      
       console.log('Fetched records:', records);
 
-      // Filter for LPToken records that aren't spent
       const lpRecords: LPTokenRecord[] = [];
       let total = BigInt(0);
 
-      for (const record of records) {
-        // Check if this is an LPToken record
+      records.forEach((record: any) => {
         if (record.recordName === 'LPToken' && !record.spent) {
           const amount = parseLeoU64(record.data?.amount);
           lpRecords.push({
             id: record.id || record.nonce || '',
-            owner: record.owner || publicKey,
+            owner: record.owner || address,
             amount,
             spent: record.spent || false,
             rawRecord: record,
           });
           total += amount;
         }
-      }
+      });
 
       setLpTokens(lpRecords);
       setTotalLP(total);
@@ -63,7 +58,7 @@ export function useLPTokens() {
     } finally {
       setLoading(false);
     }
-  }, [publicKey, requestRecords]);
+  }, [address, requestRecords]);
 
   return {
     lpTokens,
@@ -74,13 +69,9 @@ export function useLPTokens() {
   };
 }
 
-// Parse Leo u64 value from record data
 function parseLeoU64(value: string | undefined): bigint {
   if (!value) return BigInt(0);
-  
-  // Remove quotes and type suffix
   const cleaned = value.replace(/['"]/g, '').replace(/u64\.private$/, '').replace(/u64$/, '');
-  
   try {
     return BigInt(cleaned);
   } catch {
@@ -88,7 +79,6 @@ function parseLeoU64(value: string | undefined): bigint {
   }
 }
 
-// Format LP tokens for display (6 decimals like USDC)
 export function formatLPTokens(amount: bigint): string {
   const value = Number(amount) / 1_000_000;
   return value.toLocaleString('en-US', {

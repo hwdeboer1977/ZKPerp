@@ -122,7 +122,7 @@ export function MarketInfo({
         <div className="bg-zkperp-dark rounded-lg p-4 space-y-2">
           <h4 className="text-xs font-medium text-gray-500 uppercase">Contract</h4>
           <div className="flex items-center justify-between">
-            <code className="text-xs text-zkperp-accent">zkperp_v3.aleo</code>
+            <code className="text-xs text-zkperp-accent">zkperp_v6.aleo</code>
             <span className="text-xs text-zkperp-green">Testnet</span>
           </div>
         </div>

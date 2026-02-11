@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
+import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import { useZKPerp, Position } from '@/hooks/useZKPerp';
 import { formatUsdc, formatPrice, calculatePnL, calculateLeverage } from '@/utils/aleo';
 
@@ -7,7 +7,7 @@ interface Props {
   currentPrice: bigint;
 }
 
-const PROGRAM_ID = 'zkperp_v4.aleo';
+const PROGRAM_ID = 'zkperp_v6.aleo';
 const ALEO_API = 'https://api.explorer.provable.com/v1/testnet';
 
 export function PositionDisplay({ currentPrice }: Props) {

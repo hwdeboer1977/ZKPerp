@@ -1,10 +1,10 @@
-import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
-import { WalletMultiButton } from '@demox-labs/aleo-wallet-adapter-reactui';
+import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
+import { WalletMultiButton } from '@provablehq/aleo-wallet-adaptor-react-ui';
 import { truncateAddress } from '@/utils/aleo';
 import { useBalance, formatAleo, formatMockUsdc } from '@/hooks/useBalance';
 
 export function Header() {
-  const { connected, publicKey } = useWallet();
+  const { connected, address } = useWallet();
   const { publicBalance, usdcBalance, loading: balanceLoading, refresh } = useBalance();
 
   return (
@@ -35,7 +35,7 @@ export function Header() {
       </div>
 
       {/* Connected address & balances bar */}
-      {connected && publicKey && (
+      {connected && address && (
         <div className="border-t border-zkperp-border bg-zkperp-dark/50 py-2">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between flex-wrap gap-2">
@@ -43,7 +43,7 @@ export function Header() {
               <div className="flex items-center gap-2 text-sm">
                 <span className="text-gray-500">Connected:</span>
                 <code className="text-zkperp-accent font-mono text-xs bg-zkperp-dark px-2 py-1 rounded">
-                  {truncateAddress(publicKey)}
+                  {truncateAddress(address)}
                 </code>
               </div>
               

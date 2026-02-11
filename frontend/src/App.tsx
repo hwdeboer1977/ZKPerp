@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
 import { AleoWalletProvider } from '@provablehq/aleo-wallet-adaptor-react';
 import { WalletModalProvider } from '@provablehq/aleo-wallet-adaptor-react-ui';
 import { ShieldWalletAdapter } from '@provablehq/aleo-wallet-adaptor-shield';
@@ -116,7 +116,6 @@ function AppContent() {
 
 function App() {
   return (
-    <BrowserRouter>
       <AleoWalletProvider
         wallets={[new ShieldWalletAdapter()]}
         autoConnect={false}
@@ -129,7 +128,6 @@ function App() {
           <AppContent />
         </WalletModalProvider>
       </AleoWalletProvider>
-    </BrowserRouter>
   );
 }
 

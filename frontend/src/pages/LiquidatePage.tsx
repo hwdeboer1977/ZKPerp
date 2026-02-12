@@ -388,6 +388,7 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
         function: 'liquidate',
         inputs,
         fee: 2_000_000,
+        privateFee: false,
       };
 
       const result = await executeTransaction(options);

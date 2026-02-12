@@ -52,6 +52,7 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
         function: 'approve_public',
         inputs,
         fee: 1_000_000,
+        privateFee: false,
       };
 
       await approveTx.execute(options);

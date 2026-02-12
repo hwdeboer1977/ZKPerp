@@ -1,12 +1,16 @@
 import { useState, useCallback } from 'react';
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
-import { useZKPerp } from '@/hooks/useZKPerp';
+import type { TransactionOptions } from '@provablehq/aleo-types';
+import { useTransaction } from '@/hooks/useTransaction';
+import { TransactionStatus } from '@/components/TransactionStatus';
 import {
   parseUsdc,
   formatUsdc,
   formatPrice,
   calculateLeverage,
   calculateLiquidationPrice,
+  generateNonce,
+  PROGRAM_ID,
   SCALE,
 } from '@/utils/aleo';
 
@@ -15,14 +19,13 @@ interface Props {
 }
 
 export function TradingWidget({ currentPrice }: Props) {
-  const { connected } = useWallet();
-  const { openPosition, loading, error, clearError } = useZKPerp();
+  const { address, connected } = useWallet();
+  const openTx = useTransaction();
 
   const [isLong, setIsLong] = useState(true);
   const [collateralInput, setCollateralInput] = useState('');
   const [sizeInput, setSizeInput] = useState('');
   const [slippagePercent, setSlippagePercent] = useState('0.5');
-  const [txHash, setTxHash] = useState<string | null>(null);
 
   const collateral = parseUsdc(collateralInput);
   const size = parseUsdc(sizeInput);
@@ -40,29 +43,42 @@ export function TradingWidget({ currentPrice }: Props) {
   const isValidLeverage = leverage > 0 && leverage <= 20;
   const isValidSize = size >= BigInt(100);
   const canTrade = connected && isValidLeverage && isValidSize && collateral > 0;
+  const isBusy = openTx.status === 'submitting' || openTx.status === 'pending';
 
   const handleSubmit = useCallback(async () => {
-    if (!canTrade) return;
+    if (!canTrade || !address) return;
 
     try {
-      clearError();
-      setTxHash(null);
+      const nonce = generateNonce();
       
-      const hash = await openPosition(
-        collateral,
-        size,
-        isLong,
-        currentPrice,
-        maxSlippage
-      );
-      
-      setTxHash(hash ?? null);
+      const inputs = [
+        collateral.toString() + 'u128',
+        size.toString() + 'u64',
+        isLong.toString(),
+        currentPrice.toString() + 'u64',
+        maxSlippage.toString() + 'u64',
+        nonce,
+        address,
+      ];
+
+      console.log('Open position inputs:', inputs);
+      console.log('PROGRAM_ID:', PROGRAM_ID);
+
+      const options: TransactionOptions = {
+        program: PROGRAM_ID,
+        function: 'open_position',
+        inputs,
+        fee: 5_000_000,
+        privateFee: false,
+      };
+
+      await openTx.execute(options);
       setCollateralInput('');
       setSizeInput('');
     } catch (err) {
       console.error('Trade failed:', err);
     }
-  }, [canTrade, collateral, size, isLong, currentPrice, maxSlippage, openPosition, clearError]);
+  }, [canTrade, address, collateral, size, isLong, currentPrice, maxSlippage, openTx]);
 
   const setLeverageQuick = (targetLeverage: number) => {
     if (collateral > BigInt(0)) {
@@ -205,38 +221,40 @@ export function TradingWidget({ currentPrice }: Props) {
           </div>
         </div>
 
-        {/* Error display */}
-        {error && (
-          <div className="bg-zkperp-red/10 border border-zkperp-red/30 rounded-lg p-3">
-            <p className="text-zkperp-red text-sm">{error}</p>
-          </div>
-        )}
-
-        {/* Success display */}
-        {txHash && (
-          <div className="bg-zkperp-green/10 border border-zkperp-green/30 rounded-lg p-3">
-            <p className="text-zkperp-green text-sm">Transaction submitted!</p>
-            <code className="text-xs text-gray-400 break-all">{txHash}</code>
-          </div>
-        )}
+        {/* Transaction Status */}
+        <TransactionStatus
+          status={openTx.status}
+          tempTxId={openTx.tempTxId}
+          onChainTxId={openTx.onChainTxId}
+          error={openTx.error}
+          onDismiss={openTx.reset}
+        />
 
         {/* Submit Button */}
         <button
           onClick={handleSubmit}
-          disabled={!canTrade || loading}
+          disabled={!canTrade || isBusy}
           className={`w-full py-4 rounded-lg font-semibold text-white transition-all ${
             isLong
               ? 'bg-zkperp-green hover:bg-zkperp-green/80 disabled:bg-zkperp-green/30'
               : 'bg-zkperp-red hover:bg-zkperp-red/80 disabled:bg-zkperp-red/30'
           } disabled:cursor-not-allowed`}
         >
-          {loading ? (
+          {openTx.status === 'submitting' ? (
             <span className="flex items-center justify-center gap-2">
               <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
               </svg>
-              Processing...
+              Submitting...
+            </span>
+          ) : openTx.status === 'pending' ? (
+            <span className="flex items-center justify-center gap-2">
+              <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+              Confirming on-chain...
             </span>
           ) : !connected ? (
             'Connect Wallet'

@@ -2,19 +2,20 @@
 
 This document outlines the current limitations of ZKPerp and what would be needed for a production-ready deployment.
 
-**Current Version:** zkperp_v4.aleo with mock_usdc_0128.aleo
+**Current Version:** zkperp_v6.aleo with test_usdcx_stablecoin.aleo (official Aleo testnet USDCx)
 
 ---
 
 ## ✅ RESOLVED: Token Transfers
 
-**Status:** ✅ IMPLEMENTED
+**Status:** ✅ IMPLEMENTED (USDCx on Public Testnet)
 
-ZKPerp now integrates with `mock_usdc.aleo` for real token transfers:
-- LPs deposit/withdraw real USDC via `transfer_from`
-- Traders receive USDC payouts on `close_position`
+ZKPerp integrates with the official Aleo testnet stablecoin `test_usdcx_stablecoin.aleo`:
+- LPs deposit/withdraw real USDCx via `transfer_from_public`
+- Traders receive USDCx payouts on `close_position`
 - Liquidators receive rewards via `transfer_public`
-- Pool holds actual USDC balance
+- Pool holds actual USDCx balance
+- Users obtain USDCx by bridging USDC from Sepolia testnet
 
 ---
 
@@ -55,6 +56,44 @@ open_position() creates TWO records:
 ```
 
 See [LIQUIDATION_ARCHITECTURE.md](./LIQUIDATION_ARCHITECTURE.md) for full details.
+
+---
+
+## 🟡 NEW: Dust Record Accumulation
+
+**Status:** Partially Mitigated (frontend filtering) — Contract-level fix planned for v7
+
+**Problem:** When closing positions or removing liquidity, the contract returns "change" records with ~1% dust amounts (e.g., $0.001 LP tokens). These accumulate in the user's wallet and show up as phantom positions or LP entries.
+
+**Current Mitigation (Frontend):**
+```typescript
+const MIN_DUST = BigInt(10000); // $0.01 threshold
+if (amount < MIN_DUST) continue; // Skip dust records during decrypt
+```
+
+**Proposed Solution (v7 Contract):**
+- `add_liquidity_merge(existing_lp, amount)` — consumes old LP record + new deposit → returns single merged LP record
+- `open_position_merge(existing_dust, ...)` — similar merge for position dust records
+- Always 1 LP record and 1 position record per user
+- Eliminates need for frontend dust filtering
+- Better UX: 1 decrypt = 1 popup (Shield Wallet)
+
+```leo
+// Example: LP merge transition
+async transition add_liquidity_merge(
+    existing_lp: LPToken,           // Consume existing record
+    public deposit_amount: u128,     // New deposit
+    recipient: address,
+) -> (LPToken, Future) {
+    // Merge existing + new into single LP record
+    let merged_amount: u64 = existing_lp.amount + new_lp_amount;
+    let merged_token: LPToken = LPToken {
+        owner: recipient,
+        amount: merged_amount,
+    };
+    return (merged_token, finalize_add_liquidity_merge(...));
+}
+```
 
 ---
 
@@ -258,9 +297,11 @@ let result: u64 = a - capped_b;
 
 | Priority | Issue | Status | Effort | Impact |
 |----------|-------|--------|--------|--------|
-| ✅ Done | Token integration | RESOLVED | - | - |
+| ✅ Done | Token integration (USDCx) | RESOLVED | - | - |
 | ✅ Done | Oracle access control | RESOLVED | - | - |
 | ✅ Done | Liquidation mechanism | RESOLVED | - | - |
+| ✅ Done | Shield Wallet migration | RESOLVED | - | - |
+| 🟡 High | Dust record merge (v7) | Planned | Medium | UX — eliminates phantom records |
 | 🟡 High | Multi-orchestrator | Open | Medium | Decentralization |
 | 🟡 High | Admin controls | Open | Low | Operational necessity |
 | 🟡 High | Funding rate | Open | Medium | LP protection |
@@ -272,9 +313,9 @@ let result: u64 = a - capped_b;
 
 ## Summary
 
-**Current Status:** ✅ Core perpetual DEX with privacy, token integration, and liquidation system working!
+**Current Status:** ✅ Core perpetual DEX with privacy, USDCx token integration, Shield Wallet, and liquidation system working on Aleo public testnet!
 
-**For Testnet:** Need multi-orchestrator support + basic admin controls.
+**For Testnet:** Need record merge logic (v7) + multi-orchestrator support + basic admin controls.
 
 **For Mainnet:** All of the above + funding rates + LP protections + audits.
 

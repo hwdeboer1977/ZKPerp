@@ -1,4 +1,4 @@
-# ZKPerp - Privacy-First Perpetual Futures on Aleo 
+# ZKPerp - Privacy-First Perpetual Futures on Aleo
 
 <p align="center">
   <img src="./assets/zkperp_mask_icon.png" alt="ZKPerp Logo" width="200"/>
@@ -12,13 +12,12 @@
 
 ZKPerp is a decentralized perpetual futures trading platform built on Aleo that enables private leveraged trading of crypto assets. Unlike traditional DEX perpetuals where all position data is publicly visible on-chain, ZKPerp leverages Aleo's zero-knowledge proofs to keep trader positions completely private while maintaining trustless execution.
 
-
-
 ## 🎯 Overview
 
 ### The Privacy Problem in DeFi Trading
 
 Current perpetual DEXs (GMX, dYdX, Hyperliquid) expose all trading activity publicly:
+
 - 📊 Position sizes and entry prices visible to everyone
 - 🎯 Large traders get front-run by MEV bots
 - 📈 Competitors can track and copy trading strategies
@@ -26,13 +25,13 @@ Current perpetual DEXs (GMX, dYdX, Hyperliquid) expose all trading activity publ
 
 ### ZKPerp's Solution
 
-| Problem | Traditional DEX | ZKPerp |
-|---------|-----------------|--------|
-| Position visibility | Everyone sees your size/leverage | Encrypted in private records ✅ |
-| Entry price exposure | Public on-chain | Only you know ✅ |
-| Liquidation hunting | Calculable by anyone | Hidden from other traders ✅ |
-| Trading strategy | Fully transparent | Private execution ✅ |
-| Position front-running | Vulnerable to MEV | Intent is hidden ✅ |
+| Problem                | Traditional DEX                  | ZKPerp                          |
+| ---------------------- | -------------------------------- | ------------------------------- |
+| Position visibility    | Everyone sees your size/leverage | Encrypted in private records ✅ |
+| Entry price exposure   | Public on-chain                  | Only you know ✅                |
+| Liquidation hunting    | Calculable by anyone             | Hidden from other traders ✅    |
+| Trading strategy       | Fully transparent                | Private execution ✅            |
+| Position front-running | Vulnerable to MEV                | Intent is hidden ✅             |
 
 **Note on Oracle Updates:** Like all DEX perpetuals, oracle price updates are public by nature. However, ZKPerp mitigates oracle-based MEV through opening fees (0.1%), slippage protection parameters, and collateral requirements for trading.
 
@@ -43,11 +42,10 @@ Current perpetual DEXs (GMX, dYdX, Hyperliquid) expose all trading activity publ
 - 💧 **Zero Slippage**: Oracle-based pricing, no AMM curve
 - 💰 **Single-Sided LP**: Deposit USDC only, no impermanent loss from token pairs
 - 🚀 **Instant Liquidity**: Trade against the pool, no counterparty needed
-- 🔗 **Real Token Transfers**: Integrated with mock_usdc.aleo for actual USDC movements
+- 🔗 **Real Token Transfers**: Integrated with official Aleo testnet USDCx (`test_usdcx_stablecoin.aleo`)
 - 🛡️ **Dual-Record Liquidation**: Privacy-preserving liquidation via Option D (see below) architecture
 
 ## 🏗️ Architecture
-
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -59,15 +57,15 @@ Current perpetual DEXs (GMX, dYdX, Hyperliquid) expose all trading activity publ
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    Leo Wallet Adapter                        │
-│         (Transaction signing, Record decryption)             │
+│                    Shield Wallet Adapter                     │
+│    (Transaction signing, Record decryption, Public fees)    │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                   Aleo Blockchain                            │
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │                  zkperp_v4.aleo                        │  │
+│  │                  zkperp_v6.aleo                        │  │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌──────────────┐   │  │
 │  │  │  Positions  │  │  LP Tokens  │  │ Liquidation  │   │  │
 │  │  │  (private)  │  │  (private)  │  │    Auth      │   │  │
@@ -77,14 +75,16 @@ Current perpetual DEXs (GMX, dYdX, Hyperliquid) expose all trading activity publ
 │  │  └─────────────┘  └─────────────┘                     │  │
 │  └───────────────────────────────────────────────────────┘  │
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │              mock_usdc_0128.aleo                       │  │
-│  │         (ERC20-style token for testing)                │  │
+│  │            test_usdcx_stablecoin.aleo                 │  │
+│  │      (Official Aleo testnet USDCx stablecoin)         │  │
 │  └───────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
+
 A more detailed discussion on the limitations and liquidation architecture can be found here:
- - [LIMITATIONS.md](./LIMITATIONS.md)
- - [LIQUIDATION_ARCHITECTURE.md](./LIQUIDATION_ARCHITECTURE.md)
+
+- [LIMITATIONS.md](./LIMITATIONS.md)
+- [LIQUIDATION_ARCHITECTURE.md](./LIQUIDATION_ARCHITECTURE.md)
 
 ### GMX-Style Liquidity Model
 
@@ -111,30 +111,29 @@ closed_positions mapping → prevents double-close/liquidate
 
 ## 📊 Economic Parameters
 
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| Max Leverage | 20x | Minimum 5% margin required |
-| Opening Fee | 0.1% | Fee on position size |
-| Liquidation Threshold | 1% | Margin ratio triggering liquidation |
-| Liquidation Reward | 0.5% | Reward for liquidators |
-| Max OI per Side | 50% | Of total pool liquidity |
-| Borrow Fee | ~0.00001%/block | Funding rate for positions |
+| Parameter             | Value           | Description                         |
+| --------------------- | --------------- | ----------------------------------- |
+| Max Leverage          | 20x             | Minimum 5% margin required          |
+| Opening Fee           | 0.1%            | Fee on position size                |
+| Liquidation Threshold | 1%              | Margin ratio triggering liquidation |
+| Liquidation Reward    | 0.5%            | Reward for liquidators              |
+| Max OI per Side       | 50%             | Of total pool liquidity             |
+| Borrow Fee            | ~0.00001%/block | Funding rate for positions          |
 
 ## 🔐 Privacy Model
 
-| Data | Visibility | Storage |
-|------|------------|---------|
-| Position owner | Private | Record |
-| Position size | Private | Record |
-| Entry price | Private | Record |
-| Collateral | Private | Record |
-| Total pool liquidity | Public | Mapping |
-| Open interest (aggregate) | Public | Mapping |
-| Oracle prices | Public | Mapping |
-| Position closed status | Public | Mapping (position_id only) |
+| Data                      | Visibility | Storage                    |
+| ------------------------- | ---------- | -------------------------- |
+| Position owner            | Private    | Record                     |
+| Position size             | Private    | Record                     |
+| Entry price               | Private    | Record                     |
+| Collateral                | Private    | Record                     |
+| Total pool liquidity      | Public     | Mapping                    |
+| Open interest (aggregate) | Public     | Mapping                    |
+| Oracle prices             | Public     | Mapping                    |
+| Position closed status    | Public     | Mapping (position_id only) |
 
 Traders enjoy privacy for their individual positions while the protocol maintains public aggregate data for transparency and risk management.
-
 
 ## 🚀 Getting Started
 
@@ -142,43 +141,52 @@ Traders enjoy privacy for their individual positions while the protocol maintain
 
 ### Live Deployment
 
-- **Network**: Aleo Testnet Beta
-- **Contract**: `zkperp_v4.aleo`
-- **Mock USDC**: `mock_usdc_0128.aleo`
-- **Frontend**: React + Vite + Leo Wallet Adapter
+- **Network**: Aleo Public Testnet
+- **Contract**: `zkperp_v6.aleo`
+- **USDCx Token**: `test_usdcx_stablecoin.aleo` (official Aleo testnet stablecoin)
+- **Frontend**: React + Vite + Shield Wallet
+- **Wallet**: [Shield Wallet](https://www.shieldwallet.xyz/) (Aleo's official testnet wallet with delegated proving)
 
 ### Core Features Demonstrated
 
 ✅ **Private Position Opening**
+
 - Users deposit USDC collateral
 - Select long/short direction and leverage (up to 20x)
 - Position details stored in encrypted private record
 
 ✅ **Private Position Closing**
+
 - Calculate PnL based on oracle price
 - Withdraw collateral + profit (or minus loss)
 - Position record consumed, no on-chain trace
 
 ✅ **Liquidity Pool**
+
 - LPs deposit USDC, receive LP tokens
 - Pool pays winning traders, earns from losing traders
 - Fees accumulated for LP rewards
 
 ✅ **Liquidation System**
+
 - LiquidationAuth records enable third-party liquidators
 - Liquidators earn 0.5% of position size as reward
 - Maintains protocol solvency
 
 ✅ **Oracle Price Feeds**
+
 - On-chain price updates by authorized oracle
 - Slippage protection for traders
 
 ### How to Test
 
-1. **Connect Leo Wallet** (set to Testnet Beta)
-2. **Get mock USDC** (contact team or mint if you have oracle key)
-3. **Approve ZKPerp** to spend your USDC
-4. **Add Liquidity** or **Open Position**
+1. **Install Shield Wallet** browser extension from [shieldwallet.xyz](https://www.shieldwallet.xyz/)
+2. **Connect wallet** to the ZKPerp frontend (public testnet)
+3. **Get USDCx** by bridging USDC from Sepolia via the Bridge link in the app
+4. **Approve ZKPerp** to spend your USDCx (done automatically on first transaction)
+5. **Add Liquidity** or **Open Position**
+
+> **Note:** Shield Wallet uses delegated proving, reducing transaction times from 30+ seconds to ~14 seconds. All fees are paid publicly (no private fee records needed).
 
 ## 🚀 Getting Started
 
@@ -186,7 +194,7 @@ Traders enjoy privacy for their individual positions while the protocol maintain
 
 - Leo CLI v2.0+
 - Node.js 18+
-- Leo Wallet browser extension
+- [Shield Wallet](https://www.shieldwallet.xyz/) browser extension (recommended) or Leo Wallet
 
 ### Installation
 
@@ -208,12 +216,14 @@ npm run dev
 ### Local Development
 
 **Terminal 1: Start local devnet**
+
 ```bash
 cd ~/ZKPerp/leo
 leo devnet --snarkos $(which snarkos) --snarkos-features test_network --consensus-heights 0,1,2,3,4,5,6,7,8,9,10,11 --clear-storage
 ```
 
 **Terminal 2: Run test suite**
+
 ```bash
 chmod +x test_zkperp.sh
 ./test_zkperp.sh
@@ -249,15 +259,13 @@ ZKPerp/
 ├── assets/
 │   └── zkperp_mask_icon.png  # Logo
 ├── leo/
-│   ├── mock_usdc/        # Mock USDC token
-│   │   └── src/main.leo
-│   ├── zkperp/           # Main perpetuals contract
+│   ├── zkperp/           # Main perpetuals contract (v6)
 │   │   └── src/main.leo
 │   └── test_zkperp.sh    # Automated test script
 ├── frontend/              # React frontend
 │   ├── src/
-│   │   ├── components/    # UI components
-│   │   ├── hooks/         # useZKPerp, useBalance
+│   │   ├── components/    # UI components (TransactionStatus, PositionDisplay, etc.)
+│   │   ├── hooks/         # useTransaction, useBalance
 │   │   └── utils/         # Aleo utilities
 │   └── package.json
 ├── LIQUIDATION_ARCHITECTURE.md
@@ -269,28 +277,29 @@ ZKPerp/
 
 ### LP Functions
 
-| Function | Description | Parameters |
-|----------|-------------|------------|
-| `add_liquidity` | Deposit USDC, receive LP tokens | `deposit_amount`, `recipient` |
-| `remove_liquidity` | Burn LP tokens, withdraw USDC | `lp_token`, `amount_to_burn`, `expected_usdc` |
+| Function           | Description                     | Parameters                                    |
+| ------------------ | ------------------------------- | --------------------------------------------- |
+| `add_liquidity`    | Deposit USDC, receive LP tokens | `deposit_amount`, `recipient`                 |
+| `remove_liquidity` | Burn LP tokens, withdraw USDC   | `lp_token`, `amount_to_burn`, `expected_usdc` |
 
 ### Trading Functions
 
-| Function | Description | Parameters |
-|----------|-------------|------------|
-| `open_position` | Open leveraged long/short | `collateral`, `size`, `is_long`, `entry_price`, `max_slippage`, `nonce`, `recipient` |
-| `close_position` | Close position, settle PnL | `position`, `min_price`, `max_price`, `expected_payout` |
-| `liquidate` | Liquidate underwater position | `liq_auth`, `liquidator_reward` |
+| Function         | Description                   | Parameters                                                                           |
+| ---------------- | ----------------------------- | ------------------------------------------------------------------------------------ |
+| `open_position`  | Open leveraged long/short     | `collateral`, `size`, `is_long`, `entry_price`, `max_slippage`, `nonce`, `recipient` |
+| `close_position` | Close position, settle PnL    | `position`, `min_price`, `max_price`, `expected_payout`                              |
+| `liquidate`      | Liquidate underwater position | `liq_auth`, `liquidator_reward`                                                      |
 
 ### Oracle Functions
 
-| Function | Description | Parameters |
-|----------|-------------|------------|
+| Function       | Description                     | Parameters                       |
+| -------------- | ------------------------------- | -------------------------------- |
 | `update_price` | Update asset price (admin only) | `asset_id`, `price`, `timestamp` |
 
 ## 📝 Data Structures
 
 ### Position (Private Record) - Owned by Trader
+
 ```leo
 record Position {
     owner: address,
@@ -304,6 +313,7 @@ record Position {
 ```
 
 ### LiquidationAuth (Private Record) - Owned by Orchestrator
+
 ```leo
 record LiquidationAuth {
     owner: address,           // Orchestrator's address
@@ -318,6 +328,7 @@ record LiquidationAuth {
 ```
 
 ### LPToken (Private Record)
+
 ```leo
 record LPToken {
     owner: address,
@@ -326,6 +337,7 @@ record LPToken {
 ```
 
 ### PoolState (Public Mapping)
+
 ```leo
 struct PoolState {
     total_liquidity: u64,
@@ -350,6 +362,7 @@ Fee Sources:
 ```
 
 **Example:**
+
 ```
 Initial: LP deposits $100 → 100 LP tokens (value: $1.00 each)
 
@@ -364,11 +377,13 @@ LP withdraws: 100 LP tokens → $115 (15% profit!)
 ## ⚠️ Risk Factors
 
 ### For Traders
+
 - Liquidation risk at 1% margin ratio
 - Borrow fees accumulate over time
 - Oracle price determines PnL
 
 ### For LPs
+
 - Counterparty to all trades
 - Profitable traders reduce pool value
 - Smart money risk (informed traders)
@@ -387,6 +402,7 @@ The project includes a comprehensive test script that covers:
 ✅ Fee calculations
 
 Run tests:
+
 ```bash
 cd leo
 ./test_zkperp.sh
@@ -394,13 +410,17 @@ cd leo
 
 ### Frontend Integration
 
-The frontend uses the Leo Wallet Adapter to:
-- Sign transactions
-- Decrypt private records
-- Query on-chain state
-- Display position data
+The frontend uses the Shield Wallet Adapter (`@provablehq/aleo-wallet-adaptor-react`) to:
 
-Key hook: `useZKPerp()` provides all contract interaction functions.
+- Sign and submit transactions with delegated proving
+- Decrypt private records (LP tokens, positions) via two-phase batch decrypt
+- Query on-chain state via Provable Explorer API (v1)
+- Display position data with real-time PnL
+
+Key hooks:
+
+- `useTransaction()` — manages transaction lifecycle (submit → poll → confirm/reject)
+- `useBalance()` — fetches USDCx and ALEO balances
 
 ## 📚 Technical Deep Dives
 
@@ -422,17 +442,20 @@ This pattern is used extensively throughout ZKPerp's contract to prevent arithme
 ## 🎯 Product Market Fit
 
 **Target Users:**
+
 1. **Professional traders** who need execution privacy
 2. **Institutions** requiring confidential trading
 3. **Whales** who move markets when their positions are visible
 4. **Privacy-conscious retail** traders
 
 **Market Size:**
+
 - Perpetual futures: $150B+ daily volume across CEXs
 - DEX perpetuals growing rapidly (GMX $1B+ TVL, dYdX $2B+)
 - Privacy is the #1 requested feature among professional traders
 
 **Competitive Advantage:**
+
 - First privacy-preserving perpetual DEX
 - ZK-native design (not a privacy layer on top)
 - No trusted setup or centralized components
@@ -441,19 +464,33 @@ This pattern is used extensively throughout ZKPerp's contract to prevent arithme
 
 ## 📈 Progress Changelog
 
-### Wave 1 (Current Submission)
+### Wave 1 — Core Protocol
+
+- No feedback in Wave 1 (frontend link not found)
+
+### Wave 2 — Shield Wallet & USDCx (Current)
 
 **Built:**
+
 - ✅ Complete Leo smart contract with all core functions
 - ✅ Privacy-preserving position management
 - ✅ GMX-style liquidity pool
 - ✅ Liquidation system with LiquidationAuth records
-- ✅ Mock USDC token for testing
-- ✅ React frontend with Leo Wallet integration
+- ✅ React frontend with Shield Wallet integration
 - ✅ Real-time on-chain data fetching
 - ✅ Deployed to Aleo Testnet Beta
+- ✅ Integrated **Shield Wallet** (delegated proving, ~14s transactions)
+- ✅ Integrated official Aleo **USDCx** testnet stablecoin (`test_usdcx_stablecoin.aleo`)
+- ✅ Two-phase batch decrypt for private records (LP tokens & positions)
+- ✅ On-chain transaction confirmation polling (no more "fire and forget")
+- ✅ Dust record filtering for LP tokens and positions (MIN_DUST = $0.01)
+- ✅ Pure BigInt payout calculation (no floating-point errors)
+- ✅ Permissionless liquidation page with TX ID auto-parsing
+- ✅ Contract upgraded to `zkperp_v6.aleo` on public testnet
+- ✅ Public fee support (`privateFee: false` for Shield compatibility)
 
 **Technical Achievements:**
+
 - Implemented complex PnL calculations in Leo
 - Solved privacy vs. liquidation tradeoff with dual record pattern
 - Built full-stack Aleo dApp with wallet integration
@@ -462,6 +499,8 @@ This pattern is used extensively throughout ZKPerp's contract to prevent arithme
 ### Next Wave Goals
 
 **Planned Features:**
+
+- [ ] Record merge logic — max 1 LP token and 1 position record per user (eliminates dust accumulation)
 - [ ] Liquidator bot (automated liquidations)
 - [ ] Real oracle integration (Chainlink/Pyth bridge)
 - [ ] Multiple trading pairs (ETH, SOL)
@@ -473,59 +512,76 @@ This pattern is used extensively throughout ZKPerp's contract to prevent arithme
 ## 🗺️ Go-To-Market (GTM) Plan
 
 ### Completed ✅
+
 - [x] Core perpetuals logic
 - [x] LP pool mechanics
 - [x] Position management
 - [x] Liquidation system (Option D)
 - [x] Privacy via Aleo records
-- [x] Mock USDC token integration
+- [x] Official USDCx token integration
 - [x] Oracle admin access control
 - [x] Automated test suite
-- [x] React frontend with wallet integration
-- [x] Testnet deployment
+- [x] React frontend with Shield Wallet integration
+- [x] Public testnet deployment (`zkperp_v6.aleo`)
+- [x] Delegated proving (~14s transactions)
+- [x] Two-phase batch record decryption
+- [x] On-chain confirmation polling
+- [x] Dust record filtering
 
 ### In Progress 🚧
+
+- [ ] Record merge logic (1 LP / 1 position per user)
 - [ ] Liquidator bot (automated liquidations)
-- [ ] Real oracle integration (Chainlink/Pyth bridge)
-- [ ] Security audit
+- [ ] Full liquidation flow testing
 - [ ] Enhanced UI/UX
 
 ### Planned 📋
+
+- [ ] Real oracle integration (Chainlink/Pyth bridge)
+- [ ] Security audit
 - [ ] Multi-asset support (ETH, SOL, etc.)
 - [ ] Funding rate mechanism
 - [ ] Multi-orchestrator support
 - [ ] Admin controls (pause, fees)
 - [ ] Cross-margin and portfolio margin
+- [ ] Classic DEX (swaps/liquidity)
+- [ ] Borrowing/lending
+- [ ] DAO
 - [ ] Mobile app
 - [ ] Mainnet deployment
 
 **Phase 1: Testnet Launch (Current)**
-- Deploy on Aleo Testnet Beta 
+
+- Deploy on Aleo Testnet Beta
 - Build community through Aleo ecosystem
 - Gather feedback from early users
 
 **Phase 2: Security & Audits**
+
 - Formal verification of Leo contracts
 - Third-party security audit
 - Bug bounty program
 
 **Phase 3: Mainnet Launch**
+
 - Deploy to Aleo Mainnet
 - Partner with Aleo ecosystem projects
 - Integrate real price oracles (Chainlink/Pyth via bridge)
 
 **Phase 4: Growth**
+
 - Add more trading pairs
 - Cross-margin and portfolio margin
 - Mobile app
 
 ## 👥 Team
 
-| Name | Role | Discord | Wallet Address |
-|------|------|---------|----------------|
+| Name             | Role           | Discord   | Wallet Address                                                  |
+| ---------------- | -------------- | --------- | --------------------------------------------------------------- |
 | Henk-Wim de Boer | Lead Developer | @lupo1977 | aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0 |
 
 **Background:**
+
 - Experienced blockchain developer
 - Previous work: DeFi protocols, ZK systems
 - Deep expertise in Aleo/Leo development
@@ -533,9 +589,11 @@ This pattern is used extensively throughout ZKPerp's contract to prevent arithme
 ## 🔗 Links
 
 - **GitHub**: https://github.com/hwdeboer1977/ZKPerp
-- **Contract**: `zkperp_v4.aleo` on Aleo Testnet
-- **Mock USDC**: `mock_usdc_0128.aleo`
-- **Frontend**: *[Deploy link if hosted]*
+- **Contract**: `zkperp_v6.aleo` on Aleo Public Testnet
+- **USDCx Token**: `test_usdcx_stablecoin.aleo`
+- **Wallet**: [Shield Wallet](https://www.shieldwallet.xyz/)
+- **Explorer**: [Provable Explorer](https://testnet.explorer.provable.com)
+- **Frontend**: _[Deploy link if hosted]_
 
 ## 📖 Resources
 

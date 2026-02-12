@@ -53,6 +53,7 @@ export function AdminPage({ currentPrice, oracleSet, poolLiquidity, longOI, shor
         function: 'update_price',
         inputs,
         fee: 1_000_000,
+        privateFee: false,
       };
 
       await tx.execute(options);

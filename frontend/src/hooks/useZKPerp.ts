@@ -232,6 +232,7 @@ export function useZKPerp() {
           function: 'open_position',
           inputs,
           fee: 5_000_000,
+          privateFee: false,
         };
 
         const result = await executeTransaction(options);
@@ -345,6 +346,7 @@ export function useZKPerp() {
           function: 'close_position',
           inputs,
           fee: 5_000_000,
+          privateFee: false,
         };
 
         const result = await executeTransaction(options);
@@ -391,6 +393,7 @@ export function useZKPerp() {
           function: 'add_liquidity',
           inputs,
           fee: 5_000_000,
+          privateFee: false,
         };
 
         const result = await executeTransaction(options);
@@ -439,6 +442,7 @@ export function useZKPerp() {
           function: 'remove_liquidity',
           inputs,
           fee: 5_000_000,
+          privateFee: false,
         };
 
         const result = await executeTransaction(options);

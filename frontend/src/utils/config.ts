@@ -38,7 +38,6 @@ export const NETWORK_CONFIG = {
 
 export const ADDRESS_LIST = {
   ADMIN_ADDRESS: 'aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0',
-  // TODO: Update this after deploying zkperp_v6.aleo - this is the program's on-chain address
-  ZK_PERP_ADDRESS: 'aleo1nxzhwc6y2cw6ymlaq80xaqem25mkltn37lpzr9mjf6gplmjcjq8qnrefmc',
+  ZK_PERP_ADDRESS: 'zkperp_v6.aleo',
   MOCK_USDC_ADDRESS: '',
 } as const;

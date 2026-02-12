@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import type { TransactionOptions } from '@provablehq/aleo-types';
+import { useTransaction } from '@/hooks/useTransaction';
+import { TransactionStatus } from '@/components/TransactionStatus';
 import { formatUsdc, formatPrice } from '@/utils/aleo';
 
 interface Props {
@@ -26,7 +28,8 @@ interface PositionData {
 }
 
 export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: Props) {
- const { connected, executeTransaction } = useWallet();
+ const { connected } = useWallet();
+  const liquidateTx = useTransaction();
   
   // Input state
   const [txId, setTxId] = useState('');
@@ -34,9 +37,7 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
   
   // UI state
   const [fetching, setFetching] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
   const [calculation, setCalculation] = useState<{
     pnl: bigint;
     marginRatio: number;
@@ -105,193 +106,179 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
     try {
       console.log('Parsing transition:', transition);
       
-      // Collect all string values from inputs, outputs, and finalize
-      const allValues: string[] = [];
+      // STRATEGY 1: Parse from the finalize future output (most reliable)
+      // The open_position future output contains structured arguments:
+      //   [0] transfer_from_public future
+      //   [1] position_nonce (field) 
+      //   [2] trader address
+      //   [3] collateral_u64
+      //   [4] size_u64
+      //   [5] is_long (bool)
+      //   [6] entry_price_u64
+      //   [7] slippage_u64
+      //   [8] nonce (field)
+      //   [9] opening_fee_u64
+      //   [10] collateral_after_fee_u64
       
-      // From inputs
+      const futureOutput = (transition.outputs || []).find((o: any) => o.type === 'future');
+      if (futureOutput?.value) {
+        const futureStr = String(futureOutput.value);
+        console.log('Future output:', futureStr);
+        
+        // Extract the outer arguments array (after the inner transfer_from_public block)
+        // The position_id is inside the transfer_from_public arguments as the last field
+        // But we need the OUTER arguments for position data
+        
+        // Find all field values in the future - the position_id appears in transfer_from_public args
+        // and also as a nonce. We need the one from transfer_from_public.
+        
+        // Parse the structured future to find position_id
+        // The position_id is the FIRST field value AFTER the inner transfer_from_public block closes
+        // Structure: { transfer_from_public { ... } }, position_id_field, address, collateral, size, ...
+        let positionId = '';
+        
+        // Find where the inner transfer_from_public block ends (after its closing ] })
+        const innerBlockEnd = futureStr.indexOf('},');
+        if (innerBlockEnd > -1) {
+          // Everything after the inner block contains the outer arguments
+          const afterInnerBlock = futureStr.substring(innerBlockEnd + 2);
+          console.log('After inner block:', afterInnerBlock.substring(0, 200));
+          
+          // First field value after the inner block is the position_id
+          const posIdMatch = afterInnerBlock.match(/(\d{30,})field/);
+          if (posIdMatch) {
+            positionId = posIdMatch[0];
+            console.log('Position ID (after inner block):', positionId);
+          }
+        }
+        
+        // Now parse the outer finalize arguments POSITIONALLY
+        // After the inner block closes with "},", the outer arguments are in order:
+        //   position_nonce_field,    (already extracted above)
+        //   trader_address,
+        //   collateral_u64,          <- arg[3] = first u64 after position_id
+        //   size_u64,                <- arg[4] = second u64
+        //   is_long,                 <- true/false
+        //   entry_price_u64,         <- arg[6] = third u64
+        //   slippage_u64,            <- arg[7] = fourth u64
+        //   nonce_field,
+        //   opening_fee_u64,         <- arg[9] = fifth u64
+        //   collateral_after_fee_u64 <- arg[10] = sixth u64
+        
+        // Get u64 values ONLY from the outer arguments (after inner block)
+        const afterBlock = innerBlockEnd > -1 ? futureStr.substring(innerBlockEnd + 2) : '';
+        const outerU64Matches = afterBlock.match(/(\d+)u64/g) || [];
+        const outerU64Values = outerU64Matches.map((m: string) => BigInt(m.replace('u64', '')));
+        console.log('Outer u64 values (positional):', outerU64Values.map((v: bigint) => v.toString()));
+        
+        // Positional extraction:
+        // [0] = collateral (raw, before fee)
+        // [1] = size
+        // [2] = entry_price  
+        // [3] = slippage
+        // [4] = opening_fee
+        // [5] = collateral_after_fee
+        let entryPrice = 0n;
+        let sizeUsdc = 0n;
+        let collateralUsdc = 0n;
+        
+        if (outerU64Values.length >= 3) {
+          const rawCollateral = outerU64Values[0]; // collateral before fee
+          sizeUsdc = outerU64Values[1];            // size
+          entryPrice = outerU64Values[2];          // entry_price
+          // Use collateral_after_fee if available (last value), otherwise raw collateral
+          collateralUsdc = outerU64Values.length >= 6 ? outerU64Values[5] : rawCollateral;
+        }
+        
+        // Check for is_long - look in the outer args section
+        const isLong = !afterBlock.includes('\n    false') && !afterBlock.match(/,\s*false\s*,/);
+        
+        console.log('Parsed from future (positional):', { positionId, isLong, sizeUsdc: sizeUsdc.toString(), collateralUsdc: collateralUsdc.toString(), entryPrice: entryPrice.toString() });
+        
+        if (positionId && sizeUsdc > 0n && entryPrice > 0n) {
+          // If collateral not found, estimate
+          if (collateralUsdc === 0n) {
+            collateralUsdc = sizeUsdc / 10n - sizeUsdc / 10000n;
+          }
+          return { positionId, isLong, sizeUsdc, collateralUsdc, entryPrice };
+        }
+      }
+      
+      // STRATEGY 2: Fallback - parse from all values (original approach)
+      console.log('Falling back to generic parser...');
+      const allValues: string[] = [];
       for (const input of (transition.inputs || [])) {
         if (input.value) allValues.push(String(input.value));
       }
-      
-      // From outputs  
       for (const output of (transition.outputs || [])) {
         if (output.value) allValues.push(String(output.value));
       }
-      
-      // From finalize (this often has the clearest data)
       for (const val of (transition.finalize || [])) {
         allValues.push(String(val));
       }
       
-      console.log('All values to parse:', allValues);
-      
-      // Initialize position data
       let positionId = '';
       let isLong = true;
       let sizeUsdc = 0n;
       let collateralUsdc = 0n;
       let entryPrice = 0n;
-      
-      // Collect all u64 values for later sorting
       const u64Values: bigint[] = [];
       
-      // First pass: extract all values including embedded ones
       for (const val of allValues) {
-        // Position ID - large number ending in field
-        // Can be standalone OR embedded in a string
-        const fieldMatches = val.match(/(\d{30,})field/g);
-        if (fieldMatches) {
-          for (const match of fieldMatches) {
-            const numPart = match.replace('field', '');
-            // Position IDs are typically 70+ digits, nonces are shorter
-            if (numPart.length >= 70 && !positionId) {
-              positionId = match;
-              console.log('Found position ID:', positionId);
+        // Look for position ID in transfer_from_public context
+        const transferBlock = val.match(/transfer_from_public[\s\S]*?arguments:\s*\[([\s\S]*?)\]/);
+        if (transferBlock) {
+          const fieldMatches = transferBlock[1].match(/(\d{30,})field/g);
+          if (fieldMatches) {
+            positionId = fieldMatches[fieldMatches.length - 1];
+          }
+        }
+        
+        // If no transfer block, try any large field
+        if (!positionId) {
+          const fieldMatches = val.match(/(\d{30,})field/g);
+          if (fieldMatches) {
+            for (const match of fieldMatches) {
+              const numPart = match.replace('field', '');
+              if (numPart.length >= 70 && !positionId) {
+                positionId = match;
+              }
             }
           }
         }
         
-        // Boolean - check for exact match or embedded
-        if (val === 'true' || val.includes('\ttrue') || val.match(/[:,\s]true[,\s\n]/)) {
-          isLong = true;
-        }
-        if (val === 'false' || val.includes('\tfalse') || val.match(/[:,\s]false[,\s\n]/)) {
-          isLong = false;
-        }
+        if (val === 'true' || val.includes('\ttrue') || val.match(/[:,\s]true[,\s\n]/)) isLong = true;
+        if (val === 'false' || val.includes('\tfalse') || val.match(/[:,\s]false[,\s\n]/)) isLong = false;
         
-        // u64 values - can be standalone OR embedded
         const u64Matches = val.match(/(\d+)u64/g);
         if (u64Matches) {
           for (const match of u64Matches) {
-            const num = BigInt(match.replace('u64', ''));
-            u64Values.push(num);
+            u64Values.push(BigInt(match.replace('u64', '')));
           }
         }
       }
       
-      console.log('Found u64 values:', u64Values.map(v => v.toString()));
-      
-      // Deduplicate u64 values
       const uniqueU64Values = [...new Set(u64Values.map(v => v.toString()))].map(s => BigInt(s));
-      console.log('Unique u64 values:', uniqueU64Values.map(v => v.toString()));
-      
-      // Sort u64 values to identify them by magnitude
-      // Entry price: 10,000,000,000 (for $100k with 8 decimals)
-      // Size: 50,000,000 (for $50 with 6 decimals)  
-      // Collateral: 4,950,000 (for $4.95 with 6 decimals)
-      
-      // Group by magnitude - use STRICT ranges
-      const entryPriceCandidates: bigint[] = []; // 5-15 billion only (for $50k-$150k BTC)
-      const sizeCandidates: bigint[] = [];       // 10-200 million ($10-$200 positions)
-      const collateralCandidates: bigint[] = []; // 1-10 million ($1-$10 collateral)
       
       for (const val of uniqueU64Values) {
-        // Entry price: STRICT range for BTC ($50k-$150k with 8 decimals)
-        if (val >= 5_000_000_000n && val <= 15_000_000_000n) {
-          entryPriceCandidates.push(val);
-        } 
-        // Size range: $10-$200 with 6 decimals
-        else if (val >= 10_000_000n && val <= 200_000_000n) {
-          sizeCandidates.push(val);
-        } 
-        // Collateral range: $1-$10 with 6 decimals
-        else if (val >= 1_000_000n && val < 10_000_000n) {
-          collateralCandidates.push(val);
-        }
-        // Skip values outside these ranges (garbage data)
-      }
-      
-      console.log('Candidates - entry:', entryPriceCandidates.map(v => v.toString()), 
-                  'size:', sizeCandidates.map(v => v.toString()),
-                  'collateral:', collateralCandidates.map(v => v.toString()));
-      
-      // Select the most likely values
-      // Entry price: BTC is ~$80k-$100k, with 8 decimals that's 8,000,000,000 - 10,000,000,000
-      // Filter for reasonable BTC prices ($50k - $150k = 5B - 15B)
-      if (entryPriceCandidates.length > 0) {
-        const reasonablePrices = entryPriceCandidates.filter(v => v >= 5_000_000_000n && v <= 15_000_000_000n);
-        if (reasonablePrices.length > 0) {
-          // Take the one closest to $100k (10B)
-          entryPrice = reasonablePrices.reduce((a, b) => {
-            const diffA = a > 10_000_000_000n ? a - 10_000_000_000n : 10_000_000_000n - a;
-            const diffB = b > 10_000_000_000n ? b - 10_000_000_000n : 10_000_000_000n - b;
-            return diffA < diffB ? a : b;
-          });
-        } else {
-          entryPrice = entryPriceCandidates[0];
-        }
-      }
-      
-      // FALLBACK: If no valid entry price found, check if there's a value that SHOULD be entry price
-      // by looking at all u64 values and finding one close to $100k
-      if (entryPrice === 0n) {
-        console.log('No entry price in candidates, searching all u64 values...');
-        for (const val of uniqueU64Values) {
-          // Check if dividing by 100M gives a reasonable BTC price ($50k-$150k)
-          const priceUsd = Number(val) / 100_000_000;
-          if (priceUsd >= 50_000 && priceUsd <= 150_000) {
-            entryPrice = val;
-            console.log('Found entry price via fallback:', val.toString(), '=', priceUsd);
-            break;
+        if (val >= 5_000_000_000n && val <= 15_000_000_000n && entryPrice === 0n) {
+          entryPrice = val;
+        } else if (val >= 1_000_000n && val <= 1_000_000_000n) {
+          if (val > sizeUsdc) {
+            if (sizeUsdc > collateralUsdc) collateralUsdc = sizeUsdc;
+            sizeUsdc = val;
+          } else if (val > collateralUsdc && val !== sizeUsdc) {
+            collateralUsdc = val;
           }
         }
       }
       
-      // Size: take the largest in the size range
-      if (sizeCandidates.length > 0) {
-        sizeUsdc = sizeCandidates.reduce((a, b) => a > b ? a : b);
-      }
-      
-      // Collateral: take the largest in the collateral range
-      if (collateralCandidates.length > 0) {
-        collateralUsdc = collateralCandidates.reduce((a, b) => a > b ? a : b);
-      }
-      
-      // If collateral wasn't found in its range, it might be in size range (just smaller than size)
-      if (collateralUsdc === 0n && sizeCandidates.length > 1) {
-        const sorted = [...sizeCandidates].sort((a, b) => Number(b - a));
-        sizeUsdc = sorted[0];
-        collateralUsdc = sorted[1];
-      }
-      
-      console.log('Parsed values:', { 
-        positionId, 
-        isLong, 
-        sizeUsdc: sizeUsdc.toString(), 
-        collateralUsdc: collateralUsdc.toString(), 
-        entryPrice: entryPrice.toString() 
-      });
-      
-      // Validate required fields
-      if (!positionId) {
-        console.log('Missing position ID');
-        return null;
-      }
-      if (sizeUsdc === 0n) {
-        console.log('Missing size');
-        return null;
-      }
-      if (entryPrice === 0n) {
-        console.log('Missing entry price');
-        return null;
-      }
-      
-      // If collateral still not found, estimate from size (assume ~10x leverage minus fee)
+      if (!positionId || sizeUsdc === 0n || entryPrice === 0n) return null;
       if (collateralUsdc === 0n) {
-        console.log('Collateral not found, estimating from size...');
-        const estimatedCollateral = sizeUsdc / 10n;
-        const fee = estimatedCollateral / 1000n; // 0.1% fee
-        collateralUsdc = estimatedCollateral - fee;
+        collateralUsdc = sizeUsdc / 10n - sizeUsdc / 10000n;
       }
       
-      return {
-        positionId,
-        isLong,
-        sizeUsdc,
-        collateralUsdc,
-        entryPrice,
-      };
-      
+      return { positionId, isLong, sizeUsdc, collateralUsdc, entryPrice };
     } catch (err) {
       console.error('Parse error:', err);
       return null;
@@ -357,19 +344,18 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
 
   // Execute liquidation
   const handleLiquidate = async () => {
-    if (!connected || !executeTransaction || !calculation?.isLiquidatable || !position) {
+    if (!connected || !calculation?.isLiquidatable || !position) {
       return;
     }
 
-    setLoading(true);
     setError(null);
-    setSuccess(null);
 
     try {
       const { positionId, isLong, sizeUsdc, collateralUsdc, entryPrice } = position;
       
-      // Calculate reward
-      const reward = (sizeUsdc * LIQUIDATION_REWARD_BPS) / 1_000_000n;
+      // Calculate reward — minimum 1 to avoid transfer_public(0) failure
+      let reward = (sizeUsdc * LIQUIDATION_REWARD_BPS) / 1_000_000n;
+      if (reward < 1n) reward = 1n;
 
       // Build inputs for liquidate function
       const inputs = [
@@ -387,17 +373,13 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
         program: PROGRAM_ID,
         function: 'liquidate',
         inputs,
-        fee: 2_000_000,
+        fee: 5_000_000,
         privateFee: false,
       };
 
-      const result = await executeTransaction(options);
-      const resultTxId = result?.transactionId;
-      console.log('Liquidation submitted:', resultTxId);
+      await liquidateTx.execute(options);
       
-      setSuccess(`Liquidation submitted! TX: ${resultTxId}`);
-      
-      // Clear form
+      // Clear form on success
       setTxId('');
       setPosition(null);
       setCalculation(null);
@@ -405,10 +387,10 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
     } catch (err: any) {
       console.error('Liquidation failed:', err);
       setError(err.message || 'Liquidation failed');
-    } finally {
-      setLoading(false);
     }
   };
+
+  const isLiquidateBusy = liquidateTx.status === 'submitting' || liquidateTx.status === 'pending';
 
   // Format helpers
   const formatUsdcDisplay = (value: bigint) => {
@@ -455,11 +437,7 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
           <p className="text-red-400 text-sm">{error}</p>
         </div>
       )}
-      {success && (
-        <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-4 mb-6">
-          <p className="text-green-400 text-sm">{success}</p>
-        </div>
-      )}
+
 
       {/* Liquidation Form */}
       <div className="bg-zkperp-card rounded-xl border border-zkperp-border overflow-hidden">
@@ -573,21 +551,50 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
             </div>
           )}
 
+          {/* Transaction Status */}
+          <TransactionStatus
+            status={liquidateTx.status}
+            tempTxId={liquidateTx.tempTxId}
+            onChainTxId={liquidateTx.onChainTxId}
+            error={liquidateTx.error}
+            onDismiss={liquidateTx.reset}
+          />
+
           {/* Liquidate Button */}
           <button
             onClick={handleLiquidate}
-            disabled={!connected || !calculation?.isLiquidatable || loading || !position}
+            disabled={!connected || !calculation?.isLiquidatable || isLiquidateBusy || !position}
             className={`w-full py-4 rounded-lg font-semibold text-lg transition-colors ${
               calculation?.isLiquidatable
                 ? 'bg-zkperp-red hover:bg-zkperp-red/80 text-white'
                 : 'bg-gray-600 text-gray-400 cursor-not-allowed'
             }`}
           >
-            {loading ? 'Liquidating...' : 
-             !connected ? 'Connect Wallet' :
-             !position ? 'Enter Transaction ID' :
-             !calculation?.isLiquidatable ? 'Position Not Liquidatable' :
-             `Liquidate & Earn $${formatUsdc(calculation.reward)}`}
+            {liquidateTx.status === 'submitting' ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Submitting...
+              </span>
+            ) : liquidateTx.status === 'pending' ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Confirming on-chain...
+              </span>
+            ) : !connected ? (
+              'Connect Wallet'
+            ) : !position ? (
+              'Enter Transaction ID'
+            ) : !calculation?.isLiquidatable ? (
+              'Position Not Liquidatable'
+            ) : (
+              `Liquidate & Earn $${formatUsdc(calculation.reward)}`
+            )}
           </button>
         </div>
       </div>

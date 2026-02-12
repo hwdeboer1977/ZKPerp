@@ -1,9 +1,9 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import type { TransactionOptions } from '@provablehq/aleo-types';
-import { useZKPerp } from '@/hooks/useZKPerp';
 import { useLPTokens, formatLPTokens } from '@/hooks/useLPTokens';
-import { formatUsdc, parseUsdc, USDC_PROGRAM_ID } from '@/utils/aleo';
+import type { LPTokenRecord } from '@/hooks/useLPTokens';
+import { formatUsdc, parseUsdc, USDC_PROGRAM_ID, PROGRAM_ID } from '@/utils/aleo';
 import { ADDRESS_LIST } from '../utils/config';
 import { useTransaction } from '@/hooks/useTransaction';
 import { TransactionStatus } from '@/components/TransactionStatus';
@@ -17,28 +17,28 @@ interface Props {
 
 export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Props) {
   const { address, connected } = useWallet();
-  const { addLiquidity, removeLiquidity, loading, error, clearError } = useZKPerp();
-  const { lpTokens, totalLP, loading: lpLoading, refresh: refreshLP } = useLPTokens();
+  const {
+    lpTokens, totalLP, recordCount,
+    loading: lpLoading, decrypting, decrypted,
+    fetchRecords, decryptAll,
+  } = useLPTokens();
   const approveTx = useTransaction();
+  const depositTx = useTransaction();
+  const withdrawTx = useTransaction();
 
   const [depositAmount, setDepositAmount] = useState('');
-  const [withdrawAmount, setWithdrawAmount] = useState('');
-  const [txHash, setTxHash] = useState<string | null>(null);
-  const [withdrawTxHash, setWithdrawTxHash] = useState<string | null>(null);
-  const [withdrawLoading, setWithdrawLoading] = useState(false);
-  const [withdrawError, setWithdrawError] = useState<string | null>(null);
+  const [withdrawRecordId, setWithdrawRecordId] = useState<string | null>(null);
 
   // Approve ZKPerp to spend USDCx
   const handleApprove = useCallback(async () => {
     if (!address) return;
 
     try {
-      // Approve 50,000 USDCx (50000 * 10^6)
       const approveAmount = '50000000000u128';
 
       const inputs = [
-        ADDRESS_LIST.ZK_PERP_ADDRESS,     // spender (zkperp contract address)
-        approveAmount,  // amount to approve
+        ADDRESS_LIST.ZK_PERP_ADDRESS,
+        approveAmount,
       ];
 
       console.log('=== APPROVE DEBUG ===');
@@ -62,12 +62,20 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
     }
   }, [address, approveTx]);
 
-  // Fetch LP tokens when connected
+  // Fetch records (no decrypt) when connected
   useEffect(() => {
     if (connected) {
-      refreshLP();
+      fetchRecords();
     }
-  }, [connected, refreshLP]);
+  }, [connected, fetchRecords]);
+
+  // Auto-refresh when deposit or withdraw is accepted
+  useEffect(() => {
+    if (depositTx.status === 'accepted' || withdrawTx.status === 'accepted') {
+      onRefresh();
+      fetchRecords();
+    }
+  }, [depositTx.status, withdrawTx.status, onRefresh, fetchRecords]);
 
   const totalOI = longOI + shortOI;
   const utilization = poolLiquidity > 0 
@@ -78,60 +86,71 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
   const isValidAmount = parsedAmount >= BigInt(1000000); // Min $1
 
   const handleDeposit = useCallback(async () => {
-    if (!connected || !isValidAmount) return;
+    if (!connected || !isValidAmount || !address) return;
 
     try {
-      clearError();
-      setTxHash(null);
-      const hash = await addLiquidity(parsedAmount);
-      setTxHash(hash ?? null);
+      const inputs = [
+        parsedAmount.toString() + 'u128',
+        address,
+      ];
+
+      console.log('Add liquidity inputs:', inputs);
+
+      const options: TransactionOptions = {
+        program: PROGRAM_ID,
+        function: 'add_liquidity',
+        inputs,
+        fee: 5_000_000,
+        privateFee: false,
+      };
+
+      await depositTx.execute(options);
       setDepositAmount('');
-      setTimeout(() => {
-        onRefresh();
-        refreshLP();
-      }, 5000);
     } catch (err) {
       console.error('Deposit failed:', err);
     }
-  }, [connected, isValidAmount, parsedAmount, addLiquidity, clearError, onRefresh, refreshLP]);
+  }, [connected, isValidAmount, parsedAmount, address, depositTx]);
 
-  const handleWithdraw = useCallback(async () => {
-    if (!connected || !withdrawAmount || lpTokens.length === 0) return;
-
-    setWithdrawLoading(true);
-    setWithdrawError(null);
-    setWithdrawTxHash(null);
+  const handleWithdrawRecord = useCallback(async (lpToken: LPTokenRecord) => {
+    if (!connected) return;
 
     try {
-      const lpAmountToWithdraw = parseUsdc(withdrawAmount);
-      
-      // Find an LP token record with enough balance
-      const lpToken = lpTokens.find(t => t.amount >= lpAmountToWithdraw);
-      if (!lpToken) {
-        throw new Error('No LP token record with sufficient balance');
-      }
+      setWithdrawRecordId(lpToken.id);
+      const expectedUsdc = poolLiquidity > BigInt(0) && totalLP > BigInt(0)
+        ? (lpToken.amount * poolLiquidity) / totalLP
+        : lpToken.amount;
 
-      // Calculate expected USDC to receive (proportional to pool)
-      // expectedUsdc = (lpAmount / totalLpTokens) * totalLiquidity
-      const expectedUsdc = (lpAmountToWithdraw * poolLiquidity) / (totalLP + BigInt(1));
+      console.log('=== WITHDRAW DEBUG ===');
+      console.log('Plaintext:', lpToken.plaintext);
+      console.log('Amount:', lpToken.amount.toString());
+      console.log('Expected USDC:', expectedUsdc.toString());
 
-      const hash = await removeLiquidity(lpToken, lpAmountToWithdraw, expectedUsdc);
-     setWithdrawTxHash(hash ?? null);
-      setWithdrawAmount('');
-      
-      setTimeout(() => {
-        onRefresh();
-        refreshLP();
-      }, 5000);
+      const inputs = [
+        lpToken.plaintext,
+        lpToken.amount.toString() + 'u64',
+        expectedUsdc.toString() + 'u128',
+      ];
+
+      const options: TransactionOptions = {
+        program: PROGRAM_ID,
+        function: 'remove_liquidity',
+        inputs,
+        fee: 5_000_000,
+        privateFee: false,
+      };
+
+      await withdrawTx.execute(options);
     } catch (err) {
       console.error('Withdraw failed:', err);
-      setWithdrawError(err instanceof Error ? err.message : 'Withdrawal failed');
     } finally {
-      setWithdrawLoading(false);
+      setWithdrawRecordId(null);
     }
-  }, [connected, withdrawAmount, lpTokens, totalLP, poolLiquidity, removeLiquidity, onRefresh, refreshLP]);
+  }, [connected, poolLiquidity, totalLP, withdrawTx]);
 
   const quickAmounts = [10, 50, 100, 500, 1000];
+
+  const isDepositBusy = depositTx.status === 'submitting' || depositTx.status === 'pending';
+  const isWithdrawBusy = withdrawTx.status === 'submitting' || withdrawTx.status === 'pending';
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -257,25 +276,21 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
               </div>
             </div>
 
-            {error && (
-              <div className="bg-zkperp-red/10 border border-zkperp-red/30 rounded-lg p-3">
-                <p className="text-zkperp-red text-sm">{error}</p>
-              </div>
-            )}
-
-            {txHash && (
-              <div className="bg-zkperp-green/10 border border-zkperp-green/30 rounded-lg p-3">
-                <p className="text-zkperp-green text-sm">Liquidity added!</p>
-                <code className="text-xs text-gray-400 break-all">{txHash}</code>
-              </div>
-            )}
+            {/* Deposit Transaction Status */}
+            <TransactionStatus
+              status={depositTx.status}
+              tempTxId={depositTx.tempTxId}
+              onChainTxId={depositTx.onChainTxId}
+              error={depositTx.error}
+              onDismiss={depositTx.reset}
+            />
 
             <button
               onClick={handleDeposit}
-              disabled={!connected || !isValidAmount || loading}
+              disabled={!connected || !isValidAmount || isDepositBusy}
               className="w-full py-3 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-500/30 rounded-lg font-semibold text-white transition-colors"
             >
-              {loading ? 'Processing...' : !connected ? 'Connect Wallet' : 'Step 2: Add Liquidity'}
+              {depositTx.status === 'submitting' ? 'Submitting...' : depositTx.status === 'pending' ? 'Confirming on-chain...' : !connected ? 'Connect Wallet' : 'Step 2: Add Liquidity'}
             </button>
           </div>
         </div>
@@ -319,7 +334,7 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
                 <span className="text-xs bg-zkperp-accent/20 text-zkperp-accent px-2 py-0.5 rounded">private</span>
               </div>
               <button
-                onClick={refreshLP}
+                onClick={fetchRecords}
                 disabled={lpLoading || !connected}
                 className="text-sm text-zkperp-accent hover:text-zkperp-accent/80 disabled:opacity-50"
               >
@@ -335,70 +350,99 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
-                <span className="text-sm">Loading LP tokens...</span>
+                <span className="text-sm">Loading LP records...</span>
               </div>
-            ) : totalLP > BigInt(0) ? (
+            ) : recordCount > 0 ? (
               <div className="space-y-3">
+                {/* Record Count (always visible after fetch) */}
                 <div className="bg-zkperp-dark rounded-lg p-4">
-                  <p className="text-gray-400 text-sm mb-1">Your LP Tokens</p>
-                  <p className="text-2xl font-bold text-white">{formatLPTokens(totalLP)}</p>
-                </div>
-                
-                {poolLiquidity > BigInt(0) && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-400">Pool Share</span>
-                    <span className="text-white">
-                      {((Number(totalLP) / Number(poolLiquidity)) * 100).toFixed(2)}%
-                    </span>
-                  </div>
-                )}
-                
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Estimated Value</span>
-                  <span className="text-zkperp-green">${formatLPTokens(totalLP)}</span>
-                </div>
-
-                {lpTokens.length > 1 && (
-                  <p className="text-xs text-gray-500 mt-2">
-                    {lpTokens.length} LP token records
-                  </p>
-                )}
-
-                {/* Remove Liquidity Section */}
-                <div className="border-t border-zkperp-border pt-4 mt-4">
-                  <p className="text-sm text-gray-400 mb-2">Withdraw Liquidity</p>
-                  <div className="flex gap-2">
-                    <div className="relative flex-1">
-                      <input
-                        type="number"
-                        value={withdrawAmount}
-                        onChange={(e) => setWithdrawAmount(e.target.value)}
-                        placeholder="0.00"
-                        max={Number(totalLP) / 1_000_000}
-                        className="w-full bg-zkperp-dark border border-zkperp-border rounded-lg px-3 py-2 text-white placeholder-gray-600 text-sm focus:outline-none focus:border-red-500"
-                      />
-                      <button
-                        onClick={() => setWithdrawAmount((Number(totalLP) / 1_000_000).toString())}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-zkperp-accent hover:text-zkperp-accent/80"
-                      >
-                        MAX
-                      </button>
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <p className="text-gray-400 text-xs mb-1">LP Records Found</p>
+                      <p className="text-xl font-bold text-white">{recordCount} records</p>
                     </div>
-                    <button
-                      onClick={handleWithdraw}
-                      disabled={!connected || withdrawLoading || !withdrawAmount || parseFloat(withdrawAmount) <= 0}
-                      className="px-4 py-2 bg-red-500 hover:bg-red-600 disabled:bg-red-500/30 rounded-lg text-sm font-medium text-white transition-colors"
-                    >
-                      {withdrawLoading ? '...' : 'Withdraw'}
-                    </button>
+                    {decrypted && (
+                      <div className="text-right">
+                        <p className="text-gray-400 text-xs mb-1">Total Value</p>
+                        <p className="text-lg font-semibold text-zkperp-green">${formatLPTokens(totalLP)}</p>
+                      </div>
+                    )}
                   </div>
-                  {withdrawError && (
-                    <p className="text-red-400 text-xs mt-2">{withdrawError}</p>
-                  )}
-                  {withdrawTxHash && (
-                    <p className="text-zkperp-green text-xs mt-2">Withdrawal submitted!</p>
+                  {decrypted && poolLiquidity > BigInt(0) && totalLP > BigInt(0) && (
+                    <div className="flex justify-between text-xs text-gray-500 mt-2 pt-2 border-t border-zkperp-border">
+                      <span>Pool Share</span>
+                      <span>{((Number(totalLP) / Number(poolLiquidity)) * 100).toFixed(2)}%</span>
+                    </div>
                   )}
                 </div>
+
+                {/* Show Records button OR decrypted records */}
+                {!decrypted ? (
+                  <button
+                    onClick={decryptAll}
+                    disabled={decrypting}
+                    className="w-full py-3 bg-zkperp-accent/20 hover:bg-zkperp-accent/30 border border-zkperp-accent/50 disabled:opacity-50 rounded-lg text-sm font-medium text-zkperp-accent transition-colors"
+                  >
+                    {decrypting ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Decrypting {recordCount} records...
+                      </span>
+                    ) : (
+                      `🔓 Decrypt & Show ${recordCount} Records`
+                    )}
+                  </button>
+                ) : (
+                  <>
+                    {/* Individual Records */}
+                    <div className="border-t border-zkperp-border pt-3">
+                      <p className="text-sm text-gray-400 mb-2">
+                        LP Records ({lpTokens.length})
+                      </p>
+                      <div className="space-y-2 max-h-64 overflow-y-auto">
+                        {lpTokens.map((token, idx) => (
+                          <div
+                            key={token.id || idx}
+                            className="bg-zkperp-dark rounded-lg p-3 flex items-center justify-between"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="w-7 h-7 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 text-xs font-bold">
+                                {idx + 1}
+                              </div>
+                              <div>
+                                <p className="text-white text-sm font-medium">
+                                  {formatLPTokens(token.amount)} LP
+                                </p>
+                                <p className="text-gray-500 text-xs">
+                                  ~${formatLPTokens(token.amount)} USDC
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => handleWithdrawRecord(token)}
+                              disabled={isWithdrawBusy || withdrawRecordId === token.id}
+                              className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 hover:border-red-500/50 disabled:opacity-50 rounded-lg text-xs font-medium text-red-400 transition-colors"
+                            >
+                              {withdrawRecordId === token.id ? '...' : 'Withdraw'}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Withdraw Transaction Status */}
+                    <TransactionStatus
+                      status={withdrawTx.status}
+                      tempTxId={withdrawTx.tempTxId}
+                      onChainTxId={withdrawTx.onChainTxId}
+                      error={withdrawTx.error}
+                      onDismiss={withdrawTx.reset}
+                    />
+                  </>
+                )}
               </div>
             ) : (
               <div className="text-center py-4">

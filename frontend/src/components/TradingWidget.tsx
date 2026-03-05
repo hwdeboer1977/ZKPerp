@@ -50,6 +50,9 @@ export function TradingWidget({ currentPrice }: Props) {
 
     try {
       const nonce = generateNonce();
+
+      const orchestratorRes = await fetch(`https://api.explorer.provable.com/v1/testnet/program/zkperp_v7.aleo/mapping/roles/1u8`);
+      const orchestrator = (await orchestratorRes.json()).replace(/"/g, '');
       
       const inputs = [
         collateral.toString() + 'u128',
@@ -59,6 +62,7 @@ export function TradingWidget({ currentPrice }: Props) {
         maxSlippage.toString() + 'u64',
         nonce,
         address,
+        orchestrator,
       ];
 
       console.log('Open position inputs:', inputs);

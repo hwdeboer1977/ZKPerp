@@ -11,3 +11,14 @@ outputs/
 build/
 *records*
 *node_modules*
+
+# Old
+*OLD*
+
+# Python
+venv/
+.env
+__pycache__/
+voice/venv/
+voice/lib/
+lib/

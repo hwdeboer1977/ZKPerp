@@ -111,6 +111,8 @@ export function PositionDisplay({ currentPrice }: Props) {
         })
       );
 
+      
+
       const openPositions: Position[] = [];
       const closedIds: string[] = JSON.parse(localStorage.getItem('zkperp_closed_positions') || '[]');
 
@@ -118,35 +120,65 @@ export function PositionDisplay({ currentPrice }: Props) {
         if (!result) continue;
         const { plaintext } = result;
 
-        const positionIdMatch = plaintext.match(/position_id:\s*(\d+field)/);
-        const isLongMatch = plaintext.match(/is_long:\s*(true|false)/);
-        const sizeMatch = plaintext.match(/size_usdc:\s*(\d+)u64/);
-        const collateralMatch = plaintext.match(/collateral_usdc:\s*(\d+)u(?:64|128)/);
-        const entryPriceMatch = plaintext.match(/entry_price:\s*(\d+)u64/);
-        const openBlockMatch = plaintext.match(/open_block:\s*(\d+)u32/);
+        // Skip LiquidationAuth records (they have a trader: field)
+        if (plaintext.includes('trader:')) {
+          console.log('SKIP: LiquidationAuth record (has trader: field)');
+          continue;
+        }
 
-        if (!positionIdMatch || !sizeMatch) continue;
+        console.log('PARSING position plaintext...');
+
+        const positionIdMatch = plaintext.match(/position_id:\s*(\d+field)(?:\.private)?/);
+        const isLongMatch = plaintext.match(/is_long:\s*(true|false)(?:\.private)?/);
+        const sizeMatch = plaintext.match(/size_usdc:\s*(\d+)u64(?:\.private)?/);
+        const collateralMatch = plaintext.match(/collateral_usdc:\s*(\d+)u(?:64|128)(?:\.private)?/);
+        const entryPriceMatch = plaintext.match(/entry_price:\s*(\d+)u64(?:\.private)?/);
+        const openBlockMatch = plaintext.match(/open_block:\s*(\d+)u32(?:\.private)?/);
+
+        console.log('REGEX RESULTS:', {
+          positionId: positionIdMatch?.[1],
+          size: sizeMatch?.[1],
+          collateral: collateralMatch?.[1],
+          entryPrice: entryPriceMatch?.[1],
+          isLong: isLongMatch?.[1],
+        });
+
+        if (!positionIdMatch || !sizeMatch) {
+          console.log('SKIP: regex failed - positionIdMatch:', !!positionIdMatch, 'sizeMatch:', !!sizeMatch);
+          continue;
+        }
         const sizeUsdc = BigInt(sizeMatch[1]);
         const MIN_POSITION_SIZE = BigInt(10000); // $0.01
 
-        if (sizeUsdc < MIN_POSITION_SIZE) continue; // Skip dust positions
+        if (sizeUsdc < MIN_POSITION_SIZE) {
+          console.log('SKIP: dust position, size:', sizeUsdc.toString());
+          continue;
+        }
 
         const posId = positionIdMatch[1];
 
         // Skip locally known closed positions
         const cleanId = posId.replace('.private', '').replace('.public', '');
-        if (closedIds.some((id: string) => cleanId.includes(id))) continue;
+        console.log('Checking closed status for posId:', posId, 'cleanId:', cleanId);
+        console.log('localStorage closedIds:', closedIds);
+        if (closedIds.some((id: string) => cleanId.includes(id))) {
+          console.log('SKIP: locally known closed position');
+          continue;
+        }
 
         // Check on-chain if closed
         const isClosedOnChain = await checkPositionClosedOnChain(posId);
+        console.log('On-chain closed check result:', isClosedOnChain);
         if (isClosedOnChain) {
           if (!closedIds.includes(cleanId)) {
             closedIds.push(cleanId);
             localStorage.setItem('zkperp_closed_positions', JSON.stringify(closedIds));
           }
+          console.log('SKIP: closed on-chain');
           continue;
         }
 
+        console.log('✅ ADDING position to openPositions');
         openPositions.push({
           owner: address || '',
           position_id: posId,
@@ -262,12 +294,12 @@ export function PositionDisplay({ currentPrice }: Props) {
         return;
       }
 
-      const positionIdMatch = plaintext.match(/position_id:\s*(\d+field)/);
-      const isLongMatch = plaintext.match(/is_long:\s*(true|false)/);
-      const sizeMatch = plaintext.match(/size_usdc:\s*(\d+)u64/);
-      const collateralMatch = plaintext.match(/collateral_usdc:\s*(\d+)u(?:64|128)/);
-      const entryPriceMatch = plaintext.match(/entry_price:\s*(\d+)u64/);
-      const openBlockMatch = plaintext.match(/open_block:\s*(\d+)u32/);
+      const positionIdMatch = plaintext.match(/position_id:\s*(\d+field)(?:\.private)?/);
+      const isLongMatch = plaintext.match(/is_long:\s*(true|false)(?:\.private)?/);
+      const sizeMatch = plaintext.match(/size_usdc:\s*(\d+)u64(?:\.private)?/);
+      const collateralMatch = plaintext.match(/collateral_usdc:\s*(\d+)u(?:64|128)(?:\.private)?/);
+      const entryPriceMatch = plaintext.match(/entry_price:\s*(\d+)u64(?:\.private)?/);
+      const openBlockMatch = plaintext.match(/open_block:\s*(\d+)u32(?:\.private)?/);
 
       if (!positionIdMatch || !sizeMatch) {
         setDecryptError('Not a valid Position record');

@@ -5,7 +5,7 @@
 
 import test_usdcx_stablecoin.aleo;
 
-program zkperp_v6.aleo {
+program zkperp_v7.aleo {
 
     // ═══════════════════════════════════════════════════════════════════
     // LIQUIDATION ARCHITECTURE (Option D - Dual Record)
@@ -113,6 +113,10 @@ program zkperp_v6.aleo {
     // This is set in finalize where block.height is accessible
     mapping position_open_blocks: field => u32;
 
+    // Counter mappings to cap records per user (max 3 each)
+    mapping lp_count: address => u8;
+    mapping position_count: address => u8;
+
     // ============== ROLE MANAGEMENT ==============
 
     /// Initialize roles - fallback if constructor didn't set them
@@ -176,14 +180,20 @@ program zkperp_v6.aleo {
             amount: deposit_u64,
         };
         
-        return (lp_token, finalize_add_liquidity(transfer_future, deposit_u64));
+        return (lp_token, finalize_add_liquidity(transfer_future, deposit_u64, recipient));
     }
 
     async function finalize_add_liquidity(
         transfer_future: Future,
         deposit_amount: u64,
+        recipient: address,
     ) {
         transfer_future.await();
+        
+        // Check LP count cap (max 3 LP records per user)
+        let current_lp_count: u8 = Mapping::get_or_use(lp_count, recipient, 0u8);
+        assert(current_lp_count < 3u8);
+        Mapping::set(lp_count, recipient, current_lp_count + 1u8);
         
         let state: PoolState = Mapping::get_or_use(
             pool_state, 
@@ -221,20 +231,31 @@ program zkperp_v6.aleo {
             expected_usdc
         );
         
+        let remaining_amount: u64 = lp_token.amount - amount_to_burn;
+        
         let remaining: LPToken = LPToken {
             owner: lp_token.owner,
-            amount: lp_token.amount - amount_to_burn,
+            amount: remaining_amount,
         };
         
-        return (remaining, finalize_remove_liquidity(transfer_future, amount_to_burn, expected_usdc as u64));
+        return (remaining, finalize_remove_liquidity(transfer_future, amount_to_burn, expected_usdc as u64, lp_token.owner, remaining_amount));
     }
 
     async function finalize_remove_liquidity(
         transfer_future: Future,
         amount_to_burn: u64,
         expected_usdc: u64,
+        owner: address,
+        remaining_amount: u64,
     ) {
         transfer_future.await();
+        
+        // Decrement LP count if fully withdrawn (remaining = 0 or dust)
+        if (remaining_amount == 0u64) {
+            let current_lp_count: u8 = Mapping::get_or_use(lp_count, owner, 1u8);
+            let new_count: u8 = current_lp_count > 0u8 ? current_lp_count - 1u8 : 0u8;
+            Mapping::set(lp_count, owner, new_count);
+        }
         
         let state: PoolState = Mapping::get(pool_state, 0field);
         
@@ -262,7 +283,7 @@ program zkperp_v6.aleo {
     }
 
     // Open position - creates BOTH Position (for trader) and LiquidationAuth (for orchestrator)
-    // NOTE: Orchestrator address is read from mapping in finalize
+    // Orchestrator address passed as public input, verified in finalize against roles mapping
     async transition open_position(
         public collateral: u128,
         public size: u64,
@@ -271,7 +292,8 @@ program zkperp_v6.aleo {
         public max_slippage: u64,
         nonce: field,
         recipient: address,
-    ) -> (Position, Future) {
+        public orchestrator: address,
+    ) -> (Position, LiquidationAuth, Future) {
         let collateral_u64: u64 = collateral as u64;
         
         // Validate leverage (size / collateral <= 20)
@@ -301,10 +323,20 @@ program zkperp_v6.aleo {
         let position_id: field = BHP256::hash_to_field(id_input);
         
         // Create Position record for TRADER
-        // NOTE: open_block is set to 0 here because block.height is not available in transition
-        // The actual open_block is stored in position_open_blocks mapping during finalize
         let position: Position = Position {
             owner: recipient,
+            position_id: position_id,
+            is_long: is_long,
+            size_usdc: size,
+            collateral_usdc: collateral_after_fee,
+            entry_price: entry_price,
+            open_block: 0u32,  // Placeholder - actual value in mapping
+        };
+        
+        // Create LiquidationAuth record for ORCHESTRATOR
+        let liq_auth: LiquidationAuth = LiquidationAuth {
+            owner: orchestrator,
+            trader: recipient,
             position_id: position_id,
             is_long: is_long,
             size_usdc: size,
@@ -317,6 +349,7 @@ program zkperp_v6.aleo {
             transfer_future,
             position_id,
             recipient,
+            orchestrator,
             collateral_u64,
             size,
             is_long,
@@ -327,13 +360,14 @@ program zkperp_v6.aleo {
             collateral_after_fee
         );
         
-        return (position, f);
+        return (position, liq_auth, f);
     }
 
     async function finalize_open_position(
         transfer_future: Future,
         position_id: field,
         recipient: address,
+        orchestrator: address,
         collateral: u64,
         size: u64,
         is_long: bool,
@@ -344,6 +378,15 @@ program zkperp_v6.aleo {
         collateral_after_fee: u64,
     ) {
         transfer_future.await();
+        
+        // Verify orchestrator matches the one stored in roles mapping
+        let expected_orchestrator: address = Mapping::get(roles, 1u8);
+        assert_eq(orchestrator, expected_orchestrator);
+        
+        // Check position count cap (max 3 open positions per user)
+        let current_pos_count: u8 = Mapping::get_or_use(position_count, recipient, 0u8);
+        assert(current_pos_count < 3u8);
+        Mapping::set(position_count, recipient, current_pos_count + 1u8);
         
         // Check nonce
         let nonce_used: bool = Mapping::get_or_use(used_nonces, nonce, false);
@@ -417,7 +460,8 @@ program zkperp_v6.aleo {
             position.entry_price,
             min_price,
             max_price,
-            expected_payout as u64
+            expected_payout as u64,
+            position.owner
         );
     }
 
@@ -431,6 +475,7 @@ program zkperp_v6.aleo {
         min_price: u64,
         max_price: u64,
         expected_payout: u64,
+        trader: address,
     ) {
         transfer_future.await();
         
@@ -440,6 +485,11 @@ program zkperp_v6.aleo {
         
         // Mark position as closed
         Mapping::set(closed_positions, position_id, true);
+        
+        // Decrement position count for trader
+        let current_pos_count: u8 = Mapping::get_or_use(position_count, trader, 1u8);
+        let new_pos_count: u8 = current_pos_count > 0u8 ? current_pos_count - 1u8 : 0u8;
+        Mapping::set(position_count, trader, new_pos_count);
         
         // Get current price
         let price_data: PriceData = Mapping::get(oracle_prices, 0field);
@@ -520,6 +570,7 @@ program zkperp_v6.aleo {
         public collateral: u64,
         public entry_price: u64,
         public liquidator_reward: u128,
+        public trader: address,
     ) -> Future {
         // Transfer reward to the caller (liquidator)
         // USDCx: transfer_public(to, amount)
@@ -535,7 +586,8 @@ program zkperp_v6.aleo {
             size,
             collateral,
             entry_price,
-            liquidator_reward as u64
+            liquidator_reward as u64,
+            trader
         );
     }
 
@@ -547,6 +599,7 @@ program zkperp_v6.aleo {
         collateral: u64,
         entry_price: u64,
         liquidator_reward: u64,
+        trader: address,
     ) {
         transfer_future.await();
         
@@ -556,6 +609,11 @@ program zkperp_v6.aleo {
         
         // Mark position as liquidated
         Mapping::set(closed_positions, position_id, true);
+        
+        // Decrement position count for trader
+        let current_pos_count: u8 = Mapping::get_or_use(position_count, trader, 1u8);
+        let new_pos_count: u8 = current_pos_count > 0u8 ? current_pos_count - 1u8 : 0u8;
+        Mapping::set(position_count, trader, new_pos_count);
         
         // Get current price
         let price_data: PriceData = Mapping::get(oracle_prices, 0field);

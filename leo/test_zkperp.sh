@@ -2,16 +2,23 @@
 set -e
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ZKPerp v6 Test Script - Devnet
+# ZKPerp v7 Test Script - Devnet
 # ═══════════════════════════════════════════════════════════════════════════════
 #
-# Updated for v6: USDCx (test_usdcx_stablecoin.aleo), constructor-based admin
+# Updated for v7:
+#   - LiquidationAuth record created on open_position
+#   - LP count cap (max 3 per user)
+#   - Position count cap (max 3 per user)
+#   - Orchestrator address passed to open_position
+#   - Trader address passed to liquidate
 #
 # ╔════════════════════════════════════════════════════════════════╗
 # ║                    TEST SCENARIO SELECTOR                       ║
 # ╠════════════════════════════════════════════════════════════════╣
 # ║  TEST_SCENARIO=1  →  Price UP, Trader closes with PROFIT       ║
 # ║  TEST_SCENARIO=2  →  Price DOWN, Anyone LIQUIDATES             ║
+# ║  TEST_SCENARIO=3  →  Test LP cap (4th deposit should FAIL)     ║
+# ║  TEST_SCENARIO=4  →  Test Position cap (4th open should FAIL)  ║
 # ╚════════════════════════════════════════════════════════════════╝
 #
 # HOW TO RUN:
@@ -22,16 +29,11 @@ set -e
 #
 # Terminal 2: Run test
 #   chmod +x test_zkperp.sh
-#   ./test_zkperp.sh
-#
-# PREREQUISITES:
-#   - USDCx (test_usdcx_stablecoin.aleo) must be deployed on devnet
-#     OR you deploy it as part of the devnet genesis
-#   - User must have USDCx balance (bridge from Sepolia or mint on devnet)
+#   TEST_SCENARIO=1 ./test_zkperp.sh
 #
 # ═══════════════════════════════════════════════════════════════════════════════
 
-TEST_SCENARIO=1  # <-- CHANGE THIS: 1 = trader profit, 2 = liquidation
+TEST_SCENARIO=${TEST_SCENARIO:-1}
 
 # ══════════════════════════════════════════════════════════════════
 # CONFIGURATION
@@ -43,9 +45,9 @@ NETWORK="--network testnet --broadcast"
 
 # Programs
 USDC_PROGRAM="test_usdcx_stablecoin.aleo"
-PERP_PROGRAM="zkperp_v6.aleo"
+PERP_PROGRAM="zkperp_v7.aleo"
 
-# User address (default devnet address)
+# User address (default devnet address — also oracle admin & orchestrator via constructor)
 USER="aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px"
 
 # Project paths - UPDATE THESE
@@ -75,92 +77,89 @@ wait_for_devnet() {
     echo "Devnet ready! Height: $height"
 }
 
+check_mapping() {
+    local program=$1
+    local mapping=$2
+    local key=$3
+    echo "  $mapping[$key]:"
+    curl -s "$ENDPOINT/testnet/program/$program/mapping/$mapping/$key"
+    echo ""
+}
+
 # ══════════════════════════════════════════════════════════════════
 # MAIN SCRIPT
 # ══════════════════════════════════════════════════════════════════
 
 echo "╔════════════════════════════════════════════════════════════════╗"
-echo "║       ZKPerp v6 Test Suite - USDCx + Constructor Admin         ║"
+echo "║     ZKPerp v7 Test Suite - LiquidationAuth + Record Caps      ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
 echo ""
 
-if [ "$TEST_SCENARIO" -eq 1 ]; then
-    echo "🟢 TEST SCENARIO 1: Price UP → Trader closes with PROFIT"
-    echo ""
-    echo "  Entry price:  \$100,000"
-    echo "  Exit price:   \$105,000 (+5%)"
-    echo "  Position:     Long \$50 (5x leverage on \$10 collateral)"
-    echo "  Expected PnL: +\$2.50 profit"
-elif [ "$TEST_SCENARIO" -eq 2 ]; then
-    echo "🔴 TEST SCENARIO 2: Price DOWN → Position LIQUIDATED"
-    echo ""
-    echo "  Entry price:       \$100,000"
-    echo "  Exit price:        \$60,000 (-40%)"
-    echo "  Position:          Long \$50 (5x leverage on \$10 collateral)"
-    echo "  Result:            Position liquidated, liquidator gets reward"
-else
-    echo "❌ Invalid TEST_SCENARIO: $TEST_SCENARIO"
-    exit 1
-fi
+case $TEST_SCENARIO in
+    1) echo "🟢 SCENARIO 1: Price UP → Trader closes with PROFIT"
+       echo "  Entry: \$100,000 → Exit: \$105,000 (+5%)"
+       echo "  Position: Long \$50 (5x on \$10 collateral)"
+       echo "  Expected: ~\$2.50 profit" ;;
+    2) echo "🔴 SCENARIO 2: Price DOWN → Position LIQUIDATED"
+       echo "  Entry: \$100,000 → Exit: \$60,000 (-40%)"
+       echo "  Position: Long \$50 (5x on \$10 collateral)"
+       echo "  Expected: Liquidated, liquidator earns \$0.25" ;;
+    3) echo "🟡 SCENARIO 3: LP CAP TEST → 4th deposit should FAIL"
+       echo "  3 deposits of \$10 each should succeed"
+       echo "  4th deposit should fail with assertion error" ;;
+    4) echo "🟡 SCENARIO 4: POSITION CAP TEST → 4th open should FAIL"
+       echo "  3 positions of \$10 each should succeed"
+       echo "  4th position should fail with assertion error" ;;
+    *) echo "❌ Invalid TEST_SCENARIO: $TEST_SCENARIO"; exit 1 ;;
+esac
 echo ""
 
 wait_for_devnet
 
 # ══════════════════════════════════════════════════════════════════
-# STEP 1: Deploy ZKPerp v6
+# STEP 1: Deploy ZKPerp v7
 # ══════════════════════════════════════════════════════════════════
-#
-# NOTE: USDCx (test_usdcx_stablecoin.aleo) must already be deployed.
-# On devnet, either include it in genesis or deploy it separately first.
-# The constructor automatically sets deployer as oracle admin + orchestrator.
 
 echo ""
-echo "=== STEP 1: Deploying ZKPerp v6 ==="
-echo "  (Constructor sets deployer as oracle admin & orchestrator)"
+echo "=== STEP 1: Deploying ZKPerp v7 ==="
+echo "  Constructor sets deployer as oracle admin & orchestrator"
 cd $ZKPERP_DIR
 leo deploy $NETWORK $CONSENSUS --yes
 sleep 5
 
-echo "Checking roles (set by constructor)..."
-echo "  Oracle Admin:"
-curl -s "$ENDPOINT/testnet/program/$PERP_PROGRAM/mapping/roles/0u8"
-echo ""
-echo "  Orchestrator:"
-curl -s "$ENDPOINT/testnet/program/$PERP_PROGRAM/mapping/roles/1u8"
-echo ""
+echo "Checking roles..."
+check_mapping $PERP_PROGRAM roles 0u8
+check_mapping $PERP_PROGRAM roles 1u8
+
+# Store orchestrator address for open_position calls
+ORCHESTRATOR=$USER
+echo "  Orchestrator: $ORCHESTRATOR"
 
 # ══════════════════════════════════════════════════════════════════
-# STEP 2: Ensure user has USDCx balance
+# STEP 2: Check USDCx balance
 # ══════════════════════════════════════════════════════════════════
 
 echo ""
 echo "=== STEP 2: Checking USDCx balance ==="
-echo "  (On testnet, bridge USDCx at https://usdcx.aleo.dev/)"
-echo "  (On devnet, ensure USDCx is deployed and user has balance)"
-BALANCE=$(curl -s "$ENDPOINT/testnet/program/$USDC_PROGRAM/mapping/balances/$USER")
-echo "  User USDCx balance: $BALANCE"
-echo ""
+check_mapping $USDC_PROGRAM balances $USER
 
 # ══════════════════════════════════════════════════════════════════
 # STEP 3: Approve ZKPerp to spend USDCx
 # ══════════════════════════════════════════════════════════════════
 
 echo ""
-echo "=== STEP 3: Approving ZKPerp v6 to spend USDCx ==="
-echo "  (USDCx uses approve_public, not approve)"
+echo "=== STEP 3: Approving ZKPerp v7 to spend USDCx ==="
 
-# Get program address by doing a dry run
+# Get program address
 cd $ZKPERP_DIR
 PROGRAM_ADDR=$(leo run add_liquidity 100u128 $USER 2>&1 | grep -oP 'aleo1[a-z0-9]{58}' | head -4 | tail -1)
 echo "  ZKPerp program address: $PROGRAM_ADDR"
 
-# NOTE: On devnet you need the USDCx program available locally or use snarkos developer execute
-# approve_public(spender, amount)
 snarkos developer execute $USDC_PROGRAM approve_public $PROGRAM_ADDR 10000000000u128 \
     --query $ENDPOINT \
     --broadcast "$ENDPOINT/testnet/transaction/broadcast" \
     --private-key APrivateKey1zkp8CZNn3yeCBJ49HG... \
-    $CONSENSUS --yes 2>&1 || echo "  ⚠️  approve_public failed - you may need to set the correct private key or deploy USDCx first"
+    $CONSENSUS --yes 2>&1 || echo "  ⚠️  approve_public failed - check private key or deploy USDCx first"
 sleep 5
 
 # ══════════════════════════════════════════════════════════════════
@@ -170,73 +169,140 @@ sleep 5
 echo ""
 echo "=== STEP 4: Setting Oracle Price (BTC = \$100,000) ==="
 cd $ZKPERP_DIR
-
-# Price: $100,000 with 8 decimals = 10000000000u64
 leo execute update_price 0field 10000000000u64 1u32 $NETWORK $CONSENSUS --yes
 sleep 5
-
-echo "Checking oracle price..."
-curl -s "$ENDPOINT/testnet/program/$PERP_PROGRAM/mapping/oracle_prices/0field"
-echo ""
+check_mapping $PERP_PROGRAM oracle_prices 0field
 
 # ══════════════════════════════════════════════════════════════════
-# STEP 5: Add Liquidity
+# SCENARIO-SPECIFIC TESTS
 # ══════════════════════════════════════════════════════════════════
 
-echo ""
-echo "=== STEP 5: Adding Liquidity (\$100 USDCx) ==="
-leo execute add_liquidity 100000000u128 $USER $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/add_liquidity.log
-sleep 5
-
-echo "Checking pool state..."
-curl -s "$ENDPOINT/testnet/program/$PERP_PROGRAM/mapping/pool_state/0field"
-echo ""
-
-# ══════════════════════════════════════════════════════════════════
-# STEP 6: Open Long Position
-# ══════════════════════════════════════════════════════════════════
-
-echo ""
-echo "=== STEP 6: Opening Long Position (5x leverage) ==="
-echo "  Collateral: \$10 USDCx"
-echo "  Size: \$50"
-echo "  Direction: Long BTC"
-
-# open_position(collateral, size, is_long, entry_price, max_slippage, nonce, recipient)
-leo execute open_position 10000000u128 50000000u64 true 10000000000u64 100000000u64 1field $USER $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/open_position.log
-sleep 5
-
-echo "Checking pool state after position..."
-curl -s "$ENDPOINT/testnet/program/$PERP_PROGRAM/mapping/pool_state/0field"
-echo ""
-
-# Check position_open_blocks mapping
-echo "Checking position_open_blocks..."
-python3 << 'PYEOF'
-import re
-with open('/tmp/open_position.log', 'r') as f:
-    content = f.read()
-match = re.search(r'position_id:\s*(\d+field)', content)
-if match:
-    position_id = match.group(1)
-    print(f"Position ID: {position_id}")
-    with open('/tmp/position_id.txt', 'w') as f:
-        f.write(position_id)
-PYEOF
-
-if [ -f "/tmp/position_id.txt" ]; then
-    POSITION_ID=$(cat /tmp/position_id.txt)
-    echo "Checking open_block for position..."
-    curl -s "$ENDPOINT/testnet/program/$PERP_PROGRAM/mapping/position_open_blocks/$POSITION_ID"
-    echo ""
-fi
-
-# Extract Position record
-if grep -q "Transaction accepted" /tmp/open_position.log; then
-    echo "✅ open_position SUCCESS"
+if [ "$TEST_SCENARIO" -eq 3 ]; then
+    # ═══════════════════════════════════════════════════════════
+    # SCENARIO 3: LP CAP TEST
+    # ═══════════════════════════════════════════════════════════
     
-    mkdir -p $ZKPERP_DIR/records
-    python3 << 'PYEOF'
+    echo ""
+    echo "=== SCENARIO 3: Testing LP Count Cap (max 3) ==="
+    
+    echo ""
+    echo "--- LP Deposit 1/3 (\$10) ---"
+    leo execute add_liquidity 10000000u128 $USER $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/lp1.log
+    sleep 5
+    check_mapping $PERP_PROGRAM lp_count $USER
+    
+    echo ""
+    echo "--- LP Deposit 2/3 (\$10) ---"
+    leo execute add_liquidity 10000000u128 $USER $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/lp2.log
+    sleep 5
+    check_mapping $PERP_PROGRAM lp_count $USER
+    
+    echo ""
+    echo "--- LP Deposit 3/3 (\$10) ---"
+    leo execute add_liquidity 10000000u128 $USER $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/lp3.log
+    sleep 5
+    check_mapping $PERP_PROGRAM lp_count $USER
+    
+    echo ""
+    echo "--- LP Deposit 4/3 (\$10) — SHOULD FAIL ---"
+    if leo execute add_liquidity 10000000u128 $USER $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/lp4.log; then
+        if grep -q "rejected\|failed\|assert" /tmp/lp4.log; then
+            echo "✅ 4th LP deposit correctly REJECTED (cap = 3)"
+        else
+            echo "⚠️  4th LP deposit may have been accepted — check finalize"
+        fi
+    else
+        echo "✅ 4th LP deposit correctly FAILED (cap = 3)"
+    fi
+    
+    echo ""
+    echo "Final LP count:"
+    check_mapping $PERP_PROGRAM lp_count $USER
+    check_mapping $PERP_PROGRAM pool_state 0field
+
+elif [ "$TEST_SCENARIO" -eq 4 ]; then
+    # ═══════════════════════════════════════════════════════════
+    # SCENARIO 4: POSITION CAP TEST
+    # ═══════════════════════════════════════════════════════════
+    
+    echo ""
+    echo "=== Adding Liquidity first (\$200) ==="
+    leo execute add_liquidity 200000000u128 $USER $NETWORK $CONSENSUS --yes
+    sleep 5
+    
+    echo ""
+    echo "=== SCENARIO 4: Testing Position Count Cap (max 3) ==="
+    
+    echo ""
+    echo "--- Position 1/3 (\$10 size, \$5 collateral) ---"
+    # open_position(collateral, size, is_long, entry_price, max_slippage, nonce, recipient, orchestrator)
+    leo execute open_position 5000000u128 10000000u64 true 10000000000u64 100000000u64 1field $USER $ORCHESTRATOR $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/pos1.log
+    sleep 5
+    check_mapping $PERP_PROGRAM position_count $USER
+    
+    echo ""
+    echo "--- Position 2/3 (\$10 size, \$5 collateral) ---"
+    leo execute open_position 5000000u128 10000000u64 true 10000000000u64 100000000u64 2field $USER $ORCHESTRATOR $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/pos2.log
+    sleep 5
+    check_mapping $PERP_PROGRAM position_count $USER
+    
+    echo ""
+    echo "--- Position 3/3 (\$10 size, \$5 collateral) ---"
+    leo execute open_position 5000000u128 10000000u64 true 10000000000u64 100000000u64 3field $USER $ORCHESTRATOR $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/pos3.log
+    sleep 5
+    check_mapping $PERP_PROGRAM position_count $USER
+    
+    echo ""
+    echo "--- Position 4/3 (\$10 size, \$5 collateral) — SHOULD FAIL ---"
+    if leo execute open_position 5000000u128 10000000u64 true 10000000000u64 100000000u64 4field $USER $ORCHESTRATOR $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/pos4.log; then
+        if grep -q "rejected\|failed\|assert" /tmp/pos4.log; then
+            echo "✅ 4th position correctly REJECTED (cap = 3)"
+        else
+            echo "⚠️  4th position may have been accepted — check finalize"
+        fi
+    else
+        echo "✅ 4th position correctly FAILED (cap = 3)"
+    fi
+    
+    echo ""
+    echo "Final position count:"
+    check_mapping $PERP_PROGRAM position_count $USER
+    check_mapping $PERP_PROGRAM pool_state 0field
+
+else
+    # ═══════════════════════════════════════════════════════════
+    # SCENARIOS 1 & 2: Standard trading flow
+    # ═══════════════════════════════════════════════════════════
+    
+    # STEP 5: Add Liquidity
+    echo ""
+    echo "=== STEP 5: Adding Liquidity (\$100 USDCx) ==="
+    leo execute add_liquidity 100000000u128 $USER $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/add_liquidity.log
+    sleep 5
+    check_mapping $PERP_PROGRAM pool_state 0field
+    check_mapping $PERP_PROGRAM lp_count $USER
+
+    # STEP 6: Open Long Position (now with orchestrator address)
+    echo ""
+    echo "=== STEP 6: Opening Long Position (5x leverage) ==="
+    echo "  Collateral: \$10 USDCx"
+    echo "  Size: \$50"
+    echo "  Direction: Long BTC"
+    echo "  Orchestrator: $ORCHESTRATOR"
+
+    # open_position(collateral, size, is_long, entry_price, max_slippage, nonce, recipient, orchestrator)
+    leo execute open_position 10000000u128 50000000u64 true 10000000000u64 100000000u64 1field $USER $ORCHESTRATOR $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/open_position.log
+    sleep 5
+
+    check_mapping $PERP_PROGRAM pool_state 0field
+    check_mapping $PERP_PROGRAM position_count $USER
+
+    # Extract Position record AND LiquidationAuth record
+    if grep -q "Transaction accepted" /tmp/open_position.log; then
+        echo "✅ open_position SUCCESS"
+        
+        mkdir -p $ZKPERP_DIR/records
+        python3 << 'PYEOF'
 import re
 with open('/tmp/open_position.log', 'r') as f:
     content = f.read()
@@ -244,93 +310,117 @@ with open('/tmp/open_position.log', 'r') as f:
 pattern = r'\{[^{}]+\}'
 matches = re.findall(pattern, content, re.DOTALL)
 
+position_saved = False
+liq_auth_saved = False
+
 for m in matches:
     record = m.strip()
-    # Position record has position_id but NOT trader field
-    if 'position_id:' in m and 'size_usdc:' in m and 'trader:' not in m:
+    # Position record: has position_id, size_usdc, but NOT trader field
+    if 'position_id:' in record and 'size_usdc:' in record and 'trader:' not in record and not position_saved:
         with open('records/position.txt', 'w') as f:
             f.write(record)
-        print("✅ Position record saved")
-        print(f"   {record}")
-        break
+        print("✅ Position record saved (owned by TRADER)")
+        print(f"   {record[:100]}...")
+        position_saved = True
+    
+    # LiquidationAuth record: has position_id, size_usdc, AND trader field
+    elif 'position_id:' in record and 'size_usdc:' in record and 'trader:' in record and not liq_auth_saved:
+        with open('records/liq_auth.txt', 'w') as f:
+            f.write(record)
+        print("✅ LiquidationAuth record saved (owned by ORCHESTRATOR)")
+        print(f"   {record[:100]}...")
+        liq_auth_saved = True
+
+if not position_saved:
+    print("⚠️  Position record not found in output")
+if not liq_auth_saved:
+    print("⚠️  LiquidationAuth record not found in output")
 PYEOF
-else
-    echo "❌ open_position FAILED"
-    exit 1
-fi
 
-# ══════════════════════════════════════════════════════════════════
-# STEP 7: Price Movement
-# ══════════════════════════════════════════════════════════════════
+        # Extract position ID
+        python3 << 'PYEOF'
+import re
+with open('/tmp/open_position.log', 'r') as f:
+    content = f.read()
+match = re.search(r'position_id:\s*(\d+field)', content)
+if match:
+    position_id = match.group(1)
+    print(f"  Position ID: {position_id}")
+    with open('/tmp/position_id.txt', 'w') as f:
+        f.write(position_id)
+PYEOF
 
-if [ "$TEST_SCENARIO" -eq 1 ]; then
-    echo ""
-    echo "=== STEP 7: Price UP to \$105,000 (+5%) ==="
-    leo execute update_price 0field 10500000000u64 2u32 $NETWORK $CONSENSUS --yes
-    sleep 5
-    
-elif [ "$TEST_SCENARIO" -eq 2 ]; then
-    echo ""
-    echo "=== STEP 7: Price DOWN to \$60,000 (-40%) ==="
-    leo execute update_price 0field 6000000000u64 2u32 $NETWORK $CONSENSUS --yes
-    sleep 5
-fi
-
-echo "Checking new oracle price..."
-curl -s "$ENDPOINT/testnet/program/$PERP_PROGRAM/mapping/oracle_prices/0field"
-echo ""
-
-# ══════════════════════════════════════════════════════════════════
-# STEP 8: Close or Liquidate
-# ══════════════════════════════════════════════════════════════════
-
-if [ "$TEST_SCENARIO" -eq 1 ]; then
-    echo ""
-    echo "=== STEP 8: TRADER Closes Position (with profit) ==="
-    
-    if [ -f "$ZKPERP_DIR/records/position.txt" ]; then
-        POSITION_RECORD=$(cat $ZKPERP_DIR/records/position.txt)
-        echo "Position record loaded"
-        
-        # close_position(position, min_price, max_price, expected_payout)
-        # Expected payout: ~$12 ($10 collateral - fee + $2.50 profit - borrow fee)
-        leo execute close_position "$POSITION_RECORD" 10400000000u64 10600000000u64 12000000u128 $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/close_position.log
-        sleep 5
-        
-        if grep -q "Transaction accepted" /tmp/close_position.log; then
-            echo "✅ close_position SUCCESS - Trader closed with profit!"
-            echo "Waiting for mapping updates to finalize..."
-            sleep 3
-        else
-            echo "❌ close_position FAILED"
-            echo "Note: Borrow fee might be higher than expected. Try lower expected_payout."
+        if [ -f "/tmp/position_id.txt" ]; then
+            POSITION_ID=$(cat /tmp/position_id.txt)
+            check_mapping $PERP_PROGRAM position_open_blocks $POSITION_ID
         fi
     else
-        echo "❌ Position record not found"
+        echo "❌ open_position FAILED"
+        exit 1
     fi
 
-elif [ "$TEST_SCENARIO" -eq 2 ]; then
-    echo ""
-    echo "=== STEP 8: LIQUIDATE Position (permissionless) ==="
-    echo ""
-    echo "  Anyone can liquidate unhealthy positions"
-    echo "  No LiquidationAuth record needed!"
-    
-    if [ -f "/tmp/position_id.txt" ]; then
-        POSITION_ID=$(cat /tmp/position_id.txt)
-        
-        # liquidate(position_id, is_long, size, collateral, entry_price, liquidator_reward)
-        # Reward: 0.5% of $50 = $0.25 = 250000u128
-        leo execute liquidate "$POSITION_ID" true 50000000u64 9950000u64 10000000000u64 250000u128 $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/liquidate.log
+    # STEP 7: Price Movement
+    if [ "$TEST_SCENARIO" -eq 1 ]; then
+        echo ""
+        echo "=== STEP 7: Price UP to \$105,000 (+5%) ==="
+        leo execute update_price 0field 10500000000u64 2u32 $NETWORK $CONSENSUS --yes
         sleep 5
+    elif [ "$TEST_SCENARIO" -eq 2 ]; then
+        echo ""
+        echo "=== STEP 7: Price DOWN to \$60,000 (-40%) ==="
+        leo execute update_price 0field 6000000000u64 2u32 $NETWORK $CONSENSUS --yes
+        sleep 5
+    fi
+    check_mapping $PERP_PROGRAM oracle_prices 0field
+
+    # STEP 8: Close or Liquidate
+    if [ "$TEST_SCENARIO" -eq 1 ]; then
+        echo ""
+        echo "=== STEP 8: TRADER Closes Position (with profit) ==="
         
-        if grep -q "Transaction accepted" /tmp/liquidate.log; then
-            echo "✅ liquidate SUCCESS - Position liquidated!"
+        if [ -f "$ZKPERP_DIR/records/position.txt" ]; then
+            POSITION_RECORD=$(cat $ZKPERP_DIR/records/position.txt)
+            
+            # close_position(position, min_price, max_price, expected_payout)
+            leo execute close_position "$POSITION_RECORD" 10400000000u64 10600000000u64 12000000u128 $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/close_position.log
+            sleep 5
+            
+            if grep -q "Transaction accepted" /tmp/close_position.log; then
+                echo "✅ close_position SUCCESS — Trader closed with profit!"
+                echo ""
+                echo "Position count after close:"
+                check_mapping $PERP_PROGRAM position_count $USER
+            else
+                echo "❌ close_position FAILED"
+                echo "  Note: Borrow fee might be higher than expected. Try lower expected_payout."
+            fi
         else
-            echo "❌ liquidate FAILED"
+            echo "❌ Position record not found"
         fi
-    else
-        echo "❌ Position ID not found"
+
+    elif [ "$TEST_SCENARIO" -eq 2 ]; then
+        echo ""
+        echo "=== STEP 8: LIQUIDATE Position (permissionless) ==="
+        echo "  Now includes trader address for position count decrement"
+        
+        if [ -f "/tmp/position_id.txt" ]; then
+            POSITION_ID=$(cat /tmp/position_id.txt)
+            
+            # liquidate(position_id, is_long, size, collateral, entry_price, liquidator_reward, trader)
+            leo execute liquidate "$POSITION_ID" true 50000000u64 9950000u64 10000000000u64 250000u128 $USER $NETWORK $CONSENSUS --yes 2>&1 | tee /tmp/liquidate.log
+            sleep 5
+            
+            if grep -q "Transaction accepted" /tmp/liquidate.log; then
+                echo "✅ liquidate SUCCESS — Position liquidated!"
+                echo ""
+                echo "Position count after liquidation:"
+                check_mapping $PERP_PROGRAM position_count $USER
+            else
+                echo "❌ liquidate FAILED"
+            fi
+        else
+            echo "❌ Position ID not found"
+        fi
     fi
 fi
 
@@ -339,44 +429,46 @@ fi
 # ══════════════════════════════════════════════════════════════════
 
 echo ""
-echo "Waiting for all state updates to finalize..."
 sleep 3
 
-echo ""
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║                         Summary                                ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
 echo ""
 echo "Pool state:"
-curl -s "$ENDPOINT/testnet/program/$PERP_PROGRAM/mapping/pool_state/0field"
-echo ""
-echo ""
+check_mapping $PERP_PROGRAM pool_state 0field
 echo "Oracle price:"
-curl -s "$ENDPOINT/testnet/program/$PERP_PROGRAM/mapping/oracle_prices/0field"
-echo ""
-echo ""
+check_mapping $PERP_PROGRAM oracle_prices 0field
 echo "User USDCx balance:"
-curl -s "$ENDPOINT/testnet/program/$USDC_PROGRAM/mapping/balances/$USER"
-echo ""
+check_mapping $USDC_PROGRAM balances $USER
+echo "LP count:"
+check_mapping $PERP_PROGRAM lp_count $USER
+echo "Position count:"
+check_mapping $PERP_PROGRAM position_count $USER
 
-if [ "$TEST_SCENARIO" -eq 1 ]; then
-    echo ""
-    echo "═══════════════════════════════════════════════════════════════"
-    echo "SCENARIO 1 COMPLETE: Trader Closed with Profit"
-    echo "═══════════════════════════════════════════════════════════════"
-elif [ "$TEST_SCENARIO" -eq 2 ]; then
-    echo ""
-    echo "═══════════════════════════════════════════════════════════════"
-    echo "SCENARIO 2 COMPLETE: Position Liquidated"
-    echo "═══════════════════════════════════════════════════════════════"
-fi
+case $TEST_SCENARIO in
+    1) echo "═══════════════════════════════════════════════════════════════"
+       echo "SCENARIO 1 COMPLETE: Trader Closed with Profit"
+       echo "═══════════════════════════════════════════════════════════════" ;;
+    2) echo "═══════════════════════════════════════════════════════════════"
+       echo "SCENARIO 2 COMPLETE: Position Liquidated"
+       echo "═══════════════════════════════════════════════════════════════" ;;
+    3) echo "═══════════════════════════════════════════════════════════════"
+       echo "SCENARIO 3 COMPLETE: LP Cap Test"
+       echo "═══════════════════════════════════════════════════════════════" ;;
+    4) echo "═══════════════════════════════════════════════════════════════"
+       echo "SCENARIO 4 COMPLETE: Position Cap Test"
+       echo "═══════════════════════════════════════════════════════════════" ;;
+esac
 
 echo ""
-echo "v6 Features:"
-echo "  ✅ USDCx (test_usdcx_stablecoin.aleo) - Circle's official stablecoin"
-echo "  ✅ Constructor-based admin (set at deploy time)"
-echo "  ✅ initialize_roles() as fallback if constructor didn't set"
-echo "  ✅ open_block stored in mapping (correct borrow fee)"
-echo "  ✅ Permissionless liquidation (anyone can liquidate)"
-echo "  ✅ approve_public / transfer_from_public (USDCx API)"
+echo "v7 Features:"
+echo "  ✅ LiquidationAuth record created on open_position"
+echo "  ✅ Orchestrator verified in finalize against roles mapping"
+echo "  ✅ LP count cap: max 3 per user"
+echo "  ✅ Position count cap: max 3 per user"
+echo "  ✅ Position count decremented on close AND liquidate"
+echo "  ✅ LP count decremented on full withdrawal"
+echo "  ✅ USDCx (test_usdcx_stablecoin.aleo)"
+echo "  ✅ Constructor-based admin"
 echo ""

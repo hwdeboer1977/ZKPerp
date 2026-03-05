@@ -105,7 +105,7 @@ function AppContent() {
           </div>
           <div className="mt-4 pt-4 border-t border-zkperp-border">
             <p className="text-center text-xs text-gray-600">
-              Aleo Testnet Beta • Contract: zkperp_v6.aleo
+              Aleo Testnet Beta • Contract: zkperp_v7.aleo
             </p>
           </div>
         </div>
@@ -122,7 +122,7 @@ function App() {
         autoConnect={false}
         network={Network.TESTNET}
         decryptPermission={DecryptPermission.UponRequest}
-        programs={['zkperp_v6.aleo', 'test_usdcx_stablecoin.aleo', 'credits.aleo']}
+        programs={['zkperp_v7.aleo', 'test_usdcx_stablecoin.aleo', 'credits.aleo']}
         onError={(error) => console.error(error.message)}
       >
         <WalletModalProvider>

@@ -243,7 +243,7 @@ export function AdminPage({ currentPrice, oracleSet, poolLiquidity, longOI, shor
           <div className="space-y-3 text-sm">
             <div>
               <p className="text-gray-400 mb-1">ZKPerp Contract</p>
-              <code className="text-xs text-zkperp-accent break-all">zkperp_v6.aleo</code>
+              <code className="text-xs text-zkperp-accent break-all">zkperp_v7.aleo</code>
             </div>
             <div>
               <p className="text-gray-400 mb-1">Mock USDC</p>

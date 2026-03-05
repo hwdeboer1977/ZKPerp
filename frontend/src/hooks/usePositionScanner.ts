@@ -108,7 +108,7 @@ export function usePositionScanner() {
       // Look for open_position transactions and extract record ciphertexts
       for (const tx of transactions) {
         if (tx.type === 'execute') {
-          // Look for zkperp_v6.aleo/open_position transitions
+          // Look for zkperp_v7.aleo/open_position transitions
           for (const transition of tx.execution?.transitions || []) {
             if (transition.program === PROGRAM_ID && 
                 transition.function === 'open_position') {

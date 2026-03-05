@@ -15,7 +15,7 @@ interface Props {
 // Contract constants
 const LIQUIDATION_THRESHOLD_PERCENT = 1; // 1%
 const LIQUIDATION_REWARD_BPS = 5000n; // 0.5%
-const PROGRAM_ID = 'zkperp_v6.aleo';
+const PROGRAM_ID = 'zkperp_v7.aleo';
 
 const ALEO_API = 'https://api.explorer.provable.com/v1/testnet';
 

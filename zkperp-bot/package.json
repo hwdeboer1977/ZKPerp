@@ -1,0 +1,16 @@
+{
+  "name": "zkperp-bot",
+  "version": "1.0.0",
+  "description": "Oracle + Liquidation bot for ZKPerp v7",
+  "type": "module",
+  "main": "zkperp-bot.mjs",
+  "dependencies": {
+    "dotenv": "^16.4.7"
+  },
+  "scripts": {
+    "start": "node zkperp-bot.mjs",
+    "dev": "node --watch zkperp-bot.mjs"
+  },
+  "keywords": ["aleo", "zkperp", "oracle", "liquidation", "defi"],
+  "license": "MIT"
+}

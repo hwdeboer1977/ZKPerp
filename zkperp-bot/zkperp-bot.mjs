@@ -33,6 +33,8 @@ import { ProvableClient } from './provable-client.mjs';
 // CONFIGURATION
 // ═══════════════════════════════════════════════════════════════
 
+const SNARKOS = process.env.SNARKOS_PATH || 'snarkos';
+
 const CONFIG = {
   // Keys
   privateKey: process.env.PRIVATE_KEY || '',
@@ -265,16 +267,23 @@ async function updateOraclePrice(priceUsd) {
   const priceOnChain = BigInt(Math.round(priceUsd * 100_000_000));
   const timestamp = Math.floor(Date.now() / 1000);
 
-  if (currentOraclePrice !== 0n) {
-    const diff = currentOraclePrice > priceOnChain ? currentOraclePrice - priceOnChain : priceOnChain - currentOraclePrice;
-    const pctChange = Number(diff * 10000n / (currentOraclePrice + 1n)) / 100;
-    if (pctChange < 1.0) { log('ORACLE', `Price change ${pctChange.toFixed(2)}% < 1%, skipping on-chain update`); currentOraclePrice = priceOnChain; return true; }
+  // Always compare against the actual on-chain price, not in-memory
+  const onChainPrice = await getCurrentOraclePriceFromChain();
+  if (onChainPrice && onChainPrice !== 0n) {
+    const diff = onChainPrice > priceOnChain ? onChainPrice - priceOnChain : priceOnChain - onChainPrice;
+    const pctChange = Number(diff * 10000n / (onChainPrice + 1n)) / 100;
+    if (pctChange < 1.0) {
+      log('ORACLE', `Price change ${pctChange.toFixed(2)}% < 1% from on-chain price, skipping`);
+      currentOraclePrice = priceOnChain; // keep in-memory fresh for margin calcs
+      return true;
+    }
+    log('ORACLE', `Price change ${pctChange.toFixed(2)}% from on-chain — updating`);
   }
 
   log('ORACLE', `Updating to $${priceUsd.toLocaleString()} (${priceOnChain}u64)`);
   try {
     const cmd = [
-      'snarkos developer execute',
+      `${SNARKOS} developer execute`,
       `--private-key ${CONFIG.privateKey}`,
       `--query ${CONFIG.queryEndpoint}`,
       `--broadcast ${CONFIG.broadcastEndpoint}`,
@@ -343,7 +352,7 @@ async function scanViaProvableScanner() {
       let ptStr = '';
       if (record.record_ciphertext) {
         try {
-          const cmd = `snarkos developer decrypt --view-key ${CONFIG.viewKey} --ciphertext ${record.record_ciphertext}`;
+          const cmd = `${SNARKOS} developer decrypt --view-key ${CONFIG.viewKey} --ciphertext ${record.record_ciphertext}`;
           ptStr = execSync(cmd, { timeout: 10000, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
         } catch { logError('SCAN', `Decrypt failed for block ${record.block_height}`); continue; }
       }
@@ -507,7 +516,7 @@ async function liquidatePosition(position) {
   log('LIQUIDATE', `Liquidating ${positionId.slice(0, 20)}...`);
   try {
     const cmd = [
-      'snarkos developer execute',
+      `${SNARKOS} developer execute`,
       `--private-key ${CONFIG.privateKey}`,
       `--query ${CONFIG.queryEndpoint}`,
       `--broadcast ${CONFIG.broadcastEndpoint}`,

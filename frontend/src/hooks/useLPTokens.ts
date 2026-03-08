@@ -3,20 +3,27 @@ import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import { PROGRAM_IDS } from '../utils/config';
 
 const PROGRAM_ID = PROGRAM_IDS.ZKPERP;
-const MIN_DUST = BigInt(10000); // $0.01 — filter out dust records
+const MIN_DUST = BigInt(10000); // $0.01 — filter out dust
 
-export interface LPTokenRecord {
+export interface LPSlotRecord {
   id: string;
   owner: string;
-  amount: bigint;
-  spent: boolean;
+  slotId: number;
+  isOpen: boolean;
+  lpAmount: bigint;
   plaintext: string;
+  ciphertext: string;   // full plaintext — passed as first input to add/remove_liquidity
   rawRecord: any;
 }
 
 export function useLPTokens() {
   const { address, requestRecords, decrypt } = useWallet();
-  const [lpTokens, setLpTokens] = useState<LPTokenRecord[]>([]);
+
+  // All decrypted LPSlot records (open + empty)
+  const [lpSlots, setLpSlots] = useState<LPSlotRecord[]>([]);
+
+  // Convenience: only open slots with meaningful balance
+  const [lpTokens, setLpTokens] = useState<LPSlotRecord[]>([]);
   const [totalLP, setTotalLP] = useState<bigint>(BigInt(0));
   const [recordCount, setRecordCount] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -24,12 +31,14 @@ export function useLPTokens() {
   const [decrypted, setDecrypted] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Raw (encrypted) records stored between fetch and decrypt
   const [rawRecords, setRawRecords] = useState<any[]>([]);
+  // Track locally spent commitments to avoid reusing records the wallet hasn't marked spent yet
+  const [spentCommitments, setSpentCommitments] = useState<Set<string>>(new Set());
 
-  // Phase 1: Fetch records from wallet (1 popup) — no decryption
+  // Phase 1: Fetch LPSlot records from wallet (no decrypt)
   const fetchRecords = useCallback(async () => {
     if (!address || !requestRecords) {
+      setLpSlots([]);
       setLpTokens([]);
       setTotalLP(BigInt(0));
       setRecordCount(0);
@@ -40,16 +49,22 @@ export function useLPTokens() {
     setError(null);
 
     try {
-      const records = await requestRecords(PROGRAM_ID);
+      //const records = await requestRecords(PROGRAM_ID);
+      const records = await requestRecords(PROGRAM_ID, true);
       console.log('Fetched records:', records);
 
+      // v8: filter LPSlot records (not LPToken)
+      // Also filter out wallet-confirmed spent records
+      // and locally tracked spent commitments (wallet sync lag)
       const lpRecordsRaw = records.filter(
-        (r: any) => r.recordName === 'LPToken' && !r.spent
+        (r: any) => r.recordName === 'LPSlot' && !r.spent
       );
 
+      console.log(`Found ${lpRecordsRaw.length} LPSlot records`);
       setRawRecords(lpRecordsRaw);
       setRecordCount(lpRecordsRaw.length);
       setDecrypted(false);
+      setLpSlots([]);
       setLpTokens([]);
       setTotalLP(BigInt(0));
     } catch (err) {
@@ -60,7 +75,7 @@ export function useLPTokens() {
     }
   }, [address, requestRecords]);
 
-  // Phase 2: Decrypt all records (batch — user clicks "Show Records")
+  // Phase 2: Decrypt all LPSlot records
   const decryptAll = useCallback(async () => {
     if (!decrypt || rawRecords.length === 0) return;
 
@@ -68,51 +83,75 @@ export function useLPTokens() {
     setError(null);
 
     try {
-      // Batch decrypt with Promise.all — may be 1 popup or N popups depending on Shield
-      const plaintexts = await Promise.all(
+      const results = await Promise.all(
         rawRecords.map(async (record) => {
           try {
-            // Try data first (no decrypt needed)
-            if (record.data?.amount) {
-              const amount = parseLeoU64(record.data.amount);
-              const pt = `{\n  owner: ${record.owner || address}.private,\n  amount: ${record.data.amount},\n  _nonce: ${record.nonce || '0group.public'}\n}`;
-              return { record, plaintext: pt, amount };
-            }
-            // Decrypt ciphertext
-            if (record.recordCiphertext) {
-              const plaintext = await decrypt(record.recordCiphertext);
-              console.log('Decrypted LP record:', plaintext);
-              const amountMatch = plaintext.match(/amount:\s*(\d+)u64/);
-              const amount = amountMatch ? BigInt(amountMatch[1]) : BigInt(0);
-              return { record, plaintext, amount };
-            }
-            return { record, plaintext: '', amount: BigInt(0) };
+            if (!record.recordCiphertext) return null;
+            const plaintext = await decrypt(record.recordCiphertext);
+            console.log('Decrypted LPSlot:', plaintext);
+            return { record, plaintext };
           } catch (err) {
-            console.warn('Could not decrypt record:', err);
-            return { record, plaintext: '', amount: BigInt(0) };
+            console.warn('Could not decrypt LPSlot record:', err);
+            return null;
           }
         })
       );
 
-      const lpRecords: LPTokenRecord[] = [];
+      const allSlots: LPSlotRecord[] = [];
       let total = BigInt(0);
 
-      for (const { record, plaintext, amount } of plaintexts) {
-        if (amount <= MIN_DUST) continue; // Filter dust
+      for (const result of results) {
+        if (!result) continue;
+        const { record, plaintext } = result;
 
-        lpRecords.push({
-          id: record.commitment || record.id || record.nonce || '',
-          owner: record.sender || record.owner || address,
-          amount,
-          spent: false,
-          plaintext,
-          rawRecord: record,
+        const slotIdMatch = plaintext.match(/slot_id:\s*(\d+)u8(?:\.private)?/);
+        const isOpenMatch = plaintext.match(/is_open:\s*(true|false)(?:\.private)?/);
+        const lpAmountMatch = plaintext.match(/lp_amount:\s*(\d+)u64(?:\.private)?/);
+
+        console.log('LPSlot parse:', {
+          slotId: slotIdMatch?.[1],
+          isOpen: isOpenMatch?.[1],
+          lpAmount: lpAmountMatch?.[1],
         });
-        total += amount;
+
+        if (!slotIdMatch) {
+          console.log('SKIP: not a valid LPSlot (no slot_id)');
+          continue;
+        }
+
+        const slotId = parseInt(slotIdMatch[1]);
+        const isOpen = isOpenMatch?.[1] === 'true';
+        const lpAmount = BigInt(lpAmountMatch?.[1] || '0');
+
+        const slot: LPSlotRecord = {
+          id: record.commitment || record.id || record.nonce || `slot-${slotId}`,
+          owner: address || '',
+          slotId,
+          isOpen,
+          lpAmount,
+          plaintext,
+          ciphertext: record.recordCiphertext || '',
+          rawRecord: record,
+        };
+
+        allSlots.push(slot);
+
+        if (isOpen && lpAmount > MIN_DUST) {
+          total += lpAmount;
+        }
       }
 
-      console.log('LP tokens decrypted:', lpRecords.length, 'Total:', total.toString());
-      setLpTokens(lpRecords);
+      // Filter out locally-known spent records (wallet sync lag protection)
+      const filteredSlots = allSlots.filter(s => !spentCommitments.has(s.id));
+      filteredSlots.sort((a, b) => a.slotId - b.slotId);
+      const allSlotsFiltered = filteredSlots;
+
+      const openSlots = allSlotsFiltered.filter(s => s.isOpen && s.lpAmount > MIN_DUST);
+
+      console.log(`LPSlots: ${allSlotsFiltered.length} total, ${openSlots.length} open, total LP: ${total}`);
+
+      setLpSlots(allSlotsFiltered);
+      setLpTokens(openSlots);
       setTotalLP(total);
       setDecrypted(true);
     } catch (err) {
@@ -121,9 +160,28 @@ export function useLPTokens() {
     } finally {
       setDecrypting(false);
     }
-  }, [decrypt, rawRecords, address]);
+  }, [decrypt, rawRecords, address, spentCommitments]);
+
+  // Mark a record as locally spent (call this right before submitting a tx)
+  const markSpent = useCallback((commitment: string) => {
+    setSpentCommitments(prev => new Set([...prev, commitment]));
+    // Also immediately remove it from lpSlots so UI updates instantly
+    setLpSlots(prev => prev.filter(s => s.id !== commitment));
+    setLpTokens(prev => prev.filter(s => s.id !== commitment));
+  }, []);
+
+  // Returns first empty LPSlot available for a fresh deposit
+  const getEmptySlot = useCallback((): LPSlotRecord | null => {
+    return lpSlots.find(s => !s.isOpen) || null;
+  }, [lpSlots]);
+
+  // Returns first open LPSlot for top-up deposit
+  const getOpenSlot = useCallback((): LPSlotRecord | null => {
+    return lpSlots.find(s => s.isOpen) || null;
+  }, [lpSlots]);
 
   return {
+    lpSlots,
     lpTokens,
     totalLP,
     recordCount,
@@ -133,17 +191,10 @@ export function useLPTokens() {
     error,
     fetchRecords,
     decryptAll,
+    getEmptySlot,
+    getOpenSlot,
+    markSpent,
   };
-}
-
-function parseLeoU64(value: string | undefined): bigint {
-  if (!value) return BigInt(0);
-  const cleaned = value.replace(/['"]/g, '').replace(/u64\.private$/, '').replace(/u64$/, '');
-  try {
-    return BigInt(cleaned);
-  } catch {
-    return BigInt(0);
-  }
 }
 
 export function formatLPTokens(amount: bigint): string {

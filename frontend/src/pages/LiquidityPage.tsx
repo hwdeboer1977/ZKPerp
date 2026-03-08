@@ -2,7 +2,9 @@ import { useState, useCallback, useEffect } from 'react';
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import type { TransactionOptions } from '@provablehq/aleo-types';
 import { useLPTokens, formatLPTokens } from '@/hooks/useLPTokens';
-import type { LPTokenRecord } from '@/hooks/useLPTokens';
+import { useSlots } from '@/hooks/useSlots';
+import { InitializeSlotsPrompt } from '@/components/InitializeSlotsPrompt';
+import type { LPSlotRecord } from '@/hooks/useLPTokens';
 import { formatUsdc, parseUsdc, USDC_PROGRAM_ID, PROGRAM_ID } from '@/utils/aleo';
 import { ADDRESS_LIST } from '../utils/config';
 import { useTransaction } from '@/hooks/useTransaction';
@@ -15,13 +17,34 @@ interface Props {
   onRefresh: () => void;
 }
 
+// Leo record inputs must be single-line with no extra whitespace
+function normalizeRecordPlaintext(plaintext: string): string {
+  return plaintext
+    .replace(/\s+/g, ' ')      // collapse all whitespace
+    .replace(/{ /g, '{')       // remove space after {
+    .replace(/ }/g, '}')       // remove space before }
+    .replace(/,\s+/g, ',')      // remove space after commas
+    .replace(/:\s+/g, ':')      // remove space after colons
+    .trim();
+}
+
 export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Props) {
   const { address, connected } = useWallet();
   const {
     lpTokens, totalLP, recordCount,
     loading: lpLoading, decrypting, decrypted,
     fetchRecords, decryptAll,
+    getEmptySlot, getOpenSlot, markSpent,
   } = useLPTokens();
+  const {
+    recordCount: slotCount,
+    loading: slotsLoading,
+    fetchSlots,
+    initializeSlots,
+    isInitializing,
+    initTx,
+  } = useSlots();
+
   const approveTx = useTransaction();
   const depositTx = useTransaction();
   const withdrawTx = useTransaction();
@@ -66,8 +89,9 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
   useEffect(() => {
     if (connected) {
       fetchRecords();
+      fetchSlots();
     }
-  }, [connected, fetchRecords]);
+  }, [connected, fetchRecords, fetchSlots]);
 
   // Auto-refresh when deposit or withdraw is accepted
   useEffect(() => {
@@ -84,50 +108,76 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
 
   const parsedAmount = parseUsdc(depositAmount);
   const isValidAmount = parsedAmount >= BigInt(1000000); // Min $1
-
+ 
   const handleDeposit = useCallback(async () => {
     if (!connected || !isValidAmount || !address) return;
-
-    try {
-      const inputs = [
-        parsedAmount.toString() + 'u128',
-        address,
-      ];
-
-      console.log('Add liquidity inputs:', inputs);
-
-      const options: TransactionOptions = {
-        program: PROGRAM_ID,
-        function: 'add_liquidity',
-        inputs,
-        fee: 5_000_000,
-        privateFee: false,
-      };
-
-      await depositTx.execute(options);
-      setDepositAmount('');
-    } catch (err) {
-      console.error('Deposit failed:', err);
+    if (!decrypted) {
+      console.error('Decrypt your LP slots first');
+      return;
     }
-  }, [connected, isValidAmount, parsedAmount, address, depositTx]);
 
-  const handleWithdrawRecord = useCallback(async (lpToken: LPTokenRecord) => {
+    // v8: try slots in order, skipping any that are stale on-chain
+    const candidates = [getOpenSlot(), getEmptySlot()].filter(Boolean) as LPSlotRecord[];
+    if (candidates.length === 0) {
+      console.error('No LPSlot available — call initialize_slots first');
+      return;
+    }
+
+    for (const slot of candidates) {
+      try {
+        markSpent(slot.id); // Optimistically mark spent before submitting
+
+        const inputs = [
+          normalizeRecordPlaintext(slot.plaintext), // LPSlot record (consumed)
+          parsedAmount.toString() + 'u128',     // deposit_amount
+          address,                              // recipient
+        ];
+
+        console.log('Add liquidity inputs:', inputs);
+
+        const options: TransactionOptions = {
+          program: PROGRAM_ID,
+          function: 'add_liquidity',
+          inputs,
+          fee: 5_000_000,
+          privateFee: false,
+        };
+
+        await depositTx.execute(options);
+        setDepositAmount('');
+        return; // Success — stop trying
+      } catch (err: any) {
+        const msg = err?.message || String(err);
+        if (msg.includes('already exists in the ledger')) {
+          console.warn('Slot already spent on-chain, trying next slot:', slot.id);
+          continue; // Try next candidate
+        }
+        console.error('Deposit failed:', err);
+        return;
+      }
+    }
+    console.error('All available slots are stale — please refresh and re-decrypt');
+  }, [connected, isValidAmount, parsedAmount, address, depositTx, getEmptySlot, getOpenSlot, markSpent, decrypted]);
+
+  const handleWithdrawRecord = useCallback(async (lpToken: LPSlotRecord) => {
     if (!connected) return;
 
     try {
       setWithdrawRecordId(lpToken.id);
       const expectedUsdc = poolLiquidity > BigInt(0) && totalLP > BigInt(0)
-        ? (lpToken.amount * poolLiquidity) / totalLP
-        : lpToken.amount;
+        ? (lpToken.lpAmount * poolLiquidity) / totalLP
+        : lpToken.lpAmount;
 
       console.log('=== WITHDRAW DEBUG ===');
       console.log('Plaintext:', lpToken.plaintext);
-      console.log('Amount:', lpToken.amount.toString());
+      console.log('Amount:', lpToken.lpAmount.toString());
       console.log('Expected USDC:', expectedUsdc.toString());
 
+      markSpent(lpToken.id);
+
       const inputs = [
-        lpToken.plaintext,
-        lpToken.amount.toString() + 'u64',
+        normalizeRecordPlaintext(lpToken.plaintext),
+        lpToken.lpAmount.toString() + 'u64',
         expectedUsdc.toString() + 'u128',
       ];
 
@@ -161,6 +211,15 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
           Provide liquidity to earn trading fees. LPs act as counterparty to traders.
         </p>
       </div>
+
+      {/* Initialize prompt */}
+      {connected && slotCount === 0 && !slotsLoading && (
+        <InitializeSlotsPrompt
+          onInitialize={initializeSlots}
+          isInitializing={isInitializing}
+          initTx={initTx}
+        />
+      )}
 
       {/* Pool Stats */}
       <div className="grid md:grid-cols-4 gap-4 mb-8">
@@ -287,10 +346,10 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
 
             <button
               onClick={handleDeposit}
-              disabled={!connected || !isValidAmount || isDepositBusy}
+              disabled={!connected || !isValidAmount || isDepositBusy || !decrypted}
               className="w-full py-3 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-500/30 rounded-lg font-semibold text-white transition-colors"
             >
-              {depositTx.status === 'submitting' ? 'Submitting...' : depositTx.status === 'pending' ? 'Confirming on-chain...' : !connected ? 'Connect Wallet' : 'Step 2: Add Liquidity'}
+              {depositTx.status === 'submitting' ? 'Submitting...' : depositTx.status === 'pending' ? 'Confirming on-chain...' : !connected ? 'Connect Wallet' : !decrypted ? 'Decrypt slots to deposit' : 'Step 2: Add Liquidity'}
             </button>
           </div>
         </div>
@@ -414,10 +473,10 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
                               </div>
                               <div>
                                 <p className="text-white text-sm font-medium">
-                                  {formatLPTokens(token.amount)} LP
+                                  {formatLPTokens(token.lpAmount)} LP
                                 </p>
                                 <p className="text-gray-500 text-xs">
-                                  ~${formatLPTokens(token.amount)} USDC
+                                  ~${formatLPTokens(token.lpAmount)} USDC
                                 </p>
                               </div>
                             </div>

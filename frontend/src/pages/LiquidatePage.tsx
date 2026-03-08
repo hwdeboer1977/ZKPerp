@@ -89,7 +89,7 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
 
       const results: LiqAuthWithCalc[] = [];
 
-      for (const record of records) {
+      for (const record of (records as any[])) {
         try {
           if (!record.recordCiphertext) continue;
           const plaintext = await decrypt(record.recordCiphertext);

@@ -33,13 +33,12 @@ interface LiqAuthWithCalc extends PositionData {
 }
 
 export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: Props) {
-  const { connected, requestRecords, decrypt } = useWallet();
+  const { connected } = useWallet();
+  const BOT_API = import.meta.env.VITE_BOT_API_URL || 'http://localhost:3001';
   const liquidateTx = useTransaction();
 
-  // Tab state
   const [activeTab, setActiveTab] = useState<'txid' | 'orchestrator'>('orchestrator');
 
-  // TX ID mode state
   const [txId, setTxId] = useState('');
   const [position, setPosition] = useState<PositionData | null>(null);
   const [fetching, setFetching] = useState(false);
@@ -51,15 +50,10 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
     reward: bigint;
   } | null>(null);
 
-  // Orchestrator mode state
   const [liqAuths, setLiqAuths] = useState<LiqAuthWithCalc[]>([]);
   const [orchLoading, setOrchLoading] = useState(false);
   const [orchError, setOrchError] = useState<string | null>(null);
   const [liquidatingId, setLiquidatingId] = useState<string | null>(null);
-
-  // ═══════════════════════════════════════════════════════════════
-  // SHARED: Calculate liquidation status for a position
-  // ═══════════════════════════════════════════════════════════════
 
   const calcLiquidation = (pos: PositionData, price: bigint) => {
     const priceDiff = price > pos.entryPrice ? price - pos.entryPrice : pos.entryPrice - price;
@@ -74,83 +68,43 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
   };
 
   // ═══════════════════════════════════════════════════════════════
-  // ORCHESTRATOR MODE: Decrypt LiquidationAuth records
+  // ORCHESTRATOR MODE: Fetch pre-decrypted positions from bot API
+  // No wallet prompts — bot decrypts server-side using orchestrator view key
   // ═══════════════════════════════════════════════════════════════
 
   const fetchLiqAuths = useCallback(async () => {
-    if (!connected || !requestRecords || !decrypt) return;
-
     setOrchLoading(true);
     setOrchError(null);
 
     try {
-      const records = await requestRecords(PROGRAM_ID);
-      console.log('All records fetched:', records.length);
+      const res = await fetch(`${BOT_API}/api/liq-auths`);
+      if (!res.ok) throw new Error(`Bot API error: ${res.status}`);
 
-      const results: LiqAuthWithCalc[] = [];
+      const data = await res.json();
+      const results: LiqAuthWithCalc[] = (data.positions || []).map((p: any) => ({
+        positionId: p.positionId,
+        trader: p.trader,
+        isLong: p.isLong,
+        sizeUsdc: BigInt(p.sizeUsdc),
+        collateralUsdc: BigInt(p.collateralUsdc),
+        entryPrice: BigInt(p.entryPrice),
+        pnl: BigInt(p.pnl),
+        marginRatio: p.marginRatio,
+        isLiquidatable: p.isLiquidatable,
+        reward: BigInt(p.reward),
+      }));
 
-      for (const record of (records as any[])) {
-        try {
-          if (!record.recordCiphertext) continue;
-          const plaintext = await decrypt(record.recordCiphertext);
-          if (!plaintext) continue;
-
-          // Only process LiquidationAuth records (they have trader: field)
-          if (!plaintext.includes('trader:')) continue;
-
-          console.log('LiquidationAuth decrypted:', plaintext);
-
-          const positionIdMatch = plaintext.match(/position_id:\s*(\d+field)(?:\.private)?/);
-          const traderMatch = plaintext.match(/trader:\s*(aleo1[a-z0-9]+)(?:\.private)?/);
-          const isLongMatch = plaintext.match(/is_long:\s*(true|false)(?:\.private)?/);
-          const sizeMatch = plaintext.match(/size_usdc:\s*(\d+)u64(?:\.private)?/);
-          const collateralMatch = plaintext.match(/collateral_usdc:\s*(\d+)u(?:64|128)(?:\.private)?/);
-          const entryPriceMatch = plaintext.match(/entry_price:\s*(\d+)u64(?:\.private)?/);
-
-          if (!positionIdMatch || !sizeMatch || !entryPriceMatch) continue;
-
-          const sizeUsdc = BigInt(sizeMatch[1]);
-          if (sizeUsdc < 10000n) continue; // Skip dust
-
-          // Check if already closed on-chain
-          const posId = positionIdMatch[1];
-          try {
-            const res = await fetch(`${ALEO_API}/program/${PROGRAM_ID}/mapping/closed_positions/${posId}`);
-            const data = await res.text();
-            if (data.includes('true')) continue;
-          } catch {}
-
-          const pos: PositionData = {
-            positionId: posId,
-            trader: traderMatch?.[1] || 'unknown',
-            isLong: isLongMatch?.[1] === 'true',
-            sizeUsdc,
-            collateralUsdc: BigInt(collateralMatch?.[1] || '0'),
-            entryPrice: BigInt(entryPriceMatch?.[1] || '0'),
-          };
-
-          const calc = calcLiquidation(pos, currentPrice);
-          results.push({ ...pos, ...calc });
-        } catch {
-          continue;
-        }
-      }
-
-      results.sort((a, b) => {
-        if (a.isLiquidatable && !b.isLiquidatable) return -1;
-        if (!a.isLiquidatable && b.isLiquidatable) return 1;
-        return a.marginRatio - b.marginRatio;
-      });
-
-      console.log('LiquidationAuth positions found:', results.length);
+      console.log(`Bot API: ${results.length} position(s), last scan: ${data.lastScanAt}`);
       setLiqAuths(results);
     } catch (err: any) {
-      console.error('Failed to fetch LiquidationAuth records:', err);
-      setOrchError(err.message || 'Failed to fetch records');
+      console.error('Failed to fetch from bot API:', err);
+      setOrchError(err.message.includes('fetch')
+        ? 'Bot API unreachable — is zkperp-bot running? (port 3001)'
+        : err.message);
     } finally {
       setOrchLoading(false);
     }
-  }, [connected, requestRecords, decrypt, currentPrice]);
+  }, [BOT_API]);
 
   // Recalculate when price changes
   useEffect(() => {
@@ -161,10 +115,6 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
       })));
     }
   }, [currentPrice]);
-
-  // ═══════════════════════════════════════════════════════════════
-  // SHARED: Execute liquidation
-  // ═══════════════════════════════════════════════════════════════
 
   const executeLiquidation = async (pos: PositionData) => {
     if (!connected) return;
@@ -197,7 +147,6 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
       };
 
       await liquidateTx.execute(options);
-
       setLiqAuths(prev => prev.filter(a => a.positionId !== pos.positionId));
       setPosition(null);
       setCalculation(null);
@@ -209,10 +158,6 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
       setLiquidatingId(null);
     }
   };
-
-  // ═══════════════════════════════════════════════════════════════
-  // TX ID MODE: Fetch and parse transaction
-  // ═══════════════════════════════════════════════════════════════
 
   const fetchTransaction = async (transactionId: string) => {
     setFetching(true);
@@ -302,6 +247,13 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
   const formatPriceDisplay = (value: bigint) => (Number(value) / 100_000_000).toLocaleString();
   const isLiquidateBusy = liquidateTx.status === 'submitting' || liquidateTx.status === 'pending';
 
+  const Spinner = ({ size = 4 }: { size?: number }) => (
+    <svg className={`animate-spin h-${size} w-${size}`} viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+    </svg>
+  );
+
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-8">
@@ -360,9 +312,7 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
         </button>
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════ */}
-      {/* ORCHESTRATOR MODE TAB                                       */}
-      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* ORCHESTRATOR MODE */}
       {activeTab === 'orchestrator' && (
         <div className="bg-zkperp-card rounded-xl border border-zkperp-border overflow-hidden">
           <div className="p-5 border-b border-zkperp-border flex items-center justify-between">
@@ -374,15 +324,12 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
             </div>
             <button
               onClick={fetchLiqAuths}
-              disabled={orchLoading}
+              disabled={orchLoading || !connected}
               className="px-4 py-2 bg-zkperp-accent hover:bg-zkperp-accent/80 disabled:bg-zkperp-accent/30 rounded-lg text-sm font-medium text-white transition-colors"
             >
               {orchLoading ? (
                 <span className="flex items-center gap-2">
-                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
+                  <Spinner />
                   Decrypting...
                 </span>
               ) : (
@@ -390,6 +337,16 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
               )}
             </button>
           </div>
+
+          {/* Progress hint while loading */}
+          {orchLoading && (
+            <div className="px-5 py-3 bg-zkperp-accent/5 border-b border-zkperp-border">
+              <p className="text-sm text-zkperp-accent flex items-center gap-2">
+                <Spinner />
+                Fetching positions from bot API...
+              </p>
+            </div>
+          )}
 
           {liqAuths.length > 0 ? (
             <div className="divide-y divide-zkperp-border">
@@ -409,7 +366,9 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
                         {auth.isLiquidatable ? '⚠️ LIQUIDATABLE' : '✓ HEALTHY'}
                       </span>
                     </div>
-                    <span className={`font-medium text-sm ${auth.marginRatio < 1 ? 'text-red-400' : auth.marginRatio < 5 ? 'text-yellow-400' : 'text-green-400'}`}>
+                    <span className={`font-medium text-sm ${
+                      auth.marginRatio < 1 ? 'text-red-400' : auth.marginRatio < 5 ? 'text-yellow-400' : 'text-green-400'
+                    }`}>
                       {auth.marginRatio.toFixed(2)}% margin
                     </span>
                   </div>
@@ -447,10 +406,7 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
                     >
                       {liquidatingId === auth.positionId ? (
                         <span className="flex items-center justify-center gap-2">
-                          <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                          </svg>
+                          <Spinner />
                           Liquidating...
                         </span>
                       ) : (
@@ -485,9 +441,7 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
         </div>
       )}
 
-      {/* ═══════════════════════════════════════════════════════════ */}
-      {/* TX ID LOOKUP TAB                                            */}
-      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* TX ID LOOKUP */}
       {activeTab === 'txid' && (
         <>
           <div className="bg-zkperp-card rounded-xl border border-zkperp-border overflow-hidden">
@@ -605,10 +559,7 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
               >
                 {isLiquidateBusy ? (
                   <span className="flex items-center justify-center gap-2">
-                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
+                    <Spinner size={5} />
                     {liquidateTx.status === 'submitting' ? 'Submitting...' : 'Confirming on-chain...'}
                   </span>
                 ) : !connected ? 'Connect Wallet'
@@ -669,7 +620,7 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
           <ul className="space-y-3 text-sm text-gray-400">
             <li className="flex gap-2">
               <span className="text-zkperp-accent">1.</span>
-              <span><strong>Orchestrator Mode:</strong> Decrypt LiquidationAuth records to see all positions</span>
+              <span><strong>Orchestrator Mode:</strong> Fetches pre-decrypted positions from the bot API — no wallet prompts</span>
             </li>
             <li className="flex gap-2">
               <span className="text-zkperp-accent">2.</span>
@@ -691,7 +642,7 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
           <ul className="space-y-3 text-sm text-gray-400">
             <li className="flex gap-2">
               <span className="text-zkperp-accent">•</span>
-              <span><strong>Position</strong> record → owned by trader (for closing)</span>
+              <span><strong>PositionSlot</strong> record → owned by trader (for closing)</span>
             </li>
             <li className="flex gap-2">
               <span className="text-zkperp-accent">•</span>

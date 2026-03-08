@@ -32,13 +32,26 @@ interface LiqAuthWithCalc extends PositionData {
   reward: bigint;
 }
 
+interface BotStatus {
+  status: 'ok' | 'unreachable';
+  running: boolean;
+  pid: number | null;
+  startedAt: string | null;
+  stoppedAt: string | null;
+  restartCount: number;
+  // proxied from bot /health when running
+  currentPrice?: string;
+  positionCount?: number;
+  lastScanAt?: string | null;
+}
+
 export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: Props) {
   const { connected } = useWallet();
-  const BOT_API = import.meta.env.VITE_BOT_API_URL || 'http://localhost:3001';
+  const MANAGER_API = import.meta.env.VITE_MANAGER_API_URL || 'http://localhost:3000';
+  const BOT_API     = import.meta.env.VITE_BOT_API_URL     || 'http://localhost:3001';
   const liquidateTx = useTransaction();
 
   const [activeTab, setActiveTab] = useState<'txid' | 'orchestrator'>('orchestrator');
-
   const [txId, setTxId] = useState('');
   const [position, setPosition] = useState<PositionData | null>(null);
   const [fetching, setFetching] = useState(false);
@@ -54,6 +67,77 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
   const [orchLoading, setOrchLoading] = useState(false);
   const [orchError, setOrchError] = useState<string | null>(null);
   const [liquidatingId, setLiquidatingId] = useState<string | null>(null);
+
+  const [botStatus, setBotStatus] = useState<BotStatus | null>(null);
+  const [botActionBusy, setBotActionBusy] = useState(false);
+
+  // Poll manager /health every 10s, also fetch bot /bot-health when running
+  useEffect(() => {
+    const fetchBotStatus = async () => {
+      try {
+        const res = await fetch(`${MANAGER_API}/health`);
+        if (!res.ok) throw new Error('non-200');
+        const managerData = await res.json();
+        let extra: Partial<BotStatus> = {};
+
+        // If bot is running, also fetch bot-level stats via manager proxy
+        if (managerData.botRunning) {
+          try {
+            const botRes = await fetch(`${MANAGER_API}/bot-health`);
+            if (botRes.ok) {
+              const botData = await botRes.json();
+              extra = {
+                currentPrice: botData.currentPrice,
+                positionCount: botData.positionCount,
+                lastScanAt: botData.lastScanAt,
+              };
+            }
+          } catch { /* bot might not be ready yet */ }
+        }
+
+        setBotStatus({
+          status: 'ok',
+          running: managerData.botRunning,
+          pid: managerData.botPid,
+          startedAt: managerData.botStartedAt,
+          stoppedAt: managerData.botStoppedAt,
+          restartCount: managerData.restartCount,
+          ...extra,
+        });
+      } catch {
+        setBotStatus(prev => prev
+          ? { ...prev, status: 'unreachable' }
+          : { status: 'unreachable', running: false, pid: null, startedAt: null, stoppedAt: null, restartCount: 0 }
+        );
+      }
+    };
+    fetchBotStatus();
+    const interval = setInterval(fetchBotStatus, 10000);
+    return () => clearInterval(interval);
+  }, [MANAGER_API]);
+
+  const handleBotToggle = useCallback(async () => {
+    if (!botStatus || botStatus.status === 'unreachable') return;
+    setBotActionBusy(true);
+    try {
+      const action = botStatus.running ? 'stop' : 'start';
+      const res = await fetch(`${MANAGER_API}/${action}`, { method: 'POST' });
+      const data = await res.json();
+      setBotStatus(prev => prev ? { ...prev, running: data.running } : prev);
+      // Re-poll after 2s to get updated status
+      setTimeout(async () => {
+        try {
+          const r = await fetch(`${MANAGER_API}/health`);
+          const d = await r.json();
+          setBotStatus(prev => prev ? { ...prev, running: d.botRunning, pid: d.botPid } : prev);
+        } catch { /* ignore */ }
+      }, 2000);
+    } catch (err) {
+      console.error('Bot toggle failed:', err);
+    } finally {
+      setBotActionBusy(false);
+    }
+  }, [botStatus, MANAGER_API]);
 
   const calcLiquidation = (pos: PositionData, price: bigint) => {
     const priceDiff = price > pos.entryPrice ? price - pos.entryPrice : pos.entryPrice - price;
@@ -261,6 +345,48 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
         <p className="text-gray-400">
           Liquidate underwater positions to earn 0.5% rewards. Anyone can liquidate.
         </p>
+      </div>
+
+      {/* Bot Control Panel */}
+      <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-5 mb-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className={`w-2.5 h-2.5 rounded-full ${
+              botStatus?.status === 'unreachable' ? 'bg-gray-500' :
+              botStatus?.running ? 'bg-zkperp-green animate-pulse' : 'bg-red-500'
+            }`} />
+            <div>
+              <p className="text-sm font-medium text-white">Oracle &amp; Liquidation Bot</p>
+              <p className="text-xs text-gray-500">
+                {botStatus?.status === 'unreachable'
+                  ? 'Manager unreachable — is zkperp-bot-manager running on port 3000?'
+                  : !botStatus?.running
+                  ? `Stopped${botStatus?.stoppedAt ? ` · last ran ${new Date(botStatus.stoppedAt).toLocaleTimeString()}` : ''}`
+                  : botStatus?.currentPrice
+                  ? `Running · BTC $${(Number(botStatus.currentPrice) / 1e8).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · ${botStatus.positionCount ?? 0} position(s) tracked`
+                  : `Running · PID ${botStatus.pid} · starting up...`}
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleBotToggle}
+              disabled={botStatus?.status === 'unreachable' || botActionBusy}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 ${
+                botStatus?.running
+                  ? 'bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-400'
+                  : 'bg-zkperp-green/20 hover:bg-zkperp-green/30 border border-zkperp-green/50 text-zkperp-green'
+              }`}
+            >
+              {botActionBusy ? '...' : botStatus?.running ? '⏹ Stop Bot' : '▶ Start Bot'}
+            </button>
+          </div>
+        </div>
+        {botStatus?.lastScanAt && botStatus.running && (
+          <p className="text-xs text-gray-600 mt-3">
+            Last scan: {new Date(botStatus.lastScanAt).toLocaleTimeString()} · Updates on-chain when price moves &gt;1% · Restarts: {botStatus.restartCount}
+          </p>
+        )}
       </div>
 
       <div className="grid md:grid-cols-4 gap-4 mb-8">

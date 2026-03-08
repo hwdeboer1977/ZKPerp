@@ -1,0 +1,17 @@
+{
+  "program": "test_pos.aleo",
+  "version": "0.1.0",
+  "description": "Standalone open_position test harness using mock_usdc_0128",
+  "license": "MIT",
+  "leo": "3.4.0",
+  "dependencies": [
+    {
+      "name": "mock_usdc_0128.aleo",
+      "location": "local",
+      "network": "devnet",
+      "path": "../mock_usdc",
+      "edition": null
+    }
+  ],
+  "dev_dependencies": null
+}

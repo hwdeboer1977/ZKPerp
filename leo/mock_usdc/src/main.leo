@@ -293,4 +293,31 @@ program mock_usdc_0128.aleo {
         let current: u128 = Mapping::get_or_use(balances, recipient, 0u128);
         Mapping::set(balances, recipient, current + amount);
     }
+
+    // ──────────────────────────────────────────────
+    //  transfer_from_public — matches test_usdcx_stablecoin.aleo interface
+    //  Called by ZKPerp as: transfer_from_public(self.signer, self.address, collateral)
+    //  i.e. caller = zkperp program, from = trader, to = zkperp, amount = collateral
+    // ──────────────────────────────────────────────
+
+    async transition transfer_from_public(
+        public from: address,
+        public to: address,
+        public amount: u128,
+    ) -> Future {
+        return finalize_transfer_from_public(from, to, amount);
+    }
+
+    async function finalize_transfer_from_public(
+        from: address,
+        to: address,
+        amount: u128,
+    ) {
+        let from_bal: u128 = Mapping::get(balances, from);
+        assert(from_bal >= amount);
+        Mapping::set(balances, from, from_bal - amount);
+
+        let to_bal: u128 = Mapping::get_or_use(balances, to, 0u128);
+        Mapping::set(balances, to, to_bal + amount);
+    }
 }

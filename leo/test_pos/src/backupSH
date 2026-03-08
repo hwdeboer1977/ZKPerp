@@ -1,0 +1,196 @@
+#!/bin/bash
+set -e
+
+#
+# HOW TO RUN:
+#
+# Terminal 1: Start devnet
+#   leo devnet --snarkos $(which snarkos) --snarkos-features test_network --consensus-heights 0,1,2,3,4,5,6,7,8,9,10,11 --clear-storage
+#
+# Terminal 2: Run test
+#   chmod +x test.sh
+#   ./test.sh
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+
+# ══════════════════════════════════════════════════════════════════
+# CONFIGURATION
+# ══════════════════════════════════════════════════════════════════
+
+ENDPOINT="http://localhost:3030"
+CONSENSUS="--consensus-heights 0,1,2,3,4,5,6,7,8,9,10,11"
+NETWORK="--network testnet --broadcast"
+
+# Programs
+MOCK_USDC_PROGRAM="mock_usdc_0128"
+TEST_POS_PROGRAM="test_pos"
+
+# User address (default devnet address)
+USER="aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px"
+ORCHESTRATOR=$USER
+
+# Project paths
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LEO_DIR="$(dirname "$SCRIPT_DIR")"
+MOCK_USDC_DIR="$LEO_DIR/mock_usdc"
+TEST_POS_DIR="$SCRIPT_DIR"
+
+# Test parameters
+COLLATERAL="1000000u128"       # 1 USDC (6 decimals)
+SIZE="5000000u64"              # 5 USDC notional = 5x leverage
+ENTRY_PRICE="9500000u64"       # $95,000 BTC (2 decimal places)
+MAX_SLIPPAGE="50000u64"        # $500 slippage tolerance
+NONCE="12345field"             # change each test run to avoid replay error
+MINT_AMOUNT="100000000u128"    # 100 USDC minted to trader
+
+# ══════════════════════════════════════════════════════════════════
+# HELPER FUNCTIONS
+# ══════════════════════════════════════════════════════════════════
+
+get_block() {
+    curl -s "$ENDPOINT/testnet/block/height/latest"
+}
+
+wait_for_devnet() {
+    echo "Waiting for devnet..."
+    until curl -s "$ENDPOINT/testnet/block/height/latest" 2>/dev/null | grep -qE '^[0-9]+$'; do
+        sleep 2
+        echo "  Waiting for devnet to start..."
+    done
+
+    height=$(get_block)
+    while [ "$height" -lt 12 ]; do
+        echo "  Block height: $height (waiting for 12)"
+        sleep 2
+        height=$(get_block)
+    done
+    echo "Devnet ready! Height: $height"
+}
+
+check_mapping() {
+    local program=$1
+    local mapping=$2
+    local key=$3
+    echo "  $mapping[$key]:"
+    curl -s "$ENDPOINT/testnet/program/$program.aleo/mapping/$mapping/$key"
+    echo ""
+}
+
+# ══════════════════════════════════════════════════════════════════
+# MAIN SCRIPT
+# ══════════════════════════════════════════════════════════════════
+
+echo "╔════════════════════════════════════════════════════════════════╗"
+echo "║          test_pos — open_position isolation test              ║"
+echo "╚════════════════════════════════════════════════════════════════╝"
+echo ""
+echo "  Trader:       $USER"
+echo "  Orchestrator: $ORCHESTRATOR"
+echo "  Collateral:   $COLLATERAL"
+echo "  Size:         $SIZE"
+echo "  Entry price:  $ENTRY_PRICE"
+echo ""
+
+wait_for_devnet
+
+# ══════════════════════════════════════════════════════════════════
+# STEP 1: Deploy mock_usdc_0128 + test_pos together
+# ══════════════════════════════════════════════════════════════════
+
+echo ""
+echo "=== STEP 1: Deploying mock_usdc_0128.aleo + test_pos.aleo ==="
+echo "  (leo deploys dependencies first, then test_pos)"
+cd "$TEST_POS_DIR"
+leo deploy $NETWORK $CONSENSUS --yes
+sleep 5
+
+# ══════════════════════════════════════════════════════════════════
+# STEP 2: Initialize mock_usdc admin
+# ══════════════════════════════════════════════════════════════════
+
+echo ""
+echo "=== STEP 2: Initializing mock_usdc admin ==="
+cd "$MOCK_USDC_DIR"
+leo execute initialize_admin \
+  $NETWORK $CONSENSUS --yes
+sleep 3
+
+echo "Checking admin..."
+check_mapping $MOCK_USDC_PROGRAM admin 0u8
+
+# ══════════════════════════════════════════════════════════════════
+# STEP 3: Mint USDC to trader
+# ══════════════════════════════════════════════════════════════════
+
+echo ""
+echo "=== STEP 3: Minting $MINT_AMOUNT to trader ==="
+leo execute mint_public \
+  "$USER" \
+  "$MINT_AMOUNT" \
+  $NETWORK $CONSENSUS --yes
+sleep 3
+
+echo "Checking trader balance..."
+check_mapping $MOCK_USDC_PROGRAM balances "$USER"
+
+# ══════════════════════════════════════════════════════════════════
+# STEP 4: Issue empty PositionSlot
+# ══════════════════════════════════════════════════════════════════
+
+echo ""
+echo "=== STEP 4: Issuing empty PositionSlot (slot_id=0 = long) ==="
+cd "$TEST_POS_DIR"
+
+# Capture output to extract the _nonce devnet returns
+ISSUE_OUTPUT=$(leo execute issue_empty_slot \
+  "0u8" \
+  $NETWORK $CONSENSUS --yes 2>&1)
+echo "$ISSUE_OUTPUT"
+sleep 3
+
+# Extract _nonce from the plaintext record output devnet returns
+SLOT_NONCE=$(echo "$ISSUE_OUTPUT" | grep -oP '_nonce: \K[0-9]+(?=group)')
+
+if [ -z "$SLOT_NONCE" ]; then
+  echo "❌ Could not extract _nonce from issue_empty_slot output. Check output above."
+  exit 1
+fi
+
+echo "  Extracted _nonce: ${SLOT_NONCE}group"
+
+# ══════════════════════════════════════════════════════════════════
+# STEP 5: Open long position
+# ══════════════════════════════════════════════════════════════════
+
+echo ""
+echo "=== STEP 5: Opening long position ==="
+
+# Build the record inline using the extracted nonce
+SLOT_RECORD="{ owner: ${USER}.private, slot_id: 0u8.private, is_open: false.private, position_id: 0field.private, is_long: true.private, size_usdc: 0u64.private, collateral_usdc: 0u64.private, entry_price: 0u64.private, _nonce: ${SLOT_NONCE}group.public, _version: 1u8.public }"
+
+leo execute open_position \
+  "$SLOT_RECORD" \
+  "$COLLATERAL" \
+  "$SIZE" \
+  "true" \
+  "$ENTRY_PRICE" \
+  "$MAX_SLIPPAGE" \
+  "$NONCE" \
+  "$USER" \
+  "$ORCHESTRATOR" \
+  $NETWORK $CONSENSUS --yes
+sleep 3
+
+echo ""
+echo "Checking used_nonces (replay protection)..."
+check_mapping $TEST_POS_PROGRAM used_nonces "$NONCE"
+
+echo ""
+echo "╔════════════════════════════════════════════════════════════════╗"
+echo "║                        Test complete!                         ║"
+echo "║  Outputs:                                                      ║"
+echo "║    - Filled PositionSlot record  (owner = trader)             ║"
+echo "║    - LiquidationAuth record      (owner = orchestrator)       ║"
+echo "╚═══════════════════════════════════════════════════════════

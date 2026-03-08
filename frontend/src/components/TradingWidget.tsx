@@ -98,7 +98,7 @@ export function TradingWidget({ currentPrice }: Props) {
       const orchestrator = (await orchestratorRes.json()).replace(/"/g, '');
 
       const inputs = [
-        normalizeRecordPlaintext(slot.plaintext),            // PositionSlot record (VM fields stripped)
+        normalizeRecordPlaintext(slot.plaintext),
         collateral.toString() + 'u128',
         size.toString() + 'u64',
         isLong.toString(),
@@ -120,7 +120,7 @@ export function TradingWidget({ currentPrice }: Props) {
       };
 
       await openTx.execute(options);
-      markSpent(slot.id); // Mark spent after successful submission
+      markSpent(slot.id);
       setCollateralInput('');
       setSizeInput('');
     } catch (err) {
@@ -135,39 +135,23 @@ export function TradingWidget({ currentPrice }: Props) {
     }
   };
 
+  // Spinner SVG helper
+  const Spinner = () => (
+    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+    </svg>
+  );
+
   return (
     <div>
-      {/* Initialize prompt — shown when no slots exist */}
+      {/* Initialize prompt — shown as blocking modal when no slots exist */}
       {connected && recordCount === 0 && !slotsLoading && (
         <InitializeSlotsPrompt
           onInitialize={initializeSlots}
           isInitializing={isInitializing}
           initTx={initTx}
         />
-      )}
-
-      {/* Decrypt slots prompt — shown when slots exist but not yet decrypted */}
-      {connected && recordCount !== null && recordCount > 0 && !decrypted && (
-        <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-4 mb-4">
-          <p className="text-sm text-gray-400 mb-3">
-            {recordCount} position slot{recordCount > 1 ? 's' : ''} found — decrypt to trade
-          </p>
-          <button
-            onClick={decryptSlots}
-            disabled={decrypting}
-            className="w-full py-2.5 bg-zkperp-accent/20 hover:bg-zkperp-accent/30 border border-zkperp-accent/50 disabled:opacity-50 rounded-lg text-sm font-medium text-zkperp-accent transition-colors"
-          >
-            {decrypting ? (
-              <span className="flex items-center justify-center gap-2">
-                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                Decrypting...
-              </span>
-            ) : `🔓 Decrypt ${recordCount} Slot${recordCount > 1 ? 's' : ''}`}
-          </button>
-        </div>
       )}
 
       <div className="bg-zkperp-card rounded-xl border border-zkperp-border overflow-hidden">
@@ -298,7 +282,7 @@ export function TradingWidget({ currentPrice }: Props) {
               <div className="flex justify-between text-sm pt-2 border-t border-zkperp-border">
                 <span className="text-gray-400">Available Slots</span>
                 <span className={hasEmptySlot ? 'text-zkperp-green' : 'text-zkperp-red'}>
-                  {hasEmptySlot ? `${positionSlotsAvailable} / 3 free` : 'No slots available'}
+                  {hasEmptySlot ? `${positionSlotsAvailable} / 2 free` : 'No slots available'}
                 </span>
               </div>
             )}
@@ -313,30 +297,31 @@ export function TradingWidget({ currentPrice }: Props) {
             onDismiss={openTx.reset}
           />
 
-          {/* Submit Button */}
+          {/* Single submit/decrypt button */}
           <button
-            onClick={handleSubmit}
-            disabled={!canTrade || isBusy}
-            className={`w-full py-4 rounded-lg font-semibold text-white transition-all ${
-              isLong
+            onClick={!decrypted ? decryptSlots : handleSubmit}
+            disabled={decrypting || isBusy || (decrypted && !canTrade)}
+            className={`w-full py-4 rounded-lg font-semibold text-white transition-all disabled:cursor-not-allowed ${
+              !decrypted
+                ? 'bg-zkperp-accent hover:bg-zkperp-accent/80 disabled:bg-zkperp-accent/30'
+                : isLong
                 ? 'bg-zkperp-green hover:bg-zkperp-green/80 disabled:bg-zkperp-green/30'
                 : 'bg-zkperp-red hover:bg-zkperp-red/80 disabled:bg-zkperp-red/30'
-            } disabled:cursor-not-allowed`}
+            }`}
           >
-            {openTx.status === 'submitting' ? (
+            {decrypting ? (
               <span className="flex items-center justify-center gap-2">
-                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
+                <Spinner />
+                Decrypting...
+              </span>
+            ) : openTx.status === 'submitting' ? (
+              <span className="flex items-center justify-center gap-2">
+                <Spinner />
                 Submitting...
               </span>
             ) : openTx.status === 'pending' ? (
               <span className="flex items-center justify-center gap-2">
-                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
+                <Spinner />
                 Confirming on-chain...
               </span>
             ) : !connected ? (
@@ -344,9 +329,9 @@ export function TradingWidget({ currentPrice }: Props) {
             ) : recordCount === 0 ? (
               'Initialize account first'
             ) : !decrypted ? (
-              'Decrypt slots to trade'
+              `🔓 Decrypt ${recordCount} Slot${recordCount !== 1 ? 's' : ''} to Trade`
             ) : !hasEmptySlot ? (
-              'No slots available (max 2 positions)'
+              `No ${isLong ? 'Long' : 'Short'} slot available`
             ) : !isValidLeverage && leverage > 0 ? (
               'Leverage exceeds 20x'
             ) : (

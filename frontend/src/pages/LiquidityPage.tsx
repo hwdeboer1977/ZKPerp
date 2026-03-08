@@ -17,14 +17,13 @@ interface Props {
   onRefresh: () => void;
 }
 
-// Leo record inputs must be single-line with no extra whitespace
 function normalizeRecordPlaintext(plaintext: string): string {
   return plaintext
-    .replace(/\s+/g, ' ')      // collapse all whitespace
-    .replace(/{ /g, '{')       // remove space after {
-    .replace(/ }/g, '}')       // remove space before }
-    .replace(/,\s+/g, ',')      // remove space after commas
-    .replace(/:\s+/g, ':')      // remove space after colons
+    .replace(/\s+/g, ' ')
+    .replace(/{ /g, '{')
+    .replace(/ }/g, '}')
+    .replace(/,\s+/g, ',')
+    .replace(/:\s+/g, ':')
     .trim();
 }
 
@@ -52,40 +51,22 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
   const [depositAmount, setDepositAmount] = useState('');
   const [withdrawRecordId, setWithdrawRecordId] = useState<string | null>(null);
 
-  // Approve ZKPerp to spend USDCx
   const handleApprove = useCallback(async () => {
     if (!address) return;
-
     try {
-      const approveAmount = '50000000000u128';
-
-      const inputs = [
-        ADDRESS_LIST.ZK_PERP_ADDRESS,
-        approveAmount,
-      ];
-
-      console.log('=== APPROVE DEBUG ===');
-      console.log('Public Key:', address);
-      console.log('USDC Program ID:', USDC_PROGRAM_ID);
-      console.log('Spender (ZKPerp):', ADDRESS_LIST.ZK_PERP_ADDRESS);
-      console.log('Amount:', approveAmount);
-
       const options: TransactionOptions = {
         program: USDC_PROGRAM_ID,
         function: 'approve_public',
-        inputs,
+        inputs: [ADDRESS_LIST.ZK_PERP_ADDRESS, '50000000000u128'],
         fee: 1_000_000,
         privateFee: false,
       };
-
       await approveTx.execute(options);
     } catch (err) {
-      console.error('=== APPROVE ERROR ===');
-      console.error('Error:', err);
+      console.error('Approve error:', err);
     }
   }, [address, approveTx]);
 
-  // Fetch records (no decrypt) when connected
   useEffect(() => {
     if (connected) {
       fetchRecords();
@@ -93,7 +74,6 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
     }
   }, [connected, fetchRecords, fetchSlots]);
 
-  // Auto-refresh when deposit or withdraw is accepted
   useEffect(() => {
     if (depositTx.status === 'accepted' || withdrawTx.status === 'accepted') {
       onRefresh();
@@ -102,13 +82,13 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
   }, [depositTx.status, withdrawTx.status, onRefresh, fetchRecords]);
 
   const totalOI = longOI + shortOI;
-  const utilization = poolLiquidity > 0 
-    ? Number((totalOI * BigInt(100)) / poolLiquidity) 
+  const utilization = poolLiquidity > 0
+    ? Number((totalOI * BigInt(100)) / poolLiquidity)
     : 0;
 
   const parsedAmount = parseUsdc(depositAmount);
-  const isValidAmount = parsedAmount >= BigInt(1000000); // Min $1
- 
+  const isValidAmount = parsedAmount >= BigInt(1000000);
+
   const handleDeposit = useCallback(async () => {
     if (!connected || !isValidAmount || !address) return;
     if (!decrypted) {
@@ -116,7 +96,6 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
       return;
     }
 
-    // v8: try slots in order, skipping any that are stale on-chain
     const candidates = [getOpenSlot(), getEmptySlot()].filter(Boolean) as LPSlotRecord[];
     if (candidates.length === 0) {
       console.error('No LPSlot available — call initialize_slots first');
@@ -125,16 +104,12 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
 
     for (const slot of candidates) {
       try {
-        markSpent(slot.id); // Optimistically mark spent before submitting
-
+        markSpent(slot.id);
         const inputs = [
-          normalizeRecordPlaintext(slot.plaintext), // LPSlot record (consumed)
-          parsedAmount.toString() + 'u128',     // deposit_amount
-          address,                              // recipient
+          normalizeRecordPlaintext(slot.plaintext),
+          parsedAmount.toString() + 'u128',
+          address,
         ];
-
-        console.log('Add liquidity inputs:', inputs);
-
         const options: TransactionOptions = {
           program: PROGRAM_ID,
           function: 'add_liquidity',
@@ -142,45 +117,35 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
           fee: 5_000_000,
           privateFee: false,
         };
-
         await depositTx.execute(options);
         setDepositAmount('');
-        return; // Success — stop trying
+        return;
       } catch (err: any) {
         const msg = err?.message || String(err);
         if (msg.includes('already exists in the ledger')) {
-          console.warn('Slot already spent on-chain, trying next slot:', slot.id);
-          continue; // Try next candidate
+          console.warn('Slot already spent on-chain, trying next:', slot.id);
+          continue;
         }
         console.error('Deposit failed:', err);
         return;
       }
     }
-    console.error('All available slots are stale — please refresh and re-decrypt');
+    console.error('All slots stale — refresh and re-decrypt');
   }, [connected, isValidAmount, parsedAmount, address, depositTx, getEmptySlot, getOpenSlot, markSpent, decrypted]);
 
   const handleWithdrawRecord = useCallback(async (lpToken: LPSlotRecord) => {
     if (!connected) return;
-
     try {
       setWithdrawRecordId(lpToken.id);
       const expectedUsdc = poolLiquidity > BigInt(0) && totalLP > BigInt(0)
         ? (lpToken.lpAmount * poolLiquidity) / totalLP
         : lpToken.lpAmount;
-
-      console.log('=== WITHDRAW DEBUG ===');
-      console.log('Plaintext:', lpToken.plaintext);
-      console.log('Amount:', lpToken.lpAmount.toString());
-      console.log('Expected USDC:', expectedUsdc.toString());
-
       markSpent(lpToken.id);
-
       const inputs = [
         normalizeRecordPlaintext(lpToken.plaintext),
         lpToken.lpAmount.toString() + 'u64',
         expectedUsdc.toString() + 'u128',
       ];
-
       const options: TransactionOptions = {
         program: PROGRAM_ID,
         function: 'remove_liquidity',
@@ -188,7 +153,6 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
         fee: 5_000_000,
         privateFee: false,
       };
-
       await withdrawTx.execute(options);
     } catch (err) {
       console.error('Withdraw failed:', err);
@@ -198,21 +162,24 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
   }, [connected, poolLiquidity, totalLP, withdrawTx]);
 
   const quickAmounts = [10, 50, 100, 500, 1000];
-
   const isDepositBusy = depositTx.status === 'submitting' || depositTx.status === 'pending';
   const isWithdrawBusy = withdrawTx.status === 'submitting' || withdrawTx.status === 'pending';
 
+  const Spinner = ({ size = 5 }: { size?: number }) => (
+    <svg className={`animate-spin h-${size} w-${size}`} viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+    </svg>
+  );
+
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Page Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-white mb-2">Liquidity Pool</h1>
-        <p className="text-gray-400">
-          Provide liquidity to earn trading fees. LPs act as counterparty to traders.
-        </p>
+        <p className="text-gray-400">Provide liquidity to earn trading fees. LPs act as counterparty to traders.</p>
       </div>
 
-      {/* Initialize prompt */}
+      {/* Initialize prompt — blocking modal when no slots */}
       {connected && slotCount === 0 && !slotsLoading && (
         <InitializeSlotsPrompt
           onInitialize={initializeSlots}
@@ -247,14 +214,10 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
       <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-5 mb-8">
         <p className="text-gray-400 text-sm mb-3">Long/Short Balance</p>
         <div className="h-4 bg-zkperp-dark rounded-full overflow-hidden flex">
-          <div
-            className="bg-zkperp-green h-full transition-all"
-            style={{ width: totalOI > 0 ? `${Number((longOI * BigInt(100)) / totalOI)}%` : '50%' }}
-          />
-          <div
-            className="bg-zkperp-red h-full transition-all"
-            style={{ width: totalOI > 0 ? `${Number((shortOI * BigInt(100)) / totalOI)}%` : '50%' }}
-          />
+          <div className="bg-zkperp-green h-full transition-all"
+            style={{ width: totalOI > 0 ? `${Number((longOI * BigInt(100)) / totalOI)}%` : '50%' }} />
+          <div className="bg-zkperp-red h-full transition-all"
+            style={{ width: totalOI > 0 ? `${Number((shortOI * BigInt(100)) / totalOI)}%` : '50%' }} />
         </div>
         <div className="flex justify-between mt-2 text-xs text-gray-500">
           <span>Long {totalOI > 0 ? Number((longOI * BigInt(100)) / totalOI) : 50}%</span>
@@ -267,7 +230,7 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
         <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-6">
           <h2 className="text-lg font-semibold text-white mb-4">Add Liquidity</h2>
 
-          {/* Approve Section */}
+          {/* Approve */}
           <div className="mb-4 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
             <div className="flex items-center justify-between mb-2">
               <div>
@@ -283,7 +246,10 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
               disabled={!connected || approveTx.status === 'submitting' || approveTx.status === 'pending'}
               className="w-full py-2 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/50 disabled:opacity-50 rounded-lg text-sm font-medium text-blue-400 transition-colors"
             >
-              {approveTx.status === 'submitting' ? 'Submitting...' : approveTx.status === 'pending' ? 'Pending...' : approveTx.status === 'accepted' ? 'Approved ✓' : 'Approve USDCx (50,000)'}
+              {approveTx.status === 'submitting' ? 'Submitting...'
+                : approveTx.status === 'pending' ? 'Pending...'
+                : approveTx.status === 'accepted' ? 'Approved ✓'
+                : 'Approve USDCx (50,000)'}
             </button>
             <TransactionStatus
               status={approveTx.status}
@@ -335,7 +301,6 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
               </div>
             </div>
 
-            {/* Deposit Transaction Status */}
             <TransactionStatus
               status={depositTx.status}
               tempTxId={depositTx.tempTxId}
@@ -344,37 +309,44 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
               onDismiss={depositTx.reset}
             />
 
+            {/* Single decrypt-or-deposit button */}
             <button
-              onClick={handleDeposit}
-              disabled={!connected || !isValidAmount || isDepositBusy || !decrypted}
-              className="w-full py-3 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-500/30 rounded-lg font-semibold text-white transition-colors"
+              onClick={!decrypted ? decryptAll : handleDeposit}
+              disabled={decrypting || isDepositBusy || (decrypted && (!connected || !isValidAmount))}
+              className={`w-full py-3 rounded-lg font-semibold text-white transition-colors disabled:cursor-not-allowed ${
+                !decrypted
+                  ? 'bg-zkperp-accent hover:bg-zkperp-accent/80 disabled:bg-zkperp-accent/30'
+                  : 'bg-blue-500 hover:bg-blue-600 disabled:bg-blue-500/30'
+              }`}
             >
-              {depositTx.status === 'submitting' ? 'Submitting...' : depositTx.status === 'pending' ? 'Confirming on-chain...' : !connected ? 'Connect Wallet' : !decrypted ? 'Decrypt slots to deposit' : 'Step 2: Add Liquidity'}
+              {decrypting ? (
+                <span className="flex items-center justify-center gap-2"><Spinner />Decrypting...</span>
+              ) : depositTx.status === 'submitting' ? (
+                <span className="flex items-center justify-center gap-2"><Spinner />Submitting...</span>
+              ) : depositTx.status === 'pending' ? (
+                <span className="flex items-center justify-center gap-2"><Spinner />Confirming on-chain...</span>
+              ) : !connected ? (
+                'Connect Wallet'
+              ) : !decrypted ? (
+                `🔓 Decrypt ${recordCount} Slot${recordCount !== 1 ? 's' : ''} to Deposit`
+              ) : !isValidAmount ? (
+                'Step 2: Add Liquidity'
+              ) : (
+                'Step 2: Add Liquidity'
+              )}
             </button>
           </div>
         </div>
 
-        {/* Info Panel */}
+        {/* Info + LP Position */}
         <div className="space-y-4">
           <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-6">
             <h3 className="font-semibold text-white mb-3">How it Works</h3>
             <ul className="space-y-3 text-sm text-gray-400">
-              <li className="flex gap-2">
-                <span className="text-zkperp-accent">1.</span>
-                Deposit USDC to receive LP tokens representing your share
-              </li>
-              <li className="flex gap-2">
-                <span className="text-zkperp-accent">2.</span>
-                The pool acts as counterparty to all traders
-              </li>
-              <li className="flex gap-2">
-                <span className="text-zkperp-accent">3.</span>
-                Earn fees from opening positions (0.1%) and funding rates
-              </li>
-              <li className="flex gap-2">
-                <span className="text-zkperp-accent">4.</span>
-                Withdraw anytime by burning LP tokens
-              </li>
+              <li className="flex gap-2"><span className="text-zkperp-accent">1.</span>Deposit USDC to receive LP tokens representing your share</li>
+              <li className="flex gap-2"><span className="text-zkperp-accent">2.</span>The pool acts as counterparty to all traders</li>
+              <li className="flex gap-2"><span className="text-zkperp-accent">3.</span>Earn fees from opening positions (0.1%) and funding rates</li>
+              <li className="flex gap-2"><span className="text-zkperp-accent">4.</span>Withdraw anytime by burning LP tokens</li>
             </ul>
           </div>
 
@@ -400,20 +372,16 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
                 {lpLoading ? 'Loading...' : '↻ Refresh'}
               </button>
             </div>
-            
+
             {!connected ? (
               <p className="text-gray-400 text-sm">Connect wallet to view your LP position</p>
             ) : lpLoading ? (
               <div className="flex items-center gap-2 text-gray-400">
-                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
+                <Spinner size={4} />
                 <span className="text-sm">Loading LP records...</span>
               </div>
             ) : recordCount > 0 ? (
               <div className="space-y-3">
-                {/* Record Count (always visible after fetch) */}
                 <div className="bg-zkperp-dark rounded-lg p-4">
                   <div className="flex justify-between items-center">
                     <div>
@@ -435,8 +403,8 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
                   )}
                 </div>
 
-                {/* Show Records button OR decrypted records */}
                 {!decrypted ? (
+                  /* Decrypt button in LP panel — also uses decryptAll */
                   <button
                     onClick={decryptAll}
                     disabled={decrypting}
@@ -444,10 +412,7 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
                   >
                     {decrypting ? (
                       <span className="flex items-center justify-center gap-2">
-                        <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
+                        <Spinner size={4} />
                         Decrypting {recordCount} records...
                       </span>
                     ) : (
@@ -456,28 +421,18 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
                   </button>
                 ) : (
                   <>
-                    {/* Individual Records */}
                     <div className="border-t border-zkperp-border pt-3">
-                      <p className="text-sm text-gray-400 mb-2">
-                        LP Records ({lpTokens.length})
-                      </p>
+                      <p className="text-sm text-gray-400 mb-2">LP Records ({lpTokens.length})</p>
                       <div className="space-y-2 max-h-64 overflow-y-auto">
                         {lpTokens.map((token, idx) => (
-                          <div
-                            key={token.id || idx}
-                            className="bg-zkperp-dark rounded-lg p-3 flex items-center justify-between"
-                          >
+                          <div key={token.id || idx} className="bg-zkperp-dark rounded-lg p-3 flex items-center justify-between">
                             <div className="flex items-center gap-3">
                               <div className="w-7 h-7 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 text-xs font-bold">
                                 {idx + 1}
                               </div>
                               <div>
-                                <p className="text-white text-sm font-medium">
-                                  {formatLPTokens(token.lpAmount)} LP
-                                </p>
-                                <p className="text-gray-500 text-xs">
-                                  ~${formatLPTokens(token.lpAmount)} USDC
-                                </p>
+                                <p className="text-white text-sm font-medium">{formatLPTokens(token.lpAmount)} LP</p>
+                                <p className="text-gray-500 text-xs">~${formatLPTokens(token.lpAmount)} USDC</p>
                               </div>
                             </div>
                             <button
@@ -491,8 +446,6 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
                         ))}
                       </div>
                     </div>
-
-                    {/* Withdraw Transaction Status */}
                     <TransactionStatus
                       status={withdrawTx.status}
                       tempTxId={withdrawTx.tempTxId}

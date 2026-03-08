@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: zkperp-bot-manager
+    runtime: node
+    plan: starter  # $7/month — always-on, no spin-down
+    region: frankfurt  # closest to Amsterdam
+    buildCommand: npm install
+    startCommand: node zkperp-bot-manager.mjs
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MANAGER_PORT
+        value: 3000
+      - key: BOT_PORT
+        value: 3001
+      - key: FRONTEND_ORIGIN
+        value: https://zk-perp.vercel.app/  # update this
+      - key: PROGRAM_ID
+        value: zkperp_v9.aleo
+      - key: NETWORK
+        value: testnet
+      - key: NETWORK_ID
+        value: "1"
+      - key: PRICE_INTERVAL
+        value: "30000"
+      - key: SCAN_INTERVAL
+        value: "60000"
+      # Secrets — set these manually in Render dashboard (never commit)
+      - key: PRIVATE_KEY
+        sync: false
+      - key: VIEW_KEY
+        sync: false
+      - key: PROVABLE_CONSUMER_ID
+        sync: false
+      - key: PROVABLE_API_KEY
+        sync: false

@@ -1,23 +1,18 @@
 {
   "name": "zkperp-bot",
-  "version": "1.0.0",
-  "description": "Oracle + Liquidation bot for ZKPerp v7",
+  "version": "3.0.0",
+  "description": "ZKPerp Oracle + Liquidation Bot with Process Manager",
   "type": "module",
-  "main": "zkperp-bot.mjs",
-  "dependencies": {
-    "@provablehq/sdk": "^0.9.17",
-    "dotenv": "^16.4.7"
-  },
+  "main": "zkperp-bot-manager.mjs",
   "scripts": {
-    "start": "node zkperp-bot.mjs",
-    "dev": "node --watch zkperp-bot.mjs"
+    "start": "node zkperp-bot-manager.mjs",
+    "start:bot": "node zkperp-bot.mjs",
+    "dev": "node zkperp-bot-manager.mjs"
   },
-  "keywords": [
-    "aleo",
-    "zkperp",
-    "oracle",
-    "liquidation",
-    "defi"
-  ],
-  "license": "MIT"
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0"
+  }
 }

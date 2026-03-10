@@ -65,6 +65,11 @@ const CONFIG = {
   // Contract constants
   liquidationThresholdBps: 10000n,  // 1%
   liquidationRewardBps: 5000n,      // 0.5%
+
+  // Orphaned positionIds from pre-slot architecture (zkperp_v9 only, remove when on v10+)
+  blacklistedPositionIds: new Set([
+    '3180720569841804947375495095846462644145841561277714434048299513314356573527field',
+  ]),
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -359,6 +364,7 @@ async function scanViaProvableScanner() {
       if (!ptStr) continue;
       const pos = parsePositionFromPlaintext(ptStr);
       if (!pos) continue;
+      if (CONFIG.blacklistedPositionIds.has(pos.positionId)) continue;
       try {
         const closedRaw = await getMapping('closed_positions', pos.positionId);
         if (closedRaw && closedRaw.includes('true')) continue;
@@ -397,7 +403,7 @@ async function scanViaLeoRpc() {
         for (const transition of transitions) {
           if (transition.function !== 'open_position') continue;
           const pos = parsePositionFromTransition(transition);
-          if (pos && !positions.some(p => p.positionId === pos.positionId)) {
+          if (pos && !positions.some(p => p.positionId === pos.positionId) && !CONFIG.blacklistedPositionIds.has(pos.positionId)) {
             try {
               const closedRaw = await getMapping('closed_positions', pos.positionId);
               if (closedRaw && closedRaw.includes('true')) continue;

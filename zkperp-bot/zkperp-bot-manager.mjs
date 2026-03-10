@@ -14,7 +14,7 @@
  *   GET  /health        - Manager health (always 200 if manager is up)
  *
  * Environment variables:
- *   MANAGER_PORT        - Port for this manager (default: 3000)
+ *   MANAGER_PORT        - Port for this manager (default: PORT env var, then 3000)
  *   BOT_PORT            - Port the bot listens on (default: 3001)
  *   FRONTEND_ORIGIN     - CORS origin (default: http://localhost:5173)
  *   BOT_SCRIPT          - Path to bot script (default: ./zkperp-bot_v3.mjs)
@@ -29,7 +29,7 @@ import path from 'path';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const CONFIG = {
-  managerPort: parseInt(process.env.MANAGER_PORT || '3000'),
+  managerPort: parseInt(process.env.MANAGER_PORT || process.env.PORT || '3000'),
   botPort:     parseInt(process.env.BOT_PORT     || '3001'),
   frontendOrigin: process.env.FRONTEND_ORIGIN   || 'http://localhost:5173',
   botScript:   process.env.BOT_SCRIPT            || path.join(__dirname, 'zkperp-bot.mjs'),

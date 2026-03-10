@@ -12,6 +12,7 @@ import { TransactionStatus } from '@/components/TransactionStatus';
 
 interface Props {
   poolLiquidity: bigint;
+  totalLPTokens: bigint;  // pool_state.total_lp_tokens — NOT the user's LP balance
   longOI: bigint;
   shortOI: bigint;
   onRefresh: () => void;
@@ -27,7 +28,7 @@ function normalizeRecordPlaintext(plaintext: string): string {
     .trim();
 }
 
-export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Props) {
+export function LiquidityPage({ poolLiquidity, totalLPTokens, longOI, shortOI, onRefresh }: Props) {
   const { address, connected } = useWallet();
   const {
     lpTokens, totalLP, recordCount,
@@ -50,6 +51,7 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
 
   const [depositAmount, setDepositAmount] = useState('');
   const [withdrawRecordId, setWithdrawRecordId] = useState<string | null>(null);
+  const [withdrawAmounts, setWithdrawAmounts] = useState<Record<string, string>>({});
 
   const handleApprove = useCallback(async () => {
     if (!address) return;
@@ -84,6 +86,13 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
   const totalOI = longOI + shortOI;
   const utilization = poolLiquidity > 0
     ? Number((totalOI * BigInt(100)) / poolLiquidity)
+    : 0;
+
+  // Available to withdraw = pool minus locked collateral backing open positions
+  // Mirrors the contract assert: total_liquidity - expected_usdc >= long_oi + short_oi
+  const availableLiquidity = poolLiquidity > totalOI ? poolLiquidity - totalOI : 0n;
+  const availablePercent = poolLiquidity > 0n
+    ? Number((availableLiquidity * 100n) / poolLiquidity)
     : 0;
 
   const parsedAmount = parseUsdc(depositAmount);
@@ -137,13 +146,45 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
     if (!connected) return;
     try {
       setWithdrawRecordId(lpToken.id);
-      const expectedUsdc = poolLiquidity > BigInt(0) && totalLP > BigInt(0)
-        ? (lpToken.lpAmount * poolLiquidity) / totalLP
-        : lpToken.lpAmount;
+
+      // How many LP tokens to burn — either what the user typed or the full amount
+      const inputUsdc = parseUsdc(withdrawAmounts[lpToken.id] || '');
+      const poolLPSupply = totalLPTokens > 0n ? totalLPTokens : 1n;
+
+      // LP tokens to burn = proportional to requested USDC
+      // lp_to_burn = requested_usdc * total_lp_tokens / total_liquidity
+      // If no pool data or user left blank, burn everything
+      let amountToBurn: bigint;
+      let expectedUsdc: bigint;
+
+      if (inputUsdc > 0n && poolLiquidity > 0n) {
+        // Partial withdrawal: calculate LP tokens needed for this USDC amount
+        amountToBurn = (inputUsdc * poolLPSupply) / poolLiquidity;
+        // Cap burn at what this record actually holds
+        if (amountToBurn > lpToken.lpAmount) amountToBurn = lpToken.lpAmount;
+        // Recalculate actual USDC from capped burn amount
+        expectedUsdc = (amountToBurn * poolLiquidity) / poolLPSupply;
+      } else {
+        // Full withdrawal
+        amountToBurn = lpToken.lpAmount;
+        expectedUsdc = poolLiquidity > 0n && poolLPSupply > 0n
+          ? (amountToBurn * poolLiquidity) / poolLPSupply
+          : amountToBurn;
+      }
+
+      // Cap at available liquidity (locked collateral backing open positions)
+      if (expectedUsdc > availableLiquidity) expectedUsdc = availableLiquidity;
+
+      if (expectedUsdc === 0n) {
+        alert('No liquidity available to withdraw right now — all funds are locked backing open positions. Wait for traders to close their positions.');
+        setWithdrawRecordId(null);
+        return;
+      }
+
       markSpent(lpToken.id);
       const inputs = [
         normalizeRecordPlaintext(lpToken.plaintext),
-        lpToken.lpAmount.toString() + 'u64',
+        amountToBurn.toString() + 'u64',
         expectedUsdc.toString() + 'u128',
       ];
       const options: TransactionOptions = {
@@ -159,7 +200,7 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
     } finally {
       setWithdrawRecordId(null);
     }
-  }, [connected, poolLiquidity, totalLP, withdrawTx]);
+  }, [connected, poolLiquidity, totalLPTokens, availableLiquidity, withdrawAmounts, withdrawTx, markSpent]);
 
   const quickAmounts = [10, 50, 100, 500, 1000];
   const isDepositBusy = depositTx.status === 'submitting' || depositTx.status === 'pending';
@@ -189,7 +230,7 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
       )}
 
       {/* Pool Stats */}
-      <div className="grid md:grid-cols-4 gap-4 mb-8">
+      <div className="grid md:grid-cols-5 gap-4 mb-8">
         <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-5">
           <p className="text-gray-400 text-sm mb-1">Total Liquidity</p>
           <p className="text-2xl font-bold text-white">${formatUsdc(poolLiquidity)}</p>
@@ -206,6 +247,23 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
           <p className="text-gray-400 text-sm mb-1">Pool Utilization</p>
           <p className={`text-2xl font-bold ${utilization > 80 ? 'text-zkperp-red' : utilization > 50 ? 'text-yellow-500' : 'text-zkperp-green'}`}>
             {utilization.toFixed(1)}%
+          </p>
+        </div>
+        <div className={`bg-zkperp-card rounded-xl border p-5 ${
+          availablePercent < 20 ? 'border-red-500/50' :
+          availablePercent < 50 ? 'border-yellow-500/50' :
+          'border-zkperp-border'
+        }`}>
+          <p className="text-gray-400 text-sm mb-1">Available to Withdraw</p>
+          <p className={`text-2xl font-bold ${
+            availablePercent < 20 ? 'text-red-400' :
+            availablePercent < 50 ? 'text-yellow-400' :
+            'text-zkperp-green'
+          }`}>
+            ${formatUsdc(availableLiquidity)}
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            {availablePercent.toFixed(1)}% free · ${formatUsdc(totalOI)} locked
           </p>
         </div>
       </div>
@@ -395,10 +453,10 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
                       </div>
                     )}
                   </div>
-                  {decrypted && poolLiquidity > BigInt(0) && totalLP > BigInt(0) && (
+                  {decrypted && poolLiquidity > BigInt(0) && totalLPTokens > BigInt(0) && (
                     <div className="flex justify-between text-xs text-gray-500 mt-2 pt-2 border-t border-zkperp-border">
                       <span>Pool Share</span>
-                      <span>{((Number(totalLP) / Number(poolLiquidity)) * 100).toFixed(2)}%</span>
+                      <span>{((Number(totalLP) / Number(totalLPTokens)) * 100).toFixed(2)}%</span>
                     </div>
                   )}
                 </div>
@@ -424,26 +482,69 @@ export function LiquidityPage({ poolLiquidity, longOI, shortOI, onRefresh }: Pro
                     <div className="border-t border-zkperp-border pt-3">
                       <p className="text-sm text-gray-400 mb-2">LP Records ({lpTokens.length})</p>
                       <div className="space-y-2 max-h-64 overflow-y-auto">
-                        {lpTokens.map((token, idx) => (
-                          <div key={token.id || idx} className="bg-zkperp-dark rounded-lg p-3 flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="w-7 h-7 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 text-xs font-bold">
-                                {idx + 1}
+                        {lpTokens.map((token, idx) => {
+                          const poolLPSupply = totalLPTokens > 0n ? totalLPTokens : 1n;
+                          const maxEntitled = poolLiquidity > 0n
+                            ? (token.lpAmount * poolLiquidity) / poolLPSupply
+                            : token.lpAmount;
+                          const maxWithdraw = maxEntitled > availableLiquidity ? availableLiquidity : maxEntitled;
+                          const inputVal = withdrawAmounts[token.id] || '';
+                          const parsedInput = parseUsdc(inputVal);
+                          const isOverMax = parsedInput > maxWithdraw;
+
+                          return (
+                            <div key={token.id || idx} className="bg-zkperp-dark rounded-lg p-3 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-7 h-7 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 text-xs font-bold">
+                                    {idx + 1}
+                                  </div>
+                                  <div>
+                                    <p className="text-white text-sm font-medium">{formatLPTokens(token.lpAmount)} LP</p>
+                                    <p className={`text-xs ${maxWithdraw === 0n ? 'text-red-400' : 'text-gray-500'}`}>
+                                      Max withdraw: ${formatUsdc(maxWithdraw)}
+                                      {maxWithdraw < maxEntitled && (
+                                        <span className="text-yellow-500 ml-1">(locked: ${formatUsdc(totalOI)})</span>
+                                      )}
+                                    </p>
+                                  </div>
+                                </div>
                               </div>
-                              <div>
-                                <p className="text-white text-sm font-medium">{formatLPTokens(token.lpAmount)} LP</p>
-                                <p className="text-gray-500 text-xs">~${formatLPTokens(token.lpAmount)} USDC</p>
+                              <div className="flex gap-2">
+                                <div className="relative flex-1">
+                                  <input
+                                    type="number"
+                                    placeholder={`Max $${formatUsdc(maxWithdraw)}`}
+                                    value={inputVal}
+                                    onChange={(e) => setWithdrawAmounts(prev => ({ ...prev, [token.id]: e.target.value }))}
+                                    disabled={maxWithdraw === 0n || isWithdrawBusy}
+                                    className={`w-full bg-zkperp-card border rounded px-3 py-1.5 text-white text-sm placeholder-gray-600 focus:outline-none disabled:opacity-40 ${
+                                      isOverMax ? 'border-red-500' : 'border-zkperp-border focus:border-blue-500'
+                                    }`}
+                                  />
+                                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs">USDC</span>
+                                </div>
+                                <button
+                                  onClick={() => setWithdrawAmounts(prev => ({ ...prev, [token.id]: formatUsdc(maxWithdraw) }))}
+                                  disabled={maxWithdraw === 0n || isWithdrawBusy}
+                                  className="px-2 py-1.5 bg-zkperp-card border border-zkperp-border hover:border-blue-500 disabled:opacity-40 rounded text-xs text-gray-400 hover:text-white transition-colors"
+                                >
+                                  Max
+                                </button>
+                                <button
+                                  onClick={() => handleWithdrawRecord(token)}
+                                  disabled={isWithdrawBusy || withdrawRecordId === token.id || maxWithdraw === 0n || isOverMax}
+                                  className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 hover:border-red-500/50 disabled:opacity-50 rounded-lg text-xs font-medium text-red-400 transition-colors"
+                                >
+                                  {withdrawRecordId === token.id ? '...' : 'Withdraw'}
+                                </button>
                               </div>
+                              {isOverMax && (
+                                <p className="text-xs text-red-400">Amount exceeds max withdrawable (${formatUsdc(maxWithdraw)})</p>
+                              )}
                             </div>
-                            <button
-                              onClick={() => handleWithdrawRecord(token)}
-                              disabled={isWithdrawBusy || withdrawRecordId === token.id}
-                              className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 hover:border-red-500/50 disabled:opacity-50 rounded-lg text-xs font-medium text-red-400 transition-colors"
-                            >
-                              {withdrawRecordId === token.id ? '...' : 'Withdraw'}
-                            </button>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                     <TransactionStatus

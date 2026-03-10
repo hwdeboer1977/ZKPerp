@@ -48,7 +48,6 @@ interface BotStatus {
 export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: Props) {
   const { connected } = useWallet();
   const MANAGER_API = import.meta.env.VITE_MANAGER_API_URL || 'http://localhost:3000';
-  const BOT_API     = import.meta.env.VITE_BOT_API_URL     || 'http://localhost:3001';
   const liquidateTx = useTransaction();
 
   const [activeTab, setActiveTab] = useState<'txid' | 'orchestrator'>('orchestrator');
@@ -161,7 +160,7 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
     setOrchError(null);
 
     try {
-      const res = await fetch(`${BOT_API}/api/liq-auths`);
+      const res = await fetch(`${MANAGER_API}/api/liq-auths`);
       if (!res.ok) throw new Error(`Bot API error: ${res.status}`);
 
       const data = await res.json();
@@ -183,12 +182,12 @@ export function LiquidatePage({ currentPrice, poolLiquidity, longOI, shortOI }: 
     } catch (err: any) {
       console.error('Failed to fetch from bot API:', err);
       setOrchError(err.message.includes('fetch')
-        ? 'Bot API unreachable — is zkperp-bot running? (port 3001)'
+        ? 'Bot API unreachable — is zkperp-bot-manager running? (port 3000)'
         : err.message);
     } finally {
       setOrchLoading(false);
     }
-  }, [BOT_API]);
+  }, [MANAGER_API]);
 
   // Recalculate when price changes
   useEffect(() => {

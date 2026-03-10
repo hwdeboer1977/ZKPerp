@@ -23,6 +23,7 @@ function AppContent() {
 
   const currentPrice = priceData?.price ?? manualPrice ?? BigInt(10000000000000);
   const poolLiquidity = poolState?.total_liquidity ?? BigInt(0);
+  const totalLPTokens = poolState?.total_lp_tokens ?? BigInt(0);
   const longOI = poolState?.long_open_interest ?? BigInt(0);
   const shortOI = poolState?.short_open_interest ?? BigInt(0);
 
@@ -47,6 +48,7 @@ function AppContent() {
           element={
             <LiquidityPage
               poolLiquidity={poolLiquidity}
+              totalLPTokens={totalLPTokens}
               longOI={longOI}
               shortOI={shortOI}
               onRefresh={refresh}

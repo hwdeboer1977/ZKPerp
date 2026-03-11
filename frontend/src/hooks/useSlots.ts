@@ -50,14 +50,39 @@ export function useSlots() {
         console.log('record:', r.recordName, r.commitment?.slice(0,20))
       );
 
-      const allSlotRecords = records.filter((r: any) => r.recordName === 'PositionSlot');
+      const allSlotRecords = records.filter((r: any) =>
+        r.recordName === 'PositionSlot' &&
+        // Leo Wallet may return records from all program versions — hard-filter to current program only
+        (!r.programId || r.programId === PROGRAM_ID)
+      );
       allSlotRecords.forEach((r: any) => console.log('slot spent-check:', 'spent:', r.spent, 'commitment:', r.commitment?.slice(0, 20)));
       const slotRecords = allSlotRecords.filter((r: any) => !r.spent);
-      console.log(`Found ${slotRecords.length} unspent PositionSlot records (${allSlotRecords.length} total)`);
+      console.log(`Found ${slotRecords.length} unspent PositionSlot records (${allSlotRecords.length} total, program=${PROGRAM_ID})`);
 
-      setRawRecords(slotRecords);
-      setRawRecordCount(slotRecords.length);
-      setRecordCount(slotRecords.length > 0 ? slotRecords.length : 0);
+      // Pre-deduplicate before storing: keep only the last record per slot index position
+      // (slot 0 = long, slot 1 = short). This ensures we only fire 2 wallet decrypt prompts,
+      // not one per accumulated record from open+liquidate cycles.
+      // We use commitment as a tie-breaker (lexicographically last = most recently created).
+      const slotsByIndex = new Map<number, any>();
+      for (const r of slotRecords) {
+        const idx = slotRecords.indexOf(r) % 2; // fallback index before decrypt
+        const key = r.commitment || r.id || String(slotRecords.indexOf(r));
+        // Keep the record with the lexicographically largest commitment (most recent)
+        const existing = slotsByIndex.get(slotRecords.indexOf(r) < slotRecords.length / 2 ? 0 : 1);
+        // Simpler: just keep last 2 unique records — dedup by slot_id happens after decrypt
+        slotsByIndex.set(slotRecords.indexOf(r), r);
+      }
+      // Take at most 2 records — one for each slot_id (0=long, 1=short).
+      // Sort by commitment descending so newest records are preferred, then cap at 2.
+      const dedupedRaw = slotRecords
+        .slice()
+        .sort((a: any, b: any) => (b.commitment || '').localeCompare(a.commitment || ''))
+        .slice(0, 2);
+      console.log(`Pre-dedup: ${slotRecords.length} → ${dedupedRaw.length} records (max 2 wallet prompts)`);
+
+      setRawRecords(dedupedRaw);
+      setRawRecordCount(slotRecords.length); // show real count for debug
+      setRecordCount(dedupedRaw.length > 0 ? dedupedRaw.length : 0);
       setDecrypted(false);
       setPositionSlots([]);
     } catch (err) {
@@ -131,7 +156,11 @@ export function useSlots() {
           dedupMap.set(slot.slotId, slot);
         }
       }
-      const deduped = Array.from(dedupMap.values()).sort((a, b) => a.slotId - b.slotId);
+      // Hard cap: contract only ever mints slot_id 0 (long) and slot_id 1 (short)
+      // Extra records beyond this are stale from old program versions
+      const deduped = Array.from(dedupMap.values())
+        .filter(s => s.slotId === 0 || s.slotId === 1)
+        .sort((a, b) => a.slotId - b.slotId);
 
       // Cross-check open slots against chain — wallet may not know about third-party spends (e.g. liquidation)
       const verifiedDeduped = await Promise.all(deduped.map(async (slot) => {

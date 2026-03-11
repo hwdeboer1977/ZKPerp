@@ -4,6 +4,8 @@ import type { TransactionOptions } from '@provablehq/aleo-types';
 import { useTransaction } from '@/hooks/useTransaction';
 import { PROGRAM_ID } from '@/utils/aleo';
 
+const EXPLORER_API = 'https://api.explorer.provable.com/v1/testnet';
+
 export interface PositionSlotRecord {
   id: string;
   owner: string;
@@ -30,6 +32,7 @@ export function useSlots() {
   const [decrypted, setDecrypted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rawRecords, setRawRecords] = useState<any[]>([]);
+  const [rawRecordCount, setRawRecordCount] = useState<number | null>(null);
   const [spentCommitments, setSpentCommitments] = useState<Set<string>>(new Set());
 
   // Phase 1: fetch PositionSlot records (no decrypt)
@@ -41,10 +44,20 @@ export function useSlots() {
 
     try {
       const records = await requestRecords(PROGRAM_ID);
-      const slotRecords = records.filter((r: any) => r.recordName === 'PositionSlot' && !r.spent);
-      console.log(`Found ${slotRecords.length} PositionSlot records`);
+
+      // DEBUG: log all unspent records
+      records.filter((r: any) => !r.spent).forEach((r: any) => 
+        console.log('record:', r.recordName, r.commitment?.slice(0,20))
+      );
+
+      const allSlotRecords = records.filter((r: any) => r.recordName === 'PositionSlot');
+      allSlotRecords.forEach((r: any) => console.log('slot spent-check:', 'spent:', r.spent, 'commitment:', r.commitment?.slice(0, 20)));
+      const slotRecords = allSlotRecords.filter((r: any) => !r.spent);
+      console.log(`Found ${slotRecords.length} unspent PositionSlot records (${allSlotRecords.length} total)`);
+
       setRawRecords(slotRecords);
-      setRecordCount(slotRecords.length);
+      setRawRecordCount(slotRecords.length);
+      setRecordCount(slotRecords.length > 0 ? slotRecords.length : 0);
       setDecrypted(false);
       setPositionSlots([]);
     } catch (err) {
@@ -108,9 +121,38 @@ export function useSlots() {
       }
 
       const filtered = slots.filter(s => !spentCommitments.has(s.id));
-      filtered.sort((a, b) => a.slotId - b.slotId);
-      console.log(`Decrypted ${filtered.length} PositionSlots`);
-      setPositionSlots(filtered);
+
+      // Deduplicate by slot_id: if multiple records exist for same slot_id,
+      // prefer the open one; if all closed, keep only the last one.
+      const dedupMap = new Map<number, PositionSlotRecord>();
+      for (const slot of filtered) {
+        const existing = dedupMap.get(slot.slotId);
+        if (!existing || slot.isOpen) {
+          dedupMap.set(slot.slotId, slot);
+        }
+      }
+      const deduped = Array.from(dedupMap.values()).sort((a, b) => a.slotId - b.slotId);
+
+      // Cross-check open slots against chain — wallet may not know about third-party spends (e.g. liquidation)
+      const verifiedDeduped = await Promise.all(deduped.map(async (slot) => {
+        if (!slot.isOpen) return slot;
+        try {
+          const res = await fetch(`${EXPLORER_API}/program/${PROGRAM_ID}/mapping/position_open_blocks/${slot.positionId}`);
+          const val = await res.text();
+          if (!val || val === 'null') {
+            console.log(`Slot ${slot.slotId} position_open_blocks=null — marking closed (liquidated/closed on-chain)`);
+            return { ...slot, isOpen: false };
+          }
+        } catch { /* network error — trust wallet state */ }
+        return slot;
+      }));
+
+      const openSlots = verifiedDeduped.filter(s => s.isOpen);
+      console.log(`Decrypted ${filtered.length} slots, deduped to ${verifiedDeduped.length}, ${openSlots.length} open (chain-verified)`);
+      setPositionSlots(verifiedDeduped);
+      // recordCount = total slots (used to detect if account is initialized)
+      // openSlots.length is available via positionSlots.filter(s => s.isOpen)
+      setRecordCount(verifiedDeduped.length);
       setDecrypted(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to decrypt slots');
@@ -156,6 +198,7 @@ export function useSlots() {
   return {
     positionSlots,
     recordCount,
+    rawRecordCount,
     loading,
     decrypting,
     decrypted,

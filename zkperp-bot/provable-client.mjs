@@ -105,6 +105,7 @@ export class ProvableClient {
       block_height: true,
       commitment: true,
       record_ciphertext: true,
+      record_plaintext: true,   // request pre-decrypted plaintext — avoids snarkos execSync per record
       function_name: true,
       nonce: true,
       owner: true,

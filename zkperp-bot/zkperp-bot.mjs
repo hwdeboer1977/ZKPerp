@@ -389,19 +389,24 @@ async function scanPositions() {
   return await scanViaLeoRpc();
 }
 
+const MAX_RECORDS_PER_SCAN = Number(process.env.MAX_RECORDS_PER_SCAN || 50);
+
 async function scanViaProvableScanner() {
   log('SCAN', 'Fetching records from Provable Scanner...');
   try {
     const allRecords = await provableClient.getOwnedRecords({ decrypt: true, unspent: true });
     const allList = Array.isArray(allRecords) ? allRecords : (allRecords?.records || []);
-    const programRecords = allList.filter(r => r.program_name === CONFIG.programId);
-    log('SCAN', `Provable Scanner: ${programRecords.length} ${CONFIG.programId} records`);
+    const programRecords = allList
+      .filter(r => r.program_name === CONFIG.programId && r.record_name === 'LiquidationAuth')
+      .slice(0, MAX_RECORDS_PER_SCAN);
+    log('SCAN', `Provable Scanner: ${programRecords.length} LiquidationAuth records (cap=${MAX_RECORDS_PER_SCAN})`);
 
     const positions = [];
     for (const record of programRecords) {
       if (record.record_name !== 'LiquidationAuth') continue;
-      let ptStr = '';
-      if (record.record_ciphertext) {
+      // Prefer pre-decrypted plaintext from Provable (avoids spawning snarkos per record)
+      let ptStr = record.record_plaintext || record.plaintext || '';
+      if (!ptStr && record.record_ciphertext) {
         try {
           const cmd = `${SNARKOS} developer decrypt --view-key ${CONFIG.viewKey} --ciphertext ${record.record_ciphertext}`;
           ptStr = execSync(cmd, { timeout: 10000, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
@@ -421,6 +426,8 @@ async function scanViaProvableScanner() {
       const recordOnly = ptStr.substring(ptStr.indexOf('{'));
       const compactPt = recordOnly.replace(/:\s+/g, ':').replace(/,\s+/g, ',').replace(/\s*{\s*/g, '{').replace(/\s*}\s*/g, '}').trim();
       positions.push({ ...pos, ciphertext: record.record_ciphertext, plaintext: compactPt });
+      // Yield to event loop between records — lets GC run, prevents sync CPU spike
+      await sleep(50);
     }
     if (positions.length > 0) log('SCAN', `Scanner found ${positions.length} position(s)`);
     return positions;
@@ -695,7 +702,7 @@ async function main() {
   log('BOT', `Oracle interval: ${CONFIG.priceIntervalMs / 1000}s`);
   log('BOT', `Scan interval: ${CONFIG.scanIntervalMs / 1000}s`);
   log('BOT', `API port: ${CONFIG.apiPort}`);
-  log('BOT', `Max store size: ${MAX_POSITION_STORE_SIZE} | TTL: ${POSITION_TTL_MS/60000}min | Cleanup: ${POSITION_CLEANUP_INTERVAL_MS/60000}min`);
+  log('BOT', `Max store size: ${MAX_POSITION_STORE_SIZE} | TTL: ${POSITION_TTL_MS/60000}min | Cleanup: ${POSITION_CLEANUP_INTERVAL_MS/60000}min | Max records/scan: ${MAX_RECORDS_PER_SCAN}`);
   console.log('');
 
   if (!CONFIG.privateKey || CONFIG.privateKey.includes('...')) {

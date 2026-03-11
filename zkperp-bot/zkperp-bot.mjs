@@ -78,6 +78,52 @@ let lastScanAt = null;
 let currentOraclePrice = 0n;
 let botStartedAt = new Date().toISOString();
 
+// ── Memory management config ────────────────────────────────────
+const MAX_POSITION_STORE_SIZE = Number(process.env.MAX_POSITION_STORE_SIZE || 2000);
+const POSITION_TTL_MS         = Number(process.env.POSITION_TTL_MS         || 30 * 60 * 1000); // 30 min
+const POSITION_CLEANUP_INTERVAL_MS = Number(process.env.POSITION_CLEANUP_INTERVAL_MS || 5 * 60 * 1000); // 5 min
+
+function upsertPosition(pos) {
+  if (!pos?.positionId) return;
+  const existing = positionStore.get(pos.positionId);
+  positionStore.set(pos.positionId, {
+    ...existing,
+    ...pos,
+    scannedAt: pos.scannedAt || new Date().toISOString(),
+  });
+  // Evict oldest entries if over cap
+  while (positionStore.size > MAX_POSITION_STORE_SIZE) {
+    positionStore.delete(positionStore.keys().next().value);
+  }
+}
+
+function cleanupExpiredPositions() {
+  const cutoff = Date.now() - POSITION_TTL_MS;
+  let removed = 0;
+  for (const [id, pos] of positionStore.entries()) {
+    if (new Date(pos.scannedAt).getTime() < cutoff) {
+      positionStore.delete(id);
+      removed++;
+    }
+  }
+  if (removed > 0) log('CLEANUP', `Removed ${removed} stale positions, remaining=${positionStore.size}`);
+}
+
+function emergencyTrimPositionStore() {
+  const rssMb = Math.round(process.memoryUsage().rss / 1024 / 1024);
+  if (rssMb > 400) {
+    const keys = Array.from(positionStore.keys());
+    const removeCount = Math.floor(keys.length / 2);
+    for (let i = 0; i < removeCount; i++) positionStore.delete(keys[i]);
+    log('MEM', `⚠️ Emergency trim: rss=${rssMb}MB, removed ${removeCount} positions`);
+  }
+}
+
+function logMemoryUsage(tag = 'mem') {
+  const m = process.memoryUsage();
+  log(tag, `rss=${Math.round(m.rss/1024/1024)}MB heapUsed=${Math.round(m.heapUsed/1024/1024)}MB storeSize=${positionStore.size}`);
+}
+
 // ═══════════════════════════════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════════════════════════════
@@ -156,8 +202,7 @@ function serializePosition(pos) {
     isLiquidatable: calc.isLiquidatable,
     reward: calc.reward.toString(),
     scannedAt: pos.scannedAt,
-    ciphertext: pos.ciphertext || null,
-    plaintext: pos.plaintext || null,
+    // ciphertext and plaintext intentionally omitted from API output
   };
 }
 
@@ -595,10 +640,22 @@ async function liquidationTick() {
     const positions = await scanPositions();
     lastScanAt = new Date().toISOString();
 
-    // Upsert all found positions into the store
+    // Upsert all found positions into the store (slim: no ciphertext/plaintext)
     for (const pos of positions) {
-      positionStore.set(pos.positionId, pos);
+      upsertPosition({
+        positionId: pos.positionId,
+        trader:     pos.trader,
+        isLong:     pos.isLong,
+        size:       pos.size,
+        collateral: pos.collateral,
+        entryPrice: pos.entryPrice,
+        scannedAt:  pos.scannedAt || new Date().toISOString(),
+      });
     }
+
+    cleanupExpiredPositions();
+    emergencyTrimPositionStore();
+    logMemoryUsage('after-scan');
 
     if (positions.length === 0) { log('SCAN', 'No open positions'); return; }
 
@@ -611,6 +668,7 @@ async function liquidationTick() {
 
       if (m.isLiquidatable) {
         log('LIQUIDATE', '🔴 Below threshold! Liquidating...');
+        // Pass plaintext directly from the just-scanned pos (not from the store)
         await liquidatePosition(pos);
         await sleep(5000);
       }
@@ -637,6 +695,7 @@ async function main() {
   log('BOT', `Oracle interval: ${CONFIG.priceIntervalMs / 1000}s`);
   log('BOT', `Scan interval: ${CONFIG.scanIntervalMs / 1000}s`);
   log('BOT', `API port: ${CONFIG.apiPort}`);
+  log('BOT', `Max store size: ${MAX_POSITION_STORE_SIZE} | TTL: ${POSITION_TTL_MS/60000}min | Cleanup: ${POSITION_CLEANUP_INTERVAL_MS/60000}min`);
   console.log('');
 
   if (!CONFIG.privateKey || CONFIG.privateKey.includes('...')) {
@@ -662,6 +721,10 @@ async function main() {
 
   setInterval(oracleTick, CONFIG.priceIntervalMs);
   setInterval(liquidationTick, CONFIG.scanIntervalMs);
+  setInterval(() => {
+    cleanupExpiredPositions();
+    logMemoryUsage('periodic');
+  }, POSITION_CLEANUP_INTERVAL_MS);
 
   log('BOT', '✅ Running. Ctrl+C to stop.');
 }

@@ -1,4 +1,4 @@
-// ZKPerp v9 - Privacy-Preserving Perpetual DEX on Aleo
+// ZKPerp v12 - Privacy-Preserving Perpetual DEX on Aleo
 // Slot-based record model: 3 fixed records per trader, forever
 //
 // KEY CHANGE from v8:
@@ -18,7 +18,7 @@
 
 import test_usdcx_stablecoin.aleo;
 
-program zkperp_v9.aleo {
+program zkperp_v12.aleo {
 
     // ═══════════════════════════════════════════════════════════════
     // ARCHITECTURE OVERVIEW
@@ -86,6 +86,10 @@ program zkperp_v9.aleo {
     // ============== POSITION TIMING ==============
 
     mapping position_open_blocks: field => u32;
+
+    // ============== ACTIVE POSITIONS ==============
+
+    mapping active_position_ids: field => field; // position_id => position_id (existence check)
 
     // ============== REPLAY PROTECTION ==============
 
@@ -473,6 +477,7 @@ program zkperp_v9.aleo {
 
         // Store open block for borrow fee calculation
         Mapping::set(position_open_blocks, position_id, block.height);
+        Mapping::set(active_position_ids, position_id, position_id);
 
         // Get/init pool state
         let state: PoolState = Mapping::get_or_use(
@@ -617,6 +622,7 @@ program zkperp_v9.aleo {
         });
 
         Mapping::remove(position_open_blocks, position_id);
+        Mapping::remove(active_position_ids, position_id);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -738,6 +744,7 @@ program zkperp_v9.aleo {
         });
 
         Mapping::remove(position_open_blocks, position_id);
+        Mapping::remove(active_position_ids, position_id);
     }
 
     // ═══════════════════════════════════════════════════════════════

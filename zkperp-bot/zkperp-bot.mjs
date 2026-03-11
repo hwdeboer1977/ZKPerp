@@ -24,7 +24,7 @@
  */
 
 import 'dotenv/config';
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import https from 'https';
 import http from 'http';
 import { ProvableClient } from './provable-client.mjs';
@@ -66,10 +66,6 @@ const CONFIG = {
   liquidationThresholdBps: 10000n,  // 1%
   liquidationRewardBps: 5000n,      // 0.5%
 
-  // Orphaned positionIds from pre-slot architecture (zkperp_v9 only, remove when on v10+)
-  blacklistedPositionIds: new Set([
-    '3180720569841804947375495095846462644145841561277714434048299513314356573527field',
-  ]),
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -131,12 +127,15 @@ function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 function calcLiquidation(pos, price) {
   if (!price || price === 0n) return { pnl: 0n, marginRatio: 100, isLiquidatable: false, reward: 0n };
+  // size/collateral are 6-decimal microUSDC; price/entryPrice are 8-decimal — normalize to match
+  const size8 = pos.size * 100n;
+  const collateral8 = pos.collateral * 100n;
   const priceDiff = price > pos.entryPrice ? price - pos.entryPrice : pos.entryPrice - price;
-  const pnlAbs = (pos.size * priceDiff) / (pos.entryPrice + 1n);
+  const pnlAbs = (size8 * priceDiff) / (pos.entryPrice + 1n);
   const traderProfits = (pos.isLong && price > pos.entryPrice) || (!pos.isLong && price < pos.entryPrice);
   const pnl = traderProfits ? pnlAbs : -pnlAbs;
-  const remainingMargin = pos.collateral + pnl;
-  const marginRatio = Number(remainingMargin * 100n * 10000n / (pos.size + 1n)) / 10000;
+  const remainingMargin = collateral8 + pnl;
+  const marginRatio = Number(remainingMargin * 100n * 10000n / (size8 + 1n)) / 10000;
   const isLiquidatable = marginRatio < 1;
   const reward = (pos.size * CONFIG.liquidationRewardBps) / 1_000_000n;
   return { pnl, marginRatio, isLiquidatable, reward };
@@ -157,6 +156,8 @@ function serializePosition(pos) {
     isLiquidatable: calc.isLiquidatable,
     reward: calc.reward.toString(),
     scannedAt: pos.scannedAt,
+    ciphertext: pos.ciphertext || null,
+    plaintext: pos.plaintext || null,
   };
 }
 
@@ -364,12 +365,17 @@ async function scanViaProvableScanner() {
       if (!ptStr) continue;
       const pos = parsePositionFromPlaintext(ptStr);
       if (!pos) continue;
-      if (CONFIG.blacklistedPositionIds.has(pos.positionId)) continue;
       try {
         const closedRaw = await getMapping('closed_positions', pos.positionId);
         if (closedRaw && closedRaw.includes('true')) continue;
+        // Contract removes position_open_blocks on close — null means closed
+        const openRaw = await getMapping('position_open_blocks', pos.positionId);
+        if (!openRaw || openRaw === 'null') continue;
       } catch {}
-      positions.push(pos);
+      // Strip any snarkos banner lines before the record, then compact to no-spaces single line
+      const recordOnly = ptStr.substring(ptStr.indexOf('{'));
+      const compactPt = recordOnly.replace(/:\s+/g, ':').replace(/,\s+/g, ',').replace(/\s*{\s*/g, '{').replace(/\s*}\s*/g, '}').trim();
+      positions.push({ ...pos, ciphertext: record.record_ciphertext, plaintext: compactPt });
     }
     if (positions.length > 0) log('SCAN', `Scanner found ${positions.length} position(s)`);
     return positions;
@@ -403,7 +409,7 @@ async function scanViaLeoRpc() {
         for (const transition of transitions) {
           if (transition.function !== 'open_position') continue;
           const pos = parsePositionFromTransition(transition);
-          if (pos && !positions.some(p => p.positionId === pos.positionId) && !CONFIG.blacklistedPositionIds.has(pos.positionId)) {
+          if (pos && !positions.some(p => p.positionId === pos.positionId)) {
             try {
               const closedRaw = await getMapping('closed_positions', pos.positionId);
               if (closedRaw && closedRaw.includes('true')) continue;
@@ -502,12 +508,15 @@ async function fetchJsonPost(url, body) {
 
 function calculateMarginRatio(position, price) {
   const { isLong, size, collateral, entryPrice } = position;
+  // size/collateral are 6-decimal microUSDC; price/entryPrice are 8-decimal — normalize to match
+  const size8 = size * 100n;
+  const collateral8 = collateral * 100n;
   const priceDiff = price > entryPrice ? price - entryPrice : entryPrice - price;
-  const pnlAbs = (size * priceDiff) / (entryPrice + 1n);
+  const pnlAbs = (size8 * priceDiff) / (entryPrice + 1n);
   const traderProfits = (isLong && price > entryPrice) || (!isLong && price < entryPrice);
   const pnl = traderProfits ? pnlAbs : -pnlAbs;
-  const remainingMargin = collateral + pnl;
-  const marginRatioBps = (remainingMargin * 1_000_000n) / (size + 1n);
+  const remainingMargin = collateral8 + pnl;
+  const marginRatioBps = (remainingMargin * 1_000_000n) / (size8 + 1n);
   return {
     pnl, marginRatioBps,
     marginPercent: Number(marginRatioBps) / 10000,
@@ -516,27 +525,35 @@ function calculateMarginRatio(position, price) {
 }
 
 async function liquidatePosition(position) {
-  const { positionId, isLong, size, collateral, entryPrice, trader } = position;
+  const { positionId, size, plaintext } = position;
   let reward = (size * CONFIG.liquidationRewardBps) / 1_000_000n;
   if (reward < 1n) reward = 1n;
   log('LIQUIDATE', `Liquidating ${positionId.slice(0, 20)}...`);
+  log('LIQUIDATE', `Plaintext present: ${!!plaintext}, length: ${plaintext?.length}`);
+  log('LIQUIDATE', `Plaintext preview: ${plaintext?.substring(0, 150)}`);
+  if (!plaintext) {
+    logError('LIQUIDATE', `No plaintext record stored for ${positionId.slice(0, 20)} — cannot liquidate`);
+    return false;
+  }
   try {
-    const cmd = [
-      `${SNARKOS} developer execute`,
-      `--private-key ${CONFIG.privateKey}`,
-      `--query ${CONFIG.queryEndpoint}`,
-      `--broadcast ${CONFIG.broadcastEndpoint}`,
-      `--network ${CONFIG.networkId}`,
+    const result = spawnSync(SNARKOS, [
+      'developer', 'execute',
+      '--private-key', CONFIG.privateKey,
+      '--query', CONFIG.queryEndpoint,
+      '--broadcast', CONFIG.broadcastEndpoint,
+      '--network', CONFIG.networkId,
       CONFIG.programId, 'liquidate',
-      `"${positionId}"`,
-      `${isLong}`,
-      `${size}u64`,
-      `${collateral}u64`,
-      `${entryPrice}u64`,
+      plaintext,
       `${reward}u128`,
-      `${trader}`,
-    ].join(' ');
-    execSync(cmd, { timeout: 180000, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    ], { timeout: 180000, encoding: 'utf8' });
+    const output = (result.stdout || '') + (result.stderr || '');
+    if (result.status !== 0) throw { stderr: output };
+    if (!output.includes('Created execution transaction')) throw { stderr: output };
+    // Broadcast failure (e.g. 522) is non-fatal — tx was proved, will retry next scan
+    if (output.includes('Failed to broadcast')) {
+      log('LIQUIDATE', `⚠️ TX proved but broadcast failed (API down?) — will retry next scan`);
+      return false;
+    }
     log('LIQUIDATE', `✅ Liquidated! Reward: $${(Number(reward) / 1_000_000).toFixed(4)}`);
     // Remove from store after successful liquidation
     positionStore.delete(positionId);

@@ -65,10 +65,10 @@ export function useSlots() {
       // We use commitment as a tie-breaker (lexicographically last = most recently created).
       const slotsByIndex = new Map<number, any>();
       for (const r of slotRecords) {
-        const idx = slotRecords.indexOf(r) % 2; // fallback index before decrypt
-        const key = r.commitment || r.id || String(slotRecords.indexOf(r));
+        //const idx = slotRecords.indexOf(r) % 2; // fallback index before decrypt
+        //const key = r.commitment || r.id || String(slotRecords.indexOf(r));
         // Keep the record with the lexicographically largest commitment (most recent)
-        const existing = slotsByIndex.get(slotRecords.indexOf(r) < slotRecords.length / 2 ? 0 : 1);
+        //const existing = slotsByIndex.get(slotRecords.indexOf(r) < slotRecords.length / 2 ? 0 : 1);
         // Simpler: just keep last 2 unique records — dedup by slot_id happens after decrypt
         slotsByIndex.set(slotRecords.indexOf(r), r);
       }

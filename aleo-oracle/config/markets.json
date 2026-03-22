@@ -1,0 +1,29 @@
+{
+  "BTC_USD": {
+    "assetId": "BTC_USD",
+    "assetKey": "1field",
+    "sourceChainId": 1,
+    "feedAddress": "0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c",
+    "priceDecimals": 8,
+    "heartbeatSec": 3600,
+    "rpcEnvVar": "EVM_RPC_URL"
+  },
+  "ETH_USD": {
+    "assetId": "ETH_USD",
+    "assetKey": "2field",
+    "sourceChainId": 1,
+    "feedAddress": "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",
+    "priceDecimals": 8,
+    "heartbeatSec": 3600,
+    "rpcEnvVar": "EVM_RPC_URL"
+  },
+  "SOL_USD": {
+    "assetId": "SOL_USD",
+    "assetKey": "3field",
+    "sourceChainId": 42161,
+    "feedAddress": "0x24ceA4b8ce57cdA5058b924B9B9987992450590c",
+    "priceDecimals": 8,
+    "heartbeatSec": 3600,
+    "rpcEnvVar": "EVM_RPC_URL_ARB"
+  }
+}

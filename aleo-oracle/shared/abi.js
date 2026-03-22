@@ -1,0 +1,5 @@
+export const AGGREGATOR_V3_ABI = [
+  "function decimals() external view returns (uint8)",
+  "function description() external view returns (string)",
+  "function latestRoundData() external view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)"
+];

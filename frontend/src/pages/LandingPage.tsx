@@ -16,14 +16,14 @@ export function LandingPage() {
     >
       <div
         className="absolute"
-        style={{ top: '8%', right: '4%' }}
+        style={{ top: '3%', right: '2%' }}
       >
         <button
           onClick={() => navigate('/trade')}
-          className="px-16 py-6 rounded-xl font-bold text-2xl text-white transition-all duration-200 hover:scale-105 active:scale-95 whitespace-nowrap animate-pulse"
+          className="px-8 py-3 rounded-xl font-bold text-lg text-white transition-all duration-200 hover:scale-105 active:scale-95 whitespace-nowrap animate-pulse"
           style={{
             background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
-            boxShadow: '0 0 32px rgba(168, 85, 247, 0.8), 0 4px 20px rgba(0,0,0,0.6)',
+            boxShadow: '0 0 20px rgba(168, 85, 247, 0.7), 0 4px 12px rgba(0,0,0,0.5)',
             animationDuration: '2s',
           }}
         >

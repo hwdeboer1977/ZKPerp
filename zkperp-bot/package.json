@@ -13,6 +13,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "@provablehq/sdk": "^0.9.18",
     "dotenv": "^16.0.0"
   }
 }

@@ -166,7 +166,7 @@ const server = http.createServer(async (req, res) => {
   // CORS
   res.setHeader('Access-Control-Allow-Origin', CONFIG.frontendOrigin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
   const url = new URL(req.url, `http://localhost:${CONFIG.managerPort}`);
@@ -219,7 +219,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ── Proxy everything else to bot (/api/*, /health on bot port)
-  if (url.pathname.startsWith('/api/') || url.pathname === '/bot-health') {
+  if (url.pathname.startsWith('/api/') || url.pathname === '/bot-health' || url.pathname === '/oracle/update') {
     if (!isRunning()) {
       return json({ error: 'Bot is not running', running: false }, 503);
     }

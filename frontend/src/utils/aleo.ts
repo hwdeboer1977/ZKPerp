@@ -1,7 +1,14 @@
-// ZKPerp v5 contract constants (USDCx migration)
-export const PROGRAM_ID = 'zkperp_v12.aleo';
-export const USDC_PROGRAM_ID = 'test_usdcx_stablecoin.aleo';
-export const SCALE = 1_000_000; // 6 decimals for amounts
+// ZKPerp v13 contract constants (fully private — USDCx Token records)
+export const PROGRAM_ID = 'zkperp_v19.aleo';
+
+// test_usdcx_stablecoin.aleo — used for private Token record transfers
+// Exported under both names:
+//   USDC_PROGRAM_ID  — legacy name kept so useBalance.ts / old imports don't break
+//   USDCX_PROGRAM_ID — new name used by useUSDCx and LiquidityPage (v13)
+export const USDC_PROGRAM_ID  = 'test_usdcx_stablecoin.aleo';
+export const USDCX_PROGRAM_ID = 'test_usdcx_stablecoin.aleo';
+
+export const SCALE = 1_000_000;       // 6 decimals for amounts
 export const PRICE_SCALE = 100_000_000; // 8 decimals for prices
 
 // Format USDC amount (6 decimals) to display string
@@ -50,7 +57,7 @@ export function calculateLiquidationPrice(
 ): bigint {
   const entry = Number(entryPrice);
   const margin = 0.99 / leverage;
-  
+
   if (isLong) {
     return BigInt(Math.floor(entry * (1 - margin)));
   } else {
@@ -85,13 +92,13 @@ export function calculatePnL(
   const entry = Number(entryPrice);
   const current = Number(currentPrice);
   const posSize = Number(size) / SCALE;
-  
+
   const priceDiff = current - entry;
   const pnlRaw = (priceDiff / entry) * posSize;
-  
+
   const pnl = isLong ? pnlRaw : -pnlRaw;
   const pnlPercent = (priceDiff / entry) * 100 * (isLong ? 1 : -1);
-  
+
   return {
     pnl,
     pnlPercent,

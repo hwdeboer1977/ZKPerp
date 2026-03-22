@@ -2,51 +2,52 @@ import { useState, useCallback } from 'react';
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import type { TransactionOptions } from '@provablehq/aleo-types';
 import { formatPrice, formatUsdc } from '@/utils/aleo';
-import { PROGRAM_IDS, ADDRESS_LIST } from '../utils/config';
+import { ADDRESS_LIST } from '../utils/config';
 import { useTransaction } from '@/hooks/useTransaction';
 import { TransactionStatus } from '@/components/TransactionStatus';
-
-const PROGRAM_ID = PROGRAM_IDS.ZKPERP;
+import { useOnChainData } from '@/hooks/useOnChainData';
+import { getPair, PAIR_IDS } from '@/config/pairs';
+import type { PairId } from '@/config/pairs';
 
 const ADMIN_ADDRESS = ADDRESS_LIST.ADMIN_ADDRESS;
 
-interface Props {
-  currentPrice: bigint;
-  oracleSet: boolean;
-  poolLiquidity: bigint;
-  longOI: bigint;
-  shortOI: bigint;
-  onRefresh: () => void;
-}
-
-export function AdminPage({ currentPrice, oracleSet, poolLiquidity, longOI, shortOI, onRefresh }: Props) {
+// AdminPage manages its own on-chain data per selected pair
+// so each pair shows its own oracle price and pool stats.
+export function AdminPage() {
   const { address, connected } = useWallet();
   const tx = useTransaction();
-  
+
+  const [selectedPair, setSelectedPair] = useState<PairId>('btc');
   const [priceInput, setPriceInput] = useState('100000');
+
+  const pairConfig = getPair(selectedPair);
+  const PROGRAM_ID = pairConfig.programId;
+
+  const { poolState, priceData, refresh } = useOnChainData(selectedPair);
+
+  const currentPrice = priceData?.price ?? pairConfig.defaultPrice;
+  const oracleSet = priceData !== null;
+  const poolLiquidity = poolState?.total_liquidity ?? 0n;
+  const longOI = poolState?.long_open_interest ?? 0n;
+  const shortOI = poolState?.short_open_interest ?? 0n;
 
   const isAdmin = address === ADMIN_ADDRESS;
 
-  // Update Oracle Price
   const handleUpdatePrice = useCallback(async () => {
     if (!address) return;
-
     try {
       const priceValue = parseFloat(priceInput);
-      if (isNaN(priceValue) || priceValue <= 0) {
-        throw new Error('Invalid price');
-      }
+      if (isNaN(priceValue) || priceValue <= 0) throw new Error('Invalid price');
 
-      // Convert to 8 decimal format (e.g., 100000 -> 10000000000000)
       const priceU64 = BigInt(Math.floor(priceValue * 100000000));
 
       const inputs = [
-        '0field',                    // asset_id (0 = BTC)
-        priceU64.toString() + 'u64', // price
-        '1u32',                      // timestamp (placeholder)
+        '0field',                     // asset_id — always 0field per program
+        priceU64.toString() + 'u64',  // price
+        '1u32',                       // timestamp (placeholder)
       ];
 
-      console.log('Update price inputs:', inputs);
+      console.log(`Update price [${selectedPair}] inputs:`, inputs);
 
       const options: TransactionOptions = {
         program: PROGRAM_ID,
@@ -57,29 +58,63 @@ export function AdminPage({ currentPrice, oracleSet, poolLiquidity, longOI, shor
       };
 
       await tx.execute(options);
-      setTimeout(onRefresh, 10000);
+      setTimeout(refresh, 10000);
     } catch (err) {
       console.error('Update price failed:', err);
     }
-  }, [address, priceInput, onRefresh, tx]);
+  }, [address, priceInput, tx, PROGRAM_ID, selectedPair, refresh]);
 
-  // Quick price buttons
-  const quickPrices = [
-    { label: '$90,000', value: '90000' },
-    { label: '$95,000', value: '95000' },
-    { label: '$100,000', value: '100000' },
-    { label: '$105,000', value: '105000' },
-    { label: '$110,000', value: '110000' },
-  ];
+  const quickPrices = selectedPair === 'btc'
+    ? [
+        { label: '$90,000',  value: '90000' },
+        { label: '$95,000',  value: '95000' },
+        { label: '$100,000', value: '100000' },
+        { label: '$105,000', value: '105000' },
+        { label: '$110,000', value: '110000' },
+      ]
+    : selectedPair === 'eth'
+    ? [
+        { label: '$2,500', value: '2500' },
+        { label: '$3,000', value: '3000' },
+        { label: '$3,500', value: '3500' },
+        { label: '$4,000', value: '4000' },
+        { label: '$4,500', value: '4500' },
+      ]
+    : [
+        { label: '$100', value: '100' },
+        { label: '$130', value: '130' },
+        { label: '$150', value: '150' },
+        { label: '$180', value: '180' },
+        { label: '$200', value: '200' },
+      ];
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Page Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-white mb-2">Admin Panel</h1>
         <p className="text-gray-400">
           Manage oracle prices and protocol settings. Admin functions are restricted.
         </p>
+      </div>
+
+      {/* Pair selector */}
+      <div className="flex items-center gap-1 mb-6 p-1 bg-zkperp-card border border-zkperp-border rounded-xl w-fit">
+        {PAIR_IDS.map((pid) => {
+          const p = getPair(pid);
+          return (
+            <button
+              key={pid}
+              onClick={() => setSelectedPair(pid)}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                pid === selectedPair
+                  ? 'bg-zkperp-dark text-white'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              {p.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* Admin Status */}
@@ -129,10 +164,11 @@ export function AdminPage({ currentPrice, oracleSet, poolLiquidity, longOI, shor
       {/* Oracle Price Control */}
       <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-6 mb-6">
         <h3 className="text-lg font-semibold text-white mb-4">🔮 Oracle Price Control</h3>
-        
         <div className="space-y-4">
           <div>
-            <label className="text-sm text-gray-400 mb-2 block">Set BTC/USD Price</label>
+            <label className="text-sm text-gray-400 mb-2 block">
+              Set {pairConfig.label} Price
+            </label>
             <div className="flex gap-3">
               <div className="relative flex-1">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500">$</span>
@@ -154,7 +190,6 @@ export function AdminPage({ currentPrice, oracleSet, poolLiquidity, longOI, shor
             </div>
           </div>
 
-          {/* Quick Price Buttons */}
           <div className="flex flex-wrap gap-2">
             {quickPrices.map((p) => (
               <button
@@ -167,7 +202,6 @@ export function AdminPage({ currentPrice, oracleSet, poolLiquidity, longOI, shor
             ))}
           </div>
 
-          {/* Price change simulation */}
           <div className="bg-zkperp-dark rounded-lg p-4">
             <p className="text-sm text-gray-400 mb-2">Price Impact Preview</p>
             <div className="grid grid-cols-2 gap-4 text-sm">
@@ -184,13 +218,13 @@ export function AdminPage({ currentPrice, oracleSet, poolLiquidity, longOI, shor
               <div>
                 <span className="text-gray-500">Change:</span>
                 <span className={`ml-2 ${
-                  parseFloat(priceInput) > Number(currentPrice) / 100000000 
-                    ? 'text-zkperp-green' 
-                    : parseFloat(priceInput) < Number(currentPrice) / 100000000 
-                      ? 'text-zkperp-red' 
+                  parseFloat(priceInput) > Number(currentPrice) / 100000000
+                    ? 'text-zkperp-green'
+                    : parseFloat(priceInput) < Number(currentPrice) / 100000000
+                      ? 'text-zkperp-red'
                       : 'text-gray-400'
                 }`}>
-                  {currentPrice > 0 
+                  {currentPrice > 0
                     ? (((parseFloat(priceInput) * 100000000 - Number(currentPrice)) / Number(currentPrice)) * 100).toFixed(2) + '%'
                     : 'N/A'
                   }
@@ -201,7 +235,6 @@ export function AdminPage({ currentPrice, oracleSet, poolLiquidity, longOI, shor
         </div>
       </div>
 
-      {/* Transaction Status */}
       <TransactionStatus
         status={tx.status}
         tempTxId={tx.tempTxId}
@@ -210,7 +243,6 @@ export function AdminPage({ currentPrice, oracleSet, poolLiquidity, longOI, shor
         onDismiss={tx.reset}
       />
 
-      {/* Protocol Info */}
       <div className="grid md:grid-cols-2 gap-6">
         <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-6">
           <h3 className="font-semibold text-white mb-4">Protocol Parameters</h3>
@@ -241,10 +273,12 @@ export function AdminPage({ currentPrice, oracleSet, poolLiquidity, longOI, shor
         <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-6">
           <h3 className="font-semibold text-white mb-4">Contract Addresses</h3>
           <div className="space-y-3 text-sm">
-            <div>
-              <p className="text-gray-400 mb-1">ZKPerp Contract</p>
-              <code className="text-xs text-zkperp-accent break-all">zkperp_v12.aleo</code>
-            </div>
+            {PAIR_IDS.map(pid => (
+              <div key={pid}>
+                <p className="text-gray-400 mb-1">{getPair(pid).label}</p>
+                <code className="text-xs text-zkperp-accent break-all">{getPair(pid).programId}</code>
+              </div>
+            ))}
             <div>
               <p className="text-gray-400 mb-1">Mock USDC</p>
               <code className="text-xs text-zkperp-accent break-all">test_usdcx_stablecoin.aleo</code>
@@ -257,15 +291,14 @@ export function AdminPage({ currentPrice, oracleSet, poolLiquidity, longOI, shor
         </div>
       </div>
 
-      {/* CLI Commands Reference */}
       <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-6 mt-6">
         <h3 className="font-semibold text-white mb-4">📋 CLI Commands Reference</h3>
         <div className="space-y-4 text-sm">
           <div>
-            <p className="text-gray-400 mb-2">Update Oracle Price (CLI)</p>
+            <p className="text-gray-400 mb-2">Update Oracle Price — {pairConfig.label}</p>
             <pre className="bg-zkperp-dark rounded-lg p-3 overflow-x-auto">
               <code className="text-gray-300">
-leo execute update_price 0field {priceInput ? BigInt(Math.floor(parseFloat(priceInput) * 100000000)).toString() : '10000000000000'}u64 1u32 --network testnet --broadcast
+{`leo execute update_price 0field ${priceInput ? BigInt(Math.floor(parseFloat(priceInput) * 100000000)).toString() : '10000000000000'}u64 1u32 --program ${PROGRAM_ID} --network testnet --broadcast`}
               </code>
             </pre>
           </div>

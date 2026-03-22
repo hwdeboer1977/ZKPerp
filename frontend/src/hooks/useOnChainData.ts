@@ -1,161 +1,111 @@
+// src/hooks/useOnChainData.ts
 import { useState, useEffect, useCallback } from 'react';
-import { PROGRAM_ID } from '@/utils/aleo';
-import { NETWORK_CONFIG } from '../utils/config';
+import { getPair } from '@/config/pairs';
+import type { PairId } from '@/config/pairs';
 
-// Aleo Testnet API endpoint
-const API_BASE = NETWORK_CONFIG.EXPLORER_API;
+const EXPLORER_BASE = 'https://api.explorer.provable.com/v1/testnet';
 
-export interface PoolState {
+interface PoolState {
   total_liquidity: bigint;
   total_lp_tokens: bigint;
   long_open_interest: bigint;
   short_open_interest: bigint;
-  accumulated_fees: bigint;
 }
 
-export interface PriceData {
+interface PriceData {
   price: bigint;
-  timestamp: number;
 }
 
-// Parse Aleo struct response into typed object
-function parsePoolState(raw: string): PoolState | null {
-  try {
-    // Response format: { total_liquidity: 100u64, total_lp_tokens: 100u64, ... }
-    const cleaned = raw.replace(/\s+/g, '');
-    
-    const extract = (key: string): bigint => {
-      const regex = new RegExp(`${key}:(\\d+)u64`);
-      const match = cleaned.match(regex);
-      return match ? BigInt(match[1]) : BigInt(0);
-    };
+interface OnChainData {
+  poolState: PoolState | null;
+  priceData: PriceData | null;
+  availableLiquidity: bigint;
+  loading: boolean;
+  refresh: () => void;
+}
 
-    return {
-      total_liquidity: extract('total_liquidity'),
-      total_lp_tokens: extract('total_lp_tokens'),
-      long_open_interest: extract('long_open_interest'),
-      short_open_interest: extract('short_open_interest'),
-      accumulated_fees: extract('accumulated_fees'),
-    };
-  } catch (err) {
-    console.error('Failed to parse pool state:', err);
-    return null;
+// The API returns values as a JSON-encoded string, e.g.:
+//   "{\n  price: 7000000000000u64,\n  timestamp: 1u32\n}"
+// JSON.parse unwraps the outer quotes, then we strip whitespace before regex matching.
+function parseMapping(responseText: string): string {
+  try {
+    const inner = JSON.parse(responseText); // unwrap outer JSON string
+    return typeof inner === 'string' ? inner.replace(/\s+/g, '') : responseText.replace(/\s+/g, '');
+  } catch {
+    return responseText.replace(/\s+/g, '');
   }
 }
 
-function parsePriceData(raw: string): PriceData | null {
-  try {
-    // Response format: { price: 10000000000u64, timestamp: 123u32 }
-    const cleaned = raw.replace(/\s+/g, '');
-    
-    const priceMatch = cleaned.match(/price:(\d+)u64/);
-    const timestampMatch = cleaned.match(/timestamp:(\d+)u32/);
-    
-    if (!priceMatch) return null;
-    
-    return {
-      price: BigInt(priceMatch[1]),
-      timestamp: timestampMatch ? parseInt(timestampMatch[1]) : 0,
-    };
-  } catch (err) {
-    console.error('Failed to parse price data:', err);
-    return null;
-  }
+function extractU64(cleaned: string, key: string): bigint {
+  const m = cleaned.match(new RegExp(`${key}:(\\d+)u64`));
+  return m ? BigInt(m[1]) : 0n;
 }
 
-export function useOnChainData() {
+export function useOnChainData(pair: PairId = 'btc'): OnChainData {
+  const pairConfig = getPair(pair);
+
   const [poolState, setPoolState] = useState<PoolState | null>(null);
   const [priceData, setPriceData] = useState<PriceData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const fetchPoolState = useCallback(async () => {
-    try {
-      // Query pool_state mapping at key 0field
-      const response = await fetch(
-        `${API_BASE}/program/${PROGRAM_ID}/mapping/pool_state/0field`
-      );
-      
-      if (!response.ok) {
-        if (response.status === 404) {
-          // Mapping entry doesn't exist yet (no liquidity added)
-          setPoolState({
-            total_liquidity: BigInt(0),
-            total_lp_tokens: BigInt(0),
-            long_open_interest: BigInt(0),
-            short_open_interest: BigInt(0),
-            accumulated_fees: BigInt(0),
-          });
-          return;
-        }
-        throw new Error(`HTTP ${response.status}`);
-      }
-      
-      const data = await response.text();
-      const parsed = parsePoolState(data);
-      if (parsed) {
-        setPoolState(parsed);
-      }
-    } catch (err) {
-      // Handle CORS or network errors gracefully
-      console.warn('Failed to fetch pool state (may be CORS):', err);
-      // Don't set error state, just leave pool state as is
-    }
-  }, []);
-
-  const fetchPriceData = useCallback(async () => {
-    try {
-      // Query oracle_prices mapping at key 0field (BTC)
-      const response = await fetch(
-        `${API_BASE}/program/${PROGRAM_ID}/mapping/oracle_prices/0field`
-      );
-      
-      if (!response.ok) {
-        if (response.status === 404) {
-          // No price set yet
-          setPriceData(null);
-          return;
-        }
-        throw new Error(`HTTP ${response.status}`);
-      }
-      
-      const data = await response.text();
-      const parsed = parsePriceData(data);
-      if (parsed) {
-        setPriceData(parsed);
-      }
-    } catch (err) {
-      // Handle CORS or network errors gracefully
-      console.warn('Failed to fetch price data (may be CORS):', err);
-      // Don't set error state, just leave price as is
-    }
-  }, []);
-
-  const refresh = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
-    setError(null);
-    
-    await Promise.all([fetchPoolState(), fetchPriceData()]);
-    
-    setLoading(false);
-  }, [fetchPoolState, fetchPriceData]);
+    try {
+      // ── Pool state ────────────────────────────────────────────────────────
+      const poolRes = await fetch(
+        `${EXPLORER_BASE}/program/${pairConfig.programId}/mapping/pool_state/0field`
+      );
+      if (poolRes.ok) {
+        const cleaned = parseMapping(await poolRes.text());
+        setPoolState({
+          total_liquidity:    extractU64(cleaned, 'total_liquidity'),
+          total_lp_tokens:    extractU64(cleaned, 'total_lp_tokens'),
+          long_open_interest: extractU64(cleaned, 'long_open_interest'),
+          short_open_interest: extractU64(cleaned, 'short_open_interest'),
+        });
+      } else {
+        setPoolState(null);
+      }
 
-  // Initial fetch
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+      // ── Oracle price ──────────────────────────────────────────────────────
+      // Mapping name is oracle_prices (plural), key is always 0field per program.
+      const priceRes = await fetch(
+        `${EXPLORER_BASE}/program/${pairConfig.programId}/mapping/oracle_prices/${pairConfig.oracleMappingKey}`
+      );
+      if (priceRes.ok) {
+        const cleaned = parseMapping(await priceRes.text());
+        console.log(`[useOnChainData][${pair}] oracle_prices cleaned:`, cleaned);
+        const price = extractU64(cleaned, 'price');
+        if (price > 0n) setPriceData({ price });
+        else setPriceData(null);
+      } else {
+        console.warn(`[useOnChainData][${pair}] oracle_prices fetch failed:`, priceRes.status);
+        setPriceData(null);
+      }
+    } catch (e) {
+      console.error(`[useOnChainData][${pair}] fetch error:`, e);
+    } finally {
+      setLoading(false);
+    }
+  }, [pair, pairConfig.programId, pairConfig.oracleMappingKey]);
 
-  // Auto-refresh every 30 seconds
   useEffect(() => {
-    const interval = setInterval(refresh, 30000);
-    return () => clearInterval(interval);
-  }, [refresh]);
+    fetchData();
+  }, [fetchData]);
+
+  const totalLiquidity = poolState?.total_liquidity ?? 0n;
+  const longOI = poolState?.long_open_interest ?? 0n;
+  const shortOI = poolState?.short_open_interest ?? 0n;
+  const totalOI = longOI + shortOI;
+  const buffer = (totalLiquidity * 100_000n) / 1_000_000n;
+  const minRemaining = totalOI + buffer;
+  const availableLiquidity = totalLiquidity > minRemaining ? totalLiquidity - minRemaining : 0n;
 
   return {
     poolState,
     priceData,
+    availableLiquidity,
     loading,
-    error,
-    refresh,
+    refresh: fetchData,
   };
 }

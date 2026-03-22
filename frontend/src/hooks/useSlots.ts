@@ -2,7 +2,6 @@ import { useState, useCallback } from 'react';
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import type { TransactionOptions } from '@provablehq/aleo-types';
 import { useTransaction } from '@/hooks/useTransaction';
-import { PROGRAM_ID } from '@/utils/aleo';
 
 const EXPLORER_API = 'https://api.explorer.provable.com/v1/testnet';
 
@@ -21,12 +20,15 @@ export interface PositionSlotRecord {
   rawRecord: any;
 }
 
-export function useSlots() {
+// programId is now a required parameter — callers pass pairConfig.programId.
+// This ensures BTC PositionSlots (slot_id 0/1 from zkperp_v19.aleo) never
+// appear on the ETH trading page (slot_id 0/1 from zkperp_v19b.aleo).
+export function useSlots(programId: string) {
   const { address, requestRecords, decrypt } = useWallet();
   const initTx = useTransaction();
 
   const [positionSlots, setPositionSlots] = useState<PositionSlotRecord[]>([]);
-  const [recordCount, setRecordCount] = useState<number | null>(null); // null = not yet fetched
+  const [recordCount, setRecordCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [decrypting, setDecrypting] = useState(false);
   const [decrypted, setDecrypted] = useState(false);
@@ -43,55 +45,41 @@ export function useSlots() {
     setError(null);
 
     try {
-      const records = await requestRecords(PROGRAM_ID);
+      // Scope the request to this pair's program so slot records from other
+      // deployed programs (e.g. zkperp_v19b for ETH) don't bleed through.
+      const records = await requestRecords(programId);
 
-      // DEBUG: log all unspent records
-      records.filter((r: any) => !r.spent).forEach((r: any) => 
-        console.log('record:', r.recordName, r.commitment?.slice(0,20))
+      records.filter((r: any) => !r.spent).forEach((r: any) =>
+        console.log(`[useSlots][${programId}] record:`, r.recordName, r.commitment?.slice(0, 20))
       );
 
       const allSlotRecords = records.filter((r: any) =>
         r.recordName === 'PositionSlot' &&
-        // Leo Wallet may return records from all program versions — hard-filter to current program only
-        (!r.programId || r.programId === PROGRAM_ID)
+        (!r.programId || r.programId === programId)
       );
-      allSlotRecords.forEach((r: any) => console.log('slot spent-check:', 'spent:', r.spent, 'commitment:', r.commitment?.slice(0, 20)));
-      const slotRecords = allSlotRecords.filter((r: any) => !r.spent);
-      console.log(`Found ${slotRecords.length} unspent PositionSlot records (${allSlotRecords.length} total, program=${PROGRAM_ID})`);
 
-      // Pre-deduplicate before storing: keep only the last record per slot index position
-      // (slot 0 = long, slot 1 = short). This ensures we only fire 2 wallet decrypt prompts,
-      // not one per accumulated record from open+liquidate cycles.
-      // We use commitment as a tie-breaker (lexicographically last = most recently created).
-      const slotsByIndex = new Map<number, any>();
-      for (const r of slotRecords) {
-        //const idx = slotRecords.indexOf(r) % 2; // fallback index before decrypt
-        //const key = r.commitment || r.id || String(slotRecords.indexOf(r));
-        // Keep the record with the lexicographically largest commitment (most recent)
-        //const existing = slotsByIndex.get(slotRecords.indexOf(r) < slotRecords.length / 2 ? 0 : 1);
-        // Simpler: just keep last 2 unique records — dedup by slot_id happens after decrypt
-        slotsByIndex.set(slotRecords.indexOf(r), r);
-      }
-      // Take at most 2 records — one for each slot_id (0=long, 1=short).
-      // Sort by commitment descending so newest records are preferred, then cap at 2.
-      const dedupedRaw = slotRecords
+      const slotRecords = allSlotRecords.filter((r: any) => !r.spent);
+      console.log(`[useSlots][${programId}] ${slotRecords.length} unspent PositionSlot records`);
+
+      // Keep newest 2 to limit wallet decrypt prompts.
+      // Post-decrypt dedup picks the correct open record per slot_id.
+      const sortedRecords = slotRecords
         .slice()
-        .sort((a: any, b: any) => (b.commitment || '').localeCompare(a.commitment || ''))
-        .slice(0, 2);
-      console.log(`Pre-dedup: ${slotRecords.length} → ${dedupedRaw.length} records (max 2 wallet prompts)`);
+        .sort((a: any, b: any) => (b.commitment || '').localeCompare(a.commitment || ''));
+      const dedupedRaw = sortedRecords.slice(0, 2);
 
       setRawRecords(dedupedRaw);
-      setRawRecordCount(slotRecords.length); // show real count for debug
+      setRawRecordCount(slotRecords.length);
       setRecordCount(dedupedRaw.length > 0 ? dedupedRaw.length : 0);
       setDecrypted(false);
       setPositionSlots([]);
     } catch (err) {
-      console.error('Failed to fetch PositionSlot records:', err);
+      console.error(`[useSlots][${programId}] Failed to fetch:`, err);
       setError(err instanceof Error ? err.message : 'Failed to fetch slots');
     } finally {
       setLoading(false);
     }
-  }, [address, requestRecords]);
+  }, [address, requestRecords, programId]);
 
   // Phase 2: decrypt PositionSlot records
   const decryptSlots = useCallback(async () => {
@@ -119,13 +107,13 @@ export function useSlots() {
         if (!result) continue;
         const { record, plaintext } = result;
 
-        const slotIdMatch    = plaintext.match(/slot_id:\s*(\d+)u8(?:\.private)?/);
-        const isOpenMatch    = plaintext.match(/is_open:\s*(true|false)(?:\.private)?/);
-        const posIdMatch     = plaintext.match(/position_id:\s*(\d+field)(?:\.private)?/);
-        const isLongMatch    = plaintext.match(/is_long:\s*(true|false)(?:\.private)?/);
-        const sizeMatch      = plaintext.match(/size_usdc:\s*(\d+)u64(?:\.private)?/);
-        const collMatch      = plaintext.match(/collateral_usdc:\s*(\d+)u64(?:\.private)?/);
-        const entryMatch     = plaintext.match(/entry_price:\s*(\d+)u64(?:\.private)?/);
+        const slotIdMatch  = plaintext.match(/slot_id:\s*(\d+)u8(?:\.private)?/);
+        const isOpenMatch  = plaintext.match(/is_open:\s*(true|false)(?:\.private)?/);
+        const posIdMatch   = plaintext.match(/position_id:\s*(\d+field)(?:\.private)?/);
+        const isLongMatch  = plaintext.match(/is_long:\s*(true|false)(?:\.private)?/);
+        const sizeMatch    = plaintext.match(/size_usdc:\s*(\d+)u64(?:\.private)?/);
+        const collMatch    = plaintext.match(/collateral_usdc:\s*(\d+)u64(?:\.private)?/);
+        const entryMatch   = plaintext.match(/entry_price:\s*(\d+)u64(?:\.private)?/);
 
         if (!slotIdMatch) continue;
 
@@ -147,8 +135,7 @@ export function useSlots() {
 
       const filtered = slots.filter(s => !spentCommitments.has(s.id));
 
-      // Deduplicate by slot_id: if multiple records exist for same slot_id,
-      // prefer the open one; if all closed, keep only the last one.
+      // Deduplicate by slot_id: prefer the open record if both exist
       const dedupMap = new Map<number, PositionSlotRecord>();
       for (const slot of filtered) {
         const existing = dedupMap.get(slot.slotId);
@@ -156,20 +143,22 @@ export function useSlots() {
           dedupMap.set(slot.slotId, slot);
         }
       }
-      // Hard cap: contract only ever mints slot_id 0 (long) and slot_id 1 (short)
-      // Extra records beyond this are stale from old program versions
+
+      // slot_id 0 = long, slot_id 1 = short — same encoding for all program versions
       const deduped = Array.from(dedupMap.values())
         .filter(s => s.slotId === 0 || s.slotId === 1)
         .sort((a, b) => a.slotId - b.slotId);
 
-      // Cross-check open slots against chain — wallet may not know about third-party spends (e.g. liquidation)
+      // Cross-check open slots against on-chain state using this pair's program
       const verifiedDeduped = await Promise.all(deduped.map(async (slot) => {
         if (!slot.isOpen) return slot;
         try {
-          const res = await fetch(`${EXPLORER_API}/program/${PROGRAM_ID}/mapping/position_open_blocks/${slot.positionId}`);
+          const res = await fetch(
+            `${EXPLORER_API}/program/${programId}/mapping/position_open_blocks/${slot.positionId}`
+          );
           const val = await res.text();
           if (!val || val === 'null') {
-            console.log(`Slot ${slot.slotId} position_open_blocks=null — marking closed (liquidated/closed on-chain)`);
+            console.log(`[useSlots][${programId}] Slot ${slot.slotId} not on-chain — marking closed`);
             return { ...slot, isOpen: false };
           }
         } catch { /* network error — trust wallet state */ }
@@ -177,10 +166,8 @@ export function useSlots() {
       }));
 
       const openSlots = verifiedDeduped.filter(s => s.isOpen);
-      console.log(`Decrypted ${filtered.length} slots, deduped to ${verifiedDeduped.length}, ${openSlots.length} open (chain-verified)`);
+      console.log(`[useSlots][${programId}] ${verifiedDeduped.length} slots, ${openSlots.length} open`);
       setPositionSlots(verifiedDeduped);
-      // recordCount = total slots (used to detect if account is initialized)
-      // openSlots.length is available via positionSlots.filter(s => s.isOpen)
       setRecordCount(verifiedDeduped.length);
       setDecrypted(true);
     } catch (err) {
@@ -188,14 +175,14 @@ export function useSlots() {
     } finally {
       setDecrypting(false);
     }
-  }, [decrypt, rawRecords, address, spentCommitments]);
+  }, [decrypt, rawRecords, address, spentCommitments, programId]);
 
-  // Call initialize_slots — one time per trader
+  // initialize_slots — called once per (wallet, program) pair
   const initializeSlots = useCallback(async () => {
     if (!address) return;
 
     const options: TransactionOptions = {
-      program: PROGRAM_ID,
+      program: programId,         // ← uses this pair's program
       function: 'initialize_slots',
       inputs: [address],
       fee: 3_000_000,
@@ -203,14 +190,14 @@ export function useSlots() {
     };
 
     await initTx.execute(options);
-  }, [address, initTx]);
+  }, [address, initTx, programId]);
 
   const markSpent = useCallback((id: string) => {
     setSpentCommitments(prev => new Set([...prev, id]));
     setPositionSlots(prev => prev.filter(s => s.id !== id));
   }, []);
 
-  // isLong=true → slot_id 0, isLong=false → slot_id 1
+  // slot_id 0 = long, slot_id 1 = short (same for all pairs)
   const getEmptyPositionSlot = useCallback((isLong: boolean): PositionSlotRecord | null => {
     const expectedSlotId = isLong ? 0 : 1;
     return positionSlots.find(s => !s.isOpen && s.slotId === expectedSlotId) || null;
@@ -220,7 +207,6 @@ export function useSlots() {
     return positionSlots.filter(s => s.isOpen);
   }, [positionSlots]);
 
-  // recordCount === 0 after fetch = needs initialization
   const needsInitialization = recordCount === 0;
   const isInitializing = initTx.status === 'submitting' || initTx.status === 'pending';
 

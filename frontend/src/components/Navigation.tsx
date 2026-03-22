@@ -1,33 +1,46 @@
-import { NavLink } from 'react-router-dom';
-
-const navItems = [
-  { to: '/', label: 'Trade', icon: '📈' },
-  { to: '/liquidity', label: 'Liquidity', icon: '💧' },
-  { to: '/liquidate', label: 'Liquidate', icon: '⚡' },
-  { to: '/admin', label: 'Admin', icon: '⚙️' },
-];
+import { NavLink, useMatch } from 'react-router-dom';
 
 export function Navigation() {
+  // Manual active detection for routes with dynamic subroutes.
+  // NavLink's built-in isActive only matches exact paths by default.
+  const tradeActive = useMatch('/trade/*');
+  const liquidityActive = useMatch('/liquidity/*');
+
+  const linkClass = (active: boolean) =>
+    `px-5 py-4 text-sm font-medium transition-all border-b-2 ${
+      active
+        ? 'text-cyan-300 border-cyan-400'
+        : 'text-slate-400 border-transparent hover:text-white hover:border-slate-600'
+    }`;
+
   return (
-    <nav className="bg-zkperp-card border-b border-zkperp-border">
+    <nav className="border-b border-cyan-400/10 bg-white/[0.02] backdrop-blur-xl">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex gap-1">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                `px-6 py-4 text-sm font-medium transition-colors border-b-2 ${
-                  isActive
-                    ? 'text-white border-zkperp-accent'
-                    : 'text-gray-400 border-transparent hover:text-white hover:border-gray-600'
-                }`
-              }
-            >
-              <span className="mr-2">{item.icon}</span>
-              {item.label}
-            </NavLink>
-          ))}
+          {/* Trade — links to BTC by default, stays active on all /trade/* */}
+          <NavLink to="/trade/btc" className={linkClass(!!tradeActive)}>
+            <span className="mr-1.5">📈</span>Trade
+          </NavLink>
+
+          {/* Liquidity — links to BTC by default, stays active on all /liquidity/* */}
+          <NavLink to="/liquidity/btc" className={linkClass(!!liquidityActive)}>
+            <span className="mr-1.5">💧</span>Liquidity
+          </NavLink>
+
+          {/* Static routes — use NavLink's built-in isActive */}
+          <NavLink
+            to="/liquidate"
+            className={({ isActive }) => linkClass(isActive)}
+          >
+            <span className="mr-1.5">⚡</span>Liquidate
+          </NavLink>
+
+          <NavLink
+            to="/admin"
+            className={({ isActive }) => linkClass(isActive)}
+          >
+            <span className="mr-1.5">⚙️</span>Admin
+          </NavLink>
         </div>
       </div>
     </nav>

@@ -8,7 +8,7 @@
 // ============================================================================
 
 export const PROGRAM_IDS = {
-  ZKPERP: 'zkperp_v12.aleo',
+  ZKPERP: 'zkperp_v19.aleo',
   USDC: 'test_usdcx_stablecoin.aleo',
   USDCX_BRIDGE: 'test_usdcx_bridge.aleo',
 } as const;
@@ -30,6 +30,7 @@ export const NETWORK_CONFIG = {
     // Change this to localhost for local testing
   // EXPLORER_API: 'http://localhost:3030/testnet',
   
+
   
   // // Local development endpoint (when running local devnet)
   // LOCAL_ENDPOINT: 'http://localhost:3030',
@@ -38,6 +39,6 @@ export const NETWORK_CONFIG = {
 
 export const ADDRESS_LIST = {
   ADMIN_ADDRESS: 'aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0',
-  ZK_PERP_ADDRESS: 'zkperp_v12.aleo',
+  ZK_PERP_ADDRESS: 'zkperp_v19.aleo',
   MOCK_USDC_ADDRESS: '',
 } as const;

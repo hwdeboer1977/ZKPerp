@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom';
 import { AleoWalletProvider } from '@provablehq/aleo-wallet-adaptor-react';
 import { WalletModalProvider } from '@provablehq/aleo-wallet-adaptor-react-ui';
 import { ShieldWalletAdapter } from '@provablehq/aleo-wallet-adaptor-shield';
@@ -15,46 +15,88 @@ import { LiquidityPage } from '@/pages/LiquidityPage';
 import { LiquidatePage } from '@/pages/LiquidatePage';
 import { AdminPage } from '@/pages/AdminPage';
 import { useOnChainData } from '@/hooks/useOnChainData';
+import { AppLayout } from '@/components/AppLayout';
+import { LandingPage } from '@/pages/LandingPage';
+import { PAIR_IDS, getPair } from '@/config/pairs';
+import type { PairId } from '@/config/pairs';
 
-function AppContent() {
-  const { poolState, priceData, loading: dataLoading, refresh } = useOnChainData();
+// ── TradeRoute ────────────────────────────────────────────────────────────────
+// Reads :pair, fetches that pair's oracle price, passes typed prop to TradePage.
 
+function TradeRoute() {
+  const { pair } = useParams<{ pair: string }>();
   const [manualPrice, setManualPrice] = useState<bigint | null>(null);
 
-  const currentPrice = priceData?.price ?? manualPrice ?? BigInt(10000000000000);
-  const poolLiquidity = poolState?.total_liquidity ?? BigInt(0);
-  const totalLPTokens = poolState?.total_lp_tokens ?? BigInt(0);
-  const longOI = poolState?.long_open_interest ?? BigInt(0);
-  const shortOI = poolState?.short_open_interest ?? BigInt(0);
+  if (!PAIR_IDS.includes(pair as PairId)) {
+    return <Navigate to="/trade/btc" replace />;
+  }
+  const pairId = pair as PairId;
+  const { priceData } = useOnChainData(pairId);
+  const currentPrice = priceData?.price ?? manualPrice ?? getPair(pairId).defaultPrice;
 
   return (
-    <div className="min-h-screen bg-zkperp-dark">
+    <TradePage
+      pair={pairId}
+      currentPrice={currentPrice}
+      oracleSet={priceData !== null}
+      onPriceChange={setManualPrice}
+    />
+  );
+}
+
+// ── LiquidityRoute ────────────────────────────────────────────────────────────
+// Reads :pair, fetches that pair's pool state, passes typed prop to LiquidityPage.
+
+function LiquidityRoute() {
+  const { pair } = useParams<{ pair: string }>();
+
+  if (!PAIR_IDS.includes(pair as PairId)) {
+    return <Navigate to="/liquidity/btc" replace />;
+  }
+  const pairId = pair as PairId;
+  const { poolState, refresh } = useOnChainData(pairId);
+
+  return (
+    <LiquidityPage
+      pair={pairId}
+      poolLiquidity={poolState?.total_liquidity ?? 0n}
+      totalLPTokens={poolState?.total_lp_tokens ?? 0n}
+      longOI={poolState?.long_open_interest ?? 0n}
+      shortOI={poolState?.short_open_interest ?? 0n}
+      onRefresh={refresh}
+    />
+  );
+}
+
+// ── AppContent ────────────────────────────────────────────────────────────────
+// Liquidate and Admin still use BTC pool state — wire them up the same way later.
+
+function AppContent() {
+  const { poolState, priceData, loading: dataLoading, refresh } = useOnChainData('btc');
+  const [manualPrice] = useState<bigint | null>(null);
+
+  const currentPrice = priceData?.price ?? manualPrice ?? BigInt(10000000000000);
+  const poolLiquidity = poolState?.total_liquidity ?? 0n;
+  const longOI = poolState?.long_open_interest ?? 0n;
+  const shortOI = poolState?.short_open_interest ?? 0n;
+
+  const location = useLocation();
+  if (location.pathname === '/') return <LandingPage />;
+
+  return (
+    <AppLayout>
       <Header />
       <Navigation />
-
       <Routes>
-        <Route
-          path="/"
-          element={
-            <TradePage
-              currentPrice={currentPrice}
-              oracleSet={priceData !== null}
-              onPriceChange={setManualPrice}
-            />
-          }
-        />
-        <Route
-          path="/liquidity"
-          element={
-            <LiquidityPage
-              poolLiquidity={poolLiquidity}
-              totalLPTokens={totalLPTokens}
-              longOI={longOI}
-              shortOI={shortOI}
-              onRefresh={refresh}
-            />
-          }
-        />
+        {/* Trade — redirect bare /trade, dynamic pair route */}
+        <Route path="/trade" element={<Navigate to="/trade/btc" replace />} />
+        <Route path="/trade/:pair" element={<TradeRoute />} />
+
+        {/* Liquidity — redirect bare /liquidity, dynamic pair route */}
+        <Route path="/liquidity" element={<Navigate to="/liquidity/btc" replace />} />
+        <Route path="/liquidity/:pair" element={<LiquidityRoute />} />
+
+        {/* Other pages — unchanged */}
         <Route
           path="/liquidate"
           element={
@@ -68,20 +110,10 @@ function AppContent() {
         />
         <Route
           path="/admin"
-          element={
-            <AdminPage
-              currentPrice={currentPrice}
-              oracleSet={priceData !== null}
-              poolLiquidity={poolLiquidity}
-              longOI={longOI}
-              shortOI={shortOI}
-              onRefresh={refresh}
-            />
-          }
+          element={<AdminPage />}
         />
       </Routes>
 
-      {/* Footer */}
       <footer className="border-t border-zkperp-border mt-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="flex flex-col md:flex-row justify-between items-center gap-4">
@@ -92,11 +124,8 @@ function AppContent() {
               <span className="text-gray-500 text-sm">ZKPerp - Built on Aleo</span>
             </div>
             <div className="flex items-center gap-4">
-              <button
-                onClick={refresh}
-                disabled={dataLoading}
-                className="text-sm text-gray-500 hover:text-white transition-colors disabled:opacity-50"
-              >
+              <button onClick={refresh} disabled={dataLoading}
+                className="text-sm text-gray-500 hover:text-white transition-colors disabled:opacity-50">
                 {dataLoading ? 'Refreshing...' : '↻ Refresh Data'}
               </button>
               <span className="text-gray-600">|</span>
@@ -107,12 +136,12 @@ function AppContent() {
           </div>
           <div className="mt-4 pt-4 border-t border-zkperp-border">
             <p className="text-center text-xs text-gray-600">
-              Aleo Testnet Beta • Contract: zkperp_v12.aleo
+              Aleo Testnet Beta • Contracts: zkperp_v19.aleo · zkperp_eth_v1.aleo · zkperp_sol_v1.aleo
             </p>
           </div>
         </div>
       </footer>
-    </div>
+    </AppLayout>
   );
 }
 
@@ -124,7 +153,8 @@ function App() {
         autoConnect={false}
         network={Network.TESTNET}
         decryptPermission={DecryptPermission.UponRequest}
-        programs={['zkperp_v12.aleo', 'test_usdcx_stablecoin.aleo', 'credits.aleo']}
+        // All three pair programs registered so Shield Wallet can decrypt their records
+        programs={['zkperp_v19.aleo', 'zkperp_v19b.aleo', 'zkperp_v19c.aleo', 'test_usdcx_stablecoin.aleo', 'credits.aleo']}
         onError={(error) => console.error(error.message)}
       >
         <WalletModalProvider>

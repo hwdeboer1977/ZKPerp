@@ -1,8 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
-import { PROGRAM_IDS } from '../utils/config';
 
-const PROGRAM_ID = PROGRAM_IDS.ZKPERP;
 const MIN_DUST = BigInt(10000); // $0.01 — filter out dust
 
 export interface LPSlotRecord {
@@ -12,17 +10,16 @@ export interface LPSlotRecord {
   isOpen: boolean;
   lpAmount: bigint;
   plaintext: string;
-  ciphertext: string;   // full plaintext — passed as first input to add/remove_liquidity
+  ciphertext: string;
   rawRecord: any;
 }
 
-export function useLPTokens() {
+// programId is now a required parameter — callers pass pairConfig.programId
+// so BTC LP records from zkperp_v19.aleo never bleed into the ETH page.
+export function useLPTokens(programId: string) {
   const { address, requestRecords, decrypt } = useWallet();
 
-  // All decrypted LPSlot records (open + empty)
   const [lpSlots, setLpSlots] = useState<LPSlotRecord[]>([]);
-
-  // Convenience: only open slots with meaningful balance
   const [lpTokens, setLpTokens] = useState<LPSlotRecord[]>([]);
   const [totalLP, setTotalLP] = useState<bigint>(BigInt(0));
   const [recordCount, setRecordCount] = useState(0);
@@ -30,9 +27,7 @@ export function useLPTokens() {
   const [decrypting, setDecrypting] = useState(false);
   const [decrypted, setDecrypted] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
   const [rawRecords, setRawRecords] = useState<any[]>([]);
-  // Track locally spent commitments to avoid reusing records the wallet hasn't marked spent yet
   const [spentCommitments, setSpentCommitments] = useState<Set<string>>(new Set());
 
   // Phase 1: Fetch LPSlot records from wallet (no decrypt)
@@ -49,18 +44,21 @@ export function useLPTokens() {
     setError(null);
 
     try {
-      //const records = await requestRecords(PROGRAM_ID);
-      const records = await requestRecords(PROGRAM_ID, true);
-      console.log('Fetched records:', records);
+      // Request records scoped to this pair's program only.
+      // Shield Wallet returns records across all registered programs if programId
+      // isn't specified — passing it here ensures ETH LP slots don't appear on BTC page.
+      const records = await requestRecords(programId, true);
+      console.log(`[useLPTokens][${programId}] Fetched ${records.length} records`);
 
-      // v8: filter LPSlot records (not LPToken)
-      // Also filter out wallet-confirmed spent records
-      // and locally tracked spent commitments (wallet sync lag)
       const lpRecordsRaw = records.filter(
-        (r: any) => r.recordName === 'LPSlot' && !r.spent
+        (r: any) =>
+          r.recordName === 'LPSlot' &&
+          !r.spent &&
+          // Belt-and-suspenders: also filter by programId field if wallet sets it
+          (!r.programId || r.programId === programId)
       );
 
-      console.log(`Found ${lpRecordsRaw.length} LPSlot records`);
+      console.log(`[useLPTokens][${programId}] Found ${lpRecordsRaw.length} LPSlot records`);
       setRawRecords(lpRecordsRaw);
       setRecordCount(lpRecordsRaw.length);
       setDecrypted(false);
@@ -68,12 +66,12 @@ export function useLPTokens() {
       setLpTokens([]);
       setTotalLP(BigInt(0));
     } catch (err) {
-      console.error('Failed to fetch LP records:', err);
+      console.error(`[useLPTokens][${programId}] Failed to fetch LP records:`, err);
       setError(err instanceof Error ? err.message : 'Failed to fetch LP records');
     } finally {
       setLoading(false);
     }
-  }, [address, requestRecords]);
+  }, [address, requestRecords, programId]);
 
   // Phase 2: Decrypt all LPSlot records
   const decryptAll = useCallback(async () => {
@@ -88,10 +86,10 @@ export function useLPTokens() {
           try {
             if (!record.recordCiphertext) return null;
             const plaintext = await decrypt(record.recordCiphertext);
-            console.log('Decrypted LPSlot:', plaintext);
+            console.log(`[useLPTokens][${programId}] Decrypted LPSlot:`, plaintext);
             return { record, plaintext };
           } catch (err) {
-            console.warn('Could not decrypt LPSlot record:', err);
+            console.warn(`[useLPTokens][${programId}] Could not decrypt LPSlot:`, err);
             return null;
           }
         })
@@ -104,23 +102,17 @@ export function useLPTokens() {
         if (!result) continue;
         const { record, plaintext } = result;
 
-        const slotIdMatch = plaintext.match(/slot_id:\s*(\d+)u8(?:\.private)?/);
-        const isOpenMatch = plaintext.match(/is_open:\s*(true|false)(?:\.private)?/);
+        const slotIdMatch  = plaintext.match(/slot_id:\s*(\d+)u8(?:\.private)?/);
+        const isOpenMatch  = plaintext.match(/is_open:\s*(true|false)(?:\.private)?/);
         const lpAmountMatch = plaintext.match(/lp_amount:\s*(\d+)u64(?:\.private)?/);
 
-        console.log('LPSlot parse:', {
-          slotId: slotIdMatch?.[1],
-          isOpen: isOpenMatch?.[1],
-          lpAmount: lpAmountMatch?.[1],
-        });
-
         if (!slotIdMatch) {
-          console.log('SKIP: not a valid LPSlot (no slot_id)');
+          console.log(`[useLPTokens][${programId}] SKIP: not a valid LPSlot`);
           continue;
         }
 
-        const slotId = parseInt(slotIdMatch[1]);
-        const isOpen = isOpenMatch?.[1] === 'true';
+        const slotId   = parseInt(slotIdMatch[1]);
+        const isOpen   = isOpenMatch?.[1] === 'true';
         const lpAmount = BigInt(lpAmountMatch?.[1] || '0');
 
         const slot: LPSlotRecord = {
@@ -141,41 +133,36 @@ export function useLPTokens() {
         }
       }
 
-      // Filter out locally-known spent records (wallet sync lag protection)
-      const filteredSlots = allSlots.filter(s => !spentCommitments.has(s.id));
-      filteredSlots.sort((a, b) => a.slotId - b.slotId);
-      const allSlotsFiltered = filteredSlots;
+      const filteredSlots = allSlots
+        .filter(s => !spentCommitments.has(s.id))
+        .sort((a, b) => a.slotId - b.slotId);
 
-      const openSlots = allSlotsFiltered.filter(s => s.isOpen && s.lpAmount > MIN_DUST);
+      const openSlots = filteredSlots.filter(s => s.isOpen && s.lpAmount > MIN_DUST);
 
-      console.log(`LPSlots: ${allSlotsFiltered.length} total, ${openSlots.length} open, total LP: ${total}`);
+      console.log(`[useLPTokens][${programId}] ${filteredSlots.length} total, ${openSlots.length} open, total LP: ${total}`);
 
-      setLpSlots(allSlotsFiltered);
+      setLpSlots(filteredSlots);
       setLpTokens(openSlots);
       setTotalLP(total);
       setDecrypted(true);
     } catch (err) {
-      console.error('Failed to decrypt LP records:', err);
+      console.error(`[useLPTokens][${programId}] Failed to decrypt:`, err);
       setError(err instanceof Error ? err.message : 'Failed to decrypt LP records');
     } finally {
       setDecrypting(false);
     }
-  }, [decrypt, rawRecords, address, spentCommitments]);
+  }, [decrypt, rawRecords, address, spentCommitments, programId]);
 
-  // Mark a record as locally spent (call this right before submitting a tx)
   const markSpent = useCallback((commitment: string) => {
     setSpentCommitments(prev => new Set([...prev, commitment]));
-    // Also immediately remove it from lpSlots so UI updates instantly
     setLpSlots(prev => prev.filter(s => s.id !== commitment));
     setLpTokens(prev => prev.filter(s => s.id !== commitment));
   }, []);
 
-  // Returns first empty LPSlot available for a fresh deposit
   const getEmptySlot = useCallback((): LPSlotRecord | null => {
     return lpSlots.find(s => !s.isOpen) || null;
   }, [lpSlots]);
 
-  // Returns first open LPSlot for top-up deposit
   const getOpenSlot = useCallback((): LPSlotRecord | null => {
     return lpSlots.find(s => s.isOpen) || null;
   }, [lpSlots]);

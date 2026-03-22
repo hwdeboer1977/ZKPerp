@@ -3,64 +3,86 @@
 @tailwind utilities;
 
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #0a0e17;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color-scheme: dark;
+  background: #05070d;
+  color: #f0f8ff;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  background: #05070d;
 }
 
-/* Wallet adapter modal overrides */
+/* ── Glass panels ── */
+[class*="bg-zkperp-card"] {
+  background: rgba(255,255,255,0.06) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+  border-color: rgba(34,211,238,0.15) !important;
+}
+
+[class*="bg-zkperp-dark"] {
+  background: rgba(255,255,255,0.03) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+}
+
+[class*="border-zkperp-border"] {
+  border-color: rgba(34,211,238,0.12) !important;
+}
+
+/* ── Inputs ── */
+input, select, textarea {
+  background: rgba(5,7,13,0.80) !important;
+  color: #e6f1ff !important;
+  border-color: rgba(34,211,238,0.15) !important;
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: rgba(34,211,238,0.5) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 1px rgba(34,211,238,0.2) !important;
+}
+
+/* ── Wallet adapter ── */
+/* ── Wallet adapter — keep plain solid (backdrop-filter breaks clicks) ── */
 .wallet-adapter-modal-wrapper {
   background-color: rgba(0, 0, 0, 0.8) !important;
 }
-
 .wallet-adapter-modal-container {
   background-color: #111827 !important;
   border: 1px solid #1f2937 !important;
   border-radius: 12px !important;
 }
-
-.wallet-adapter-modal-title {
-  color: white !important;
-}
-
+.wallet-adapter-modal-title { color: white !important; }
 .wallet-adapter-modal-list li {
   background-color: #1f2937 !important;
   border-radius: 8px !important;
   margin-bottom: 8px !important;
 }
+.wallet-adapter-modal-list li:hover { background-color: #374151 !important; }
+.wallet-adapter-button { background-color: #6366f1 !important; border-radius: 8px !important; }
+.wallet-adapter-button:hover { background-color: #4f46e5 !important; }
 
-.wallet-adapter-modal-list li:hover {
-  background-color: #374151 !important;
-}
+/* ── Text brightness inside cards ── */
+.text-gray-400 { color: #94a3b8 !important; }
+.text-gray-500 { color: #7a8fa8 !important; }
+.text-gray-600 { color: #64748b !important; }
+.text-slate-400 { color: #94a3b8 !important; }
+.text-slate-500 { color: #7a8fa8 !important; }
 
-.wallet-adapter-button {
-  background-color: #6366f1 !important;
-  border-radius: 8px !important;
-}
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #05070d; }
+::-webkit-scrollbar-thumb { background: rgba(34,211,238,0.2); border-radius: 3px; }
 
-.wallet-adapter-button:hover {
-  background-color: #4f46e5 !important;
-}
-
-/* Custom input styling */
+/* ── Number input ── */
 input[type="number"]::-webkit-inner-spin-button,
-input[type="number"]::-webkit-outer-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-
-input[type="number"] {
-  -moz-appearance: textfield;
-}
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; }

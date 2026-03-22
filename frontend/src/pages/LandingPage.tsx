@@ -15,22 +15,20 @@ export function LandingPage() {
       }}
     >
       <div
-        className="absolute left-1/2 flex flex-col items-center gap-3"
-        style={{ top: '14%', transform: 'translateX(-50%)' }}
+        className="absolute flex flex-col items-end gap-2"
+        style={{ top: '120px', right: '180px' }}
       >
         <button
           onClick={() => navigate('/trade')}
-          className="px-14 py-4 rounded-xl font-bold text-lg text-white transition-all duration-200 hover:scale-105 active:scale-95 whitespace-nowrap"
+          className="px-16 py-6 rounded-xl font-bold text-2xl text-white transition-all duration-200 hover:scale-105 active:scale-95 whitespace-nowrap animate-pulse"
           style={{
-            background: 'linear-gradient(135deg, #16a34a 0%, #22c55e 100%)',
-            boxShadow: '0 0 40px rgba(34, 197, 94, 0.8), 0 4px 20px rgba(0,0,0,0.6)',
+            background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
+            boxShadow: '0 0 24px rgba(168, 85, 247, 0.7), 0 4px 16px rgba(0,0,0,0.5)',
+            animationDuration: '2s',
           }}
         >
           🚀 Launch App
         </button>
-        <p className="text-sm text-gray-200 opacity-80 drop-shadow-lg whitespace-nowrap">
-          Built on Aleo · Zero-Knowledge Proofs · Testnet
-        </p>
       </div>
     </div>
   );

@@ -1,0 +1,94 @@
+services:
+  # ── ZKPerp Bot ──────────────────────────────────────────────────────────────
+  - type: web
+    name: zkperp-bot
+    runtime: node
+    rootDir: zkperp-bot
+    buildCommand: npm install
+    startCommand: node zkperp-bot-manager.mjs
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PRIVATE_KEY
+        sync: false
+      - key: VIEW_KEY
+        sync: false
+      - key: PROVABLE_CONSUMER_ID
+        sync: false
+      - key: PROVABLE_API_KEY
+        sync: false
+      - key: ORACLE_TOKEN
+        sync: false
+      - key: PROGRAM_ID
+        value: zkperp_v19.aleo
+      - key: PROGRAM_ID_BTC
+        value: zkperp_v19.aleo
+      - key: PROGRAM_ID_ETH
+        value: zkperp_v19b.aleo
+      - key: PROGRAM_ID_SOL
+        value: zkperp_v19c.aleo
+      - key: NETWORK
+        value: testnet
+      - key: NETWORK_ID
+        value: "1"
+      - key: API_ENDPOINT
+        value: https://api.explorer.provable.com/v1/testnet
+      - key: QUERY_ENDPOINT
+        value: https://api.explorer.provable.com/v1
+      - key: BROADCAST_ENDPOINT
+        value: https://api.explorer.provable.com/v1/testnet/transaction/broadcast
+      - key: PRICE_INTERVAL
+        value: "30000"
+      - key: SCAN_INTERVAL
+        value: "60000"
+      - key: API_PORT
+        value: "3001"
+      - key: EXEC_USE_FEE_MASTER
+        value: "false"
+      - key: DISABLE_ORACLE
+        value: "false"
+      - key: FRONTEND_ORIGIN
+        value: https://zk-perp.vercel.app
+
+  # ── Aleo Oracle ─────────────────────────────────────────────────────────────
+  - type: worker
+    name: aleo-oracle
+    runtime: node
+    rootDir: aleo-oracle
+    buildCommand: npm install
+    startCommand: node manager.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Ethereum Mainnet RPC (BTC/USD + ETH/USD)
+      - key: EVM_RPC_URL
+        sync: false
+      # Arbitrum Mainnet RPC (SOL/USD)
+      - key: EVM_RPC_URL_ARB
+        sync: false
+      - key: COORDINATOR_PORT
+        value: "3010"
+      # Set this to the zkperp-bot Render service URL after first deploy
+      - key: ZKPERP_ORCHESTRATOR_URL
+        sync: false
+      - key: ZKPERP_ORCHESTRATOR_TOKEN
+        sync: false
+      # Relayer signing keys
+      - key: RELAYER_A_PK
+        sync: false
+      - key: RELAYER_B_PK
+        sync: false
+      - key: RELAYER_C_PK
+        sync: false
+      # Relayer allowlist addresses
+      - key: RELAYER_A_ADDR
+        sync: false
+      - key: RELAYER_B_ADDR
+        sync: false
+      - key: RELAYER_C_ADDR
+        sync: false
+      - key: POLL_INTERVAL_MS
+        value: "15000"
+      - key: ENTRY_MAX_AGE_MS
+        value: "60000"

@@ -28,18 +28,12 @@ export function Navigation() {
           </NavLink>
 
           {/* Static routes — use NavLink's built-in isActive */}
-          <NavLink
-            to="/liquidate"
-            className={({ isActive }) => linkClass(isActive)}
-          >
-            <span className="mr-1.5">⚡</span>Liquidate
+          <NavLink to="/darkpool" className={({ isActive }) => linkClass(isActive)}>
+            <span className="mr-1.5">🌑</span>ZK Darkpool
           </NavLink>
 
-          <NavLink
-            to="/admin"
-            className={({ isActive }) => linkClass(isActive)}
-          >
-            <span className="mr-1.5">⚙️</span>Admin
+          <NavLink to="/status" className={({ isActive }) => linkClass(isActive)}>
+            <span className="mr-1.5">📡</span>System Status
           </NavLink>
         </div>
       </div>

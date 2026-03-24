@@ -12,7 +12,8 @@ import { Header } from '@/components/Header';
 import { Navigation } from '@/components/Navigation';
 import { TradePage } from '@/pages/TradePage';
 import { LiquidityPage } from '@/pages/LiquidityPage';
-import { LiquidatePage } from '@/pages/LiquidatePage';
+import { SystemStatusPage } from '@/pages/SystemStatusPage';
+import { DarkpoolPage } from '@/pages/DarkpoolPage';
 import { AdminPage } from '@/pages/AdminPage';
 import { useOnChainData } from '@/hooks/useOnChainData';
 import { AppLayout } from '@/components/AppLayout';
@@ -98,11 +99,11 @@ function AppContent() {
         <Route path="/liquidity" element={<Navigate to="/liquidity/btc" replace />} />
         <Route path="/liquidity/:pair" element={<LiquidityRoute />} />
 
-        {/* Other pages — unchanged */}
+        <Route path="/darkpool" element={<DarkpoolPage />} />
         <Route
-          path="/liquidate"
+          path="/status"
           element={
-            <LiquidatePage
+            <SystemStatusPage
               currentPrice={currentPrice}
               poolLiquidity={poolLiquidity}
               longOI={longOI}
@@ -110,10 +111,8 @@ function AppContent() {
             />
           }
         />
-        <Route
-          path="/admin"
-          element={<AdminPage />}
-        />
+        {/* Admin — unlisted from nav, still accessible at /admin */}
+        <Route path="/admin" element={<AdminPage />} />
       </Routes>
 
       <footer className="border-t border-zkperp-border mt-16">

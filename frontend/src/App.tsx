@@ -19,6 +19,7 @@ import { AppLayout } from '@/components/AppLayout';
 import { LandingPage } from '@/pages/LandingPage';
 import { PAIR_IDS, getPair } from '@/config/pairs';
 import type { PairId } from '@/config/pairs';
+import { PrivateDataProvider } from '@/contexts/PrivateDataContext';
 
 // ── TradeRoute ────────────────────────────────────────────────────────────────
 // Reads :pair, fetches that pair's oracle price, passes typed prop to TradePage.
@@ -84,6 +85,7 @@ function AppContent() {
   if (location.pathname === '/') return <LandingPage />;
 
   return (
+    <PrivateDataProvider>
     <AppLayout>
       <Header />
       <Navigation />
@@ -142,6 +144,7 @@ function AppContent() {
         </div>
       </footer>
     </AppLayout>
+    </PrivateDataProvider>
   );
 }
 

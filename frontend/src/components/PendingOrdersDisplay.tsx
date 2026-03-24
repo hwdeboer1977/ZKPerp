@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import { useTransaction } from '@/hooks/useTransaction';
-import { useOrderReceipts, type OrderReceiptRecord } from '@/hooks/useOrderReceipts';
+import { type OrderReceiptRecord } from '@/hooks/useOrderReceipts';
 import { TransactionStatus } from '@/components/TransactionStatus';
 import { formatPrice, formatUsdc, PROGRAM_ID } from '@/utils/aleo';
 
@@ -136,44 +136,22 @@ function PendingOrdersDisplayInner({ receipts, loading, onCancelled }: InnerProp
   );
 }
 
-export function PendingOrdersDisplay() {
-  const {
-    receipts, recordCount, loading, decrypting, decrypted,
-    fetchAndDecrypt, decryptAll, markSpent,
-  } = useOrderReceipts();
+interface DisplayProps {
+  receipts: OrderReceiptRecord[];
+  decrypted: boolean;
+  loading?: boolean;
+  decrypting?: boolean;
+  onCancelled?: (id: string) => void;
+}
 
-  if (loading) return (
-    <div className="mt-4 p-4 text-sm text-gray-400">Scanning for orders...</div>
-  );
-
-  if (!recordCount && !decrypted) return (
-    <div className="mt-4">
-      <button
-        onClick={fetchAndDecrypt}
-        className="w-full py-2 rounded-lg text-xs font-medium border border-zkperp-border text-gray-400 hover:text-white hover:border-zkperp-accent transition-colors"
-      >
-        🔍 Scan for Pending Orders
-      </button>
-    </div>
-  );
-
-  if (recordCount && !decrypted) return (
-    <div className="mt-4">
-      <button
-        onClick={decryptAll}
-        disabled={decrypting}
-        className="w-full py-2 rounded-lg text-xs font-medium border border-zkperp-accent/50 text-zkperp-accent hover:bg-zkperp-accent/10 disabled:opacity-50 transition-colors"
-      >
-        {decrypting ? '⏳ Decrypting...' : `🔓 Decrypt ${recordCount} Order Record${recordCount > 1 ? 's' : ''}`}
-      </button>
-    </div>
-  );
+export function PendingOrdersDisplay({ receipts, decrypted, decrypting, onCancelled }: DisplayProps) {
+  if (!decrypted) return null;
 
   return (
     <PendingOrdersDisplayInner
       receipts={receipts}
       loading={decrypting}
-      onCancelled={markSpent}
+      onCancelled={onCancelled}
     />
   );
 }

@@ -19,12 +19,32 @@ import {
 interface Props {
   pair: PairId;
   currentPrice: bigint;
+  // Shared state from TradePage
+  positionSlots: ReturnType<typeof useSlots>['positionSlots'];
+  recordCount: ReturnType<typeof useSlots>['recordCount'];
+  loading: ReturnType<typeof useSlots>['loading'];
+  decrypting: ReturnType<typeof useSlots>['decrypting'];
+  decrypted: ReturnType<typeof useSlots>['decrypted'];
+  error: ReturnType<typeof useSlots>['error'];
+  markSpent: ReturnType<typeof useSlots>['markSpent'];
+  needsInitialization: ReturnType<typeof useSlots>['needsInitialization'];
+  // Unshield button callback
+  onUnshield: () => void;
+  unshieldBusy: boolean;
+  unshieldLabel: string;
+  allDecrypted: boolean;
+  unshieldError: string | null;
 }
 
 const ALEO_API = 'https://api.explorer.provable.com/v1/testnet';
 const BOT_API = (import.meta as any).env?.VITE_BOT_API || 'http://localhost:3001';
 
-export function PositionDisplay({ pair, currentPrice }: Props) {
+export function PositionDisplay({
+  pair, currentPrice,
+  positionSlots, recordCount, loading, decrypted, error,
+  markSpent, needsInitialization,
+  onUnshield, unshieldBusy, unshieldLabel, allDecrypted, unshieldError,
+}: Props) {
   const pairConfig = getPair(pair);
   const PROGRAM_ID = pairConfig.programId;
   const { connected, address } = useWallet();
@@ -32,19 +52,6 @@ export function PositionDisplay({ pair, currentPrice }: Props) {
   const tpTx = useTransaction();
   const slTx = useTransaction();
   const cancelTx = useTransaction();
-
-  const {
-    positionSlots,
-    recordCount,
-    loading,
-    decrypting,
-    decrypted,
-    error,
-    fetchSlots,
-    decryptSlots,
-    markSpent,
-    needsInitialization,
-  } = useSlots(PROGRAM_ID);
 
   // Receipts needed for TP/SL cancel
   const { receipts: orderReceipts } = useOrderReceipts();
@@ -414,30 +421,31 @@ export function PositionDisplay({ pair, currentPrice }: Props) {
         </div>
       )}
 
-      {/* Slots found but not decrypted yet */}
-      {recordCount !== null && recordCount > 0 && !decrypted && !loading && (
+      {/* ── Unshield All button ── */}
+      {!allDecrypted && !needsInitialization && (
         <div className="p-4">
-          <div className="bg-zkperp-dark rounded-lg p-4 mb-3">
-            <p className="text-white text-sm font-medium">{recordCount} slot record{recordCount > 1 ? 's' : ''} found</p>
-            <p className="text-gray-500 text-xs mt-1">Decrypt to view your positions</p>
-          </div>
           <button
-            onClick={decryptSlots}
-            disabled={decrypting}
-            className="w-full py-3 bg-zkperp-accent/20 hover:bg-zkperp-accent/30 border border-zkperp-accent/50 disabled:opacity-50 rounded-lg text-sm font-medium text-zkperp-accent transition-colors"
+            onClick={onUnshield}
+            disabled={unshieldBusy || loading}
+            className="w-full py-4 rounded-xl font-semibold text-base transition-all border-2
+              bg-zkperp-accent/10 hover:bg-zkperp-accent/20
+              border-zkperp-accent/60 hover:border-zkperp-accent
+              text-zkperp-accent disabled:opacity-50 disabled:cursor-not-allowed
+              whitespace-pre-line leading-snug"
           >
-            {decrypting ? (
-              <span className="flex items-center justify-center gap-2">
-                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+            {(unshieldBusy || loading) ? (
+              <span className="flex items-center justify-center gap-3">
+                <svg className="animate-spin h-5 w-5 flex-shrink-0" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
-                Decrypting slots...
+                {unshieldLabel}
               </span>
-            ) : (
-              `🔓 Decrypt & Show Positions`
-            )}
+            ) : unshieldLabel}
           </button>
+          {unshieldError && (
+            <p className="mt-2 text-xs text-zkperp-red text-center">{unshieldError}</p>
+          )}
         </div>
       )}
 

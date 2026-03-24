@@ -152,10 +152,100 @@ export function useOrderReceipts() {
     setReceipts(prev => prev.filter(r => r.id !== id));
   }, []);
 
-  // Auto-decrypt when records are fetched
+  // Combined fetch+decrypt — avoids React state race between the two phases
   const fetchAndDecrypt = useCallback(async () => {
-    await fetchRecords();
-  }, [fetchRecords]);
+    if (!address || !requestRecords) return;
+    setLoading(true);
+    setError(null);
+    let raw: any[] = [];
+    try {
+      const records = await requestRecords(PROGRAM_ID);
+      raw = records.filter(
+        (r: any) => (r.recordName === 'OrderReceipt' || r.recordName === 'LimitReceipt') && !r.spent
+      );
+      setRawRecords(raw);
+      setRecordCount(raw.length);
+      setDecrypted(false);
+      setReceipts([]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch OrderReceipt records');
+      setLoading(false);
+      return;
+    } finally {
+      setLoading(false);
+    }
+    if (raw.length === 0) { setDecrypted(true); return; }
+
+    // Decrypt immediately using local variable — not React state
+    if (!decrypt) return;
+    setDecrypting(true);
+    try {
+      const results = await Promise.all(
+        raw.map(async (record) => {
+          try {
+            if (!record.recordCiphertext) return null;
+            const plaintext = await decrypt(record.recordCiphertext);
+            return { record, plaintext };
+          } catch { return null; }
+        })
+      );
+      const parsed: OrderReceiptRecord[] = [];
+      for (const result of results) {
+        if (!result) continue;
+        const { record, plaintext } = result;
+        const orderIdMatch   = plaintext.match(/order_id:\s*(\d+field)(?:\.private)?/);
+        const orderTypeMatch = plaintext.match(/order_type:\s*(\d+)u8(?:\.private)?/);
+        const isLongMatch    = plaintext.match(/is_long:\s*(true|false)(?:\.private)?/);
+        const triggerMatch   = plaintext.match(/trigger_price:\s*(\d+)u64(?:\.private)?/);
+        const sizeMatch      = plaintext.match(/size_usdc:\s*(\d+)u64(?:\.private)?/);
+        const collMatch      = plaintext.match(/collateral_usdc:\s*(\d+)u64(?:\.private)?/);
+        const entryMatch     = plaintext.match(/entry_price:\s*(\d+)u64(?:\.private)?/);
+        const posIdMatch     = plaintext.match(/position_id:\s*(\d+field)(?:\.private)?/);
+        const slotIdMatch    = plaintext.match(/slot_id:\s*(\d+)u8(?:\.private)?/);
+        const nonceMatch     = plaintext.match(/nonce:\s*(\d+field)(?:\.private)?/);
+        if (!orderIdMatch || !triggerMatch) continue;
+        const isLimitReceipt = record.recordName === 'LimitReceipt';
+        const orderType = isLimitReceipt ? 0 : parseInt(orderTypeMatch?.[1] || '0');
+        parsed.push({
+          id:             record.commitment || record.id || `receipt-${orderIdMatch[1]}`,
+          owner:          address || '',
+          orderId:        orderIdMatch[1],
+          orderType,
+          orderTypeStr:   orderType === 0 ? 'Limit' : orderType === 1 ? 'Take Profit' : 'Stop Loss',
+          isLong:         isLongMatch?.[1] === 'true',
+          triggerPrice:   BigInt(triggerMatch[1]),
+          sizeUsdc:       BigInt(sizeMatch?.[1] || '0'),
+          collateralUsdc: BigInt(collMatch?.[1] || '0'),
+          entryPrice:     BigInt(entryMatch?.[1] || '0'),
+          positionId:     posIdMatch?.[1] || '0field',
+          slotId:         parseInt(slotIdMatch?.[1] || '0'),
+          nonce:          nonceMatch?.[1] || '0field',
+          plaintext,
+          ciphertext:     record.recordCiphertext || '',
+          rawRecord:      record,
+        });
+      }
+      const filtered = parsed.filter(r => !spentIds.has(r.id));
+      const EXPLORER = 'https://api.explorer.provable.com/v1/testnet';
+      const chainVerified = await Promise.all(
+        filtered.map(async (r) => {
+          try {
+            const res = await fetch(`${EXPLORER}/program/${PROGRAM_ID}/mapping/pending_orders/${r.orderId}`);
+            const val = await res.text();
+            if (!val || val === 'null' || val.includes('false')) return null;
+            return r;
+          } catch { return r; }
+        })
+      );
+      const active = chainVerified.filter(Boolean) as typeof filtered;
+      setReceipts(active);
+      setDecrypted(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to decrypt OrderReceipt records');
+    } finally {
+      setDecrypting(false);
+    }
+  }, [address, requestRecords, decrypt, spentIds]);
 
   return {
     receipts,

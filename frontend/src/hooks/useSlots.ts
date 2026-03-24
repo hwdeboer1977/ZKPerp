@@ -192,6 +192,100 @@ export function useSlots(programId: string) {
     await initTx.execute(options);
   }, [address, initTx, programId]);
 
+  // Combined fetch+decrypt — avoids React state race between the two phases
+  const fetchAndDecryptSlots = useCallback(async () => {
+    if (!address || !requestRecords || !decrypt) return;
+    setLoading(true);
+    setError(null);
+    let dedupedRaw: any[] = [];
+    try {
+      const records = await requestRecords(programId);
+      const slotRecords = records.filter((r: any) =>
+        r.recordName === 'PositionSlot' &&
+        (!r.programId || r.programId === programId) &&
+        !r.spent
+      );
+      const sorted = slotRecords
+        .slice()
+        .sort((a: any, b: any) => (b.commitment || '').localeCompare(a.commitment || ''));
+      dedupedRaw = sorted.slice(0, 2);
+      setRawRecords(dedupedRaw);
+      setRawRecordCount(slotRecords.length);
+      setRecordCount(dedupedRaw.length > 0 ? dedupedRaw.length : 0);
+      setDecrypted(false);
+      setPositionSlots([]);
+    } finally {
+      setLoading(false);
+    }
+    if (dedupedRaw.length === 0) return;
+
+    // Decrypt immediately using local variable — not React state
+    setDecrypting(true);
+    try {
+      const results = await Promise.all(
+        dedupedRaw.map(async (record) => {
+          try {
+            if (!record.recordCiphertext) return null;
+            const plaintext = await decrypt(record.recordCiphertext);
+            return { record, plaintext };
+          } catch { return null; }
+        })
+      );
+      const slots: PositionSlotRecord[] = [];
+      for (const result of results) {
+        if (!result) continue;
+        const { record, plaintext } = result;
+        const slotIdMatch  = plaintext.match(/slot_id:\s*(\d+)u8(?:\.private)?/);
+        const isOpenMatch  = plaintext.match(/is_open:\s*(true|false)(?:\.private)?/);
+        const posIdMatch   = plaintext.match(/position_id:\s*(\d+field)(?:\.private)?/);
+        const isLongMatch  = plaintext.match(/is_long:\s*(true|false)(?:\.private)?/);
+        const sizeMatch    = plaintext.match(/size_usdc:\s*(\d+)u64(?:\.private)?/);
+        const collMatch    = plaintext.match(/collateral_usdc:\s*(\d+)u64(?:\.private)?/);
+        const entryMatch   = plaintext.match(/entry_price:\s*(\d+)u64(?:\.private)?/);
+        if (!slotIdMatch) continue;
+        slots.push({
+          id: record.commitment || record.id || `slot-${slotIdMatch[1]}`,
+          owner: address || '',
+          slotId: parseInt(slotIdMatch[1]),
+          isOpen: isOpenMatch?.[1] === 'true',
+          positionId: posIdMatch?.[1] || '0field',
+          isLong: isLongMatch?.[1] === 'true',
+          sizeUsdc: BigInt(sizeMatch?.[1] || '0'),
+          collateralUsdc: BigInt(collMatch?.[1] || '0'),
+          entryPrice: BigInt(entryMatch?.[1] || '0'),
+          plaintext,
+          ciphertext: record.recordCiphertext || '',
+          rawRecord: record,
+        });
+      }
+      const filtered = slots.filter(s => !spentCommitments.has(s.id));
+      const dedupMap = new Map<number, PositionSlotRecord>();
+      for (const slot of filtered) {
+        const existing = dedupMap.get(slot.slotId);
+        if (!existing || slot.isOpen) dedupMap.set(slot.slotId, slot);
+      }
+      const deduped = Array.from(dedupMap.values())
+        .filter(s => s.slotId === 0 || s.slotId === 1)
+        .sort((a, b) => a.slotId - b.slotId);
+      const verifiedDeduped = await Promise.all(deduped.map(async (slot) => {
+        if (!slot.isOpen) return slot;
+        try {
+          const res = await fetch(`${EXPLORER_API}/program/${programId}/mapping/position_open_blocks/${slot.positionId}`);
+          const val = await res.text();
+          if (!val || val === 'null') return { ...slot, isOpen: false };
+        } catch {}
+        return slot;
+      }));
+      setPositionSlots(verifiedDeduped);
+      setRecordCount(verifiedDeduped.length);
+      setDecrypted(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to decrypt slots');
+    } finally {
+      setDecrypting(false);
+    }
+  }, [address, requestRecords, decrypt, programId, spentCommitments]);
+
   const markSpent = useCallback((id: string) => {
     setSpentCommitments(prev => new Set([...prev, id]));
     setPositionSlots(prev => prev.filter(s => s.id !== id));
@@ -220,6 +314,7 @@ export function useSlots(programId: string) {
     error,
     fetchSlots,
     decryptSlots,
+    fetchAndDecryptSlots,
     initializeSlots,
     getEmptyPositionSlot,
     getOpenPositionSlots,

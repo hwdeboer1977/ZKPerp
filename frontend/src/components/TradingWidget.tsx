@@ -24,9 +24,24 @@ import type { PairId } from '@/config/pairs';
 interface Props {
   pair: PairId;
   currentPrice: bigint;
+  // Shared state passed from TradePage — avoids duplicate hook instances
+  positionSlots: ReturnType<typeof useSlots>['positionSlots'];
+  recordCount: ReturnType<typeof useSlots>['recordCount'];
+  slotsLoading: ReturnType<typeof useSlots>['loading'];
+  decrypting: ReturnType<typeof useSlots>['decrypting'];
+  decrypted: ReturnType<typeof useSlots>['decrypted'];
+  initializeSlots: ReturnType<typeof useSlots>['initializeSlots'];
+  getEmptyPositionSlot: ReturnType<typeof useSlots>['getEmptyPositionSlot'];
+  isInitializing: ReturnType<typeof useSlots>['isInitializing'];
+  initTx: ReturnType<typeof useSlots>['initTx'];
+  markSpent: ReturnType<typeof useSlots>['markSpent'];
+  usdcTokens: ReturnType<typeof useUSDCx>['tokens'];
+  usdcTotal: ReturnType<typeof useUSDCx>['total'];
+  usdcLoading: ReturnType<typeof useUSDCx>['loading'];
+  usdcDecrypted: ReturnType<typeof useUSDCx>['decrypted'];
+  fetchUSDCx: ReturnType<typeof useUSDCx>['fetchAndDecrypt'];
+  markUSDCxSpent: ReturnType<typeof useUSDCx>['markSpent'];
 }
-
-//const BOT_API = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_BOT_API) || 'http://localhost:3001';
 
 function normalizeRecordPlaintext(plaintext: string): string {
   return plaintext
@@ -38,36 +53,18 @@ function normalizeRecordPlaintext(plaintext: string): string {
     .trim();
 }
 
-export function TradingWidget({ pair, currentPrice }: Props) {
+export function TradingWidget({
+  pair, currentPrice,
+  positionSlots, recordCount, slotsLoading, decrypting, decrypted,
+  initializeSlots, getEmptyPositionSlot, isInitializing, initTx, markSpent,
+  usdcTokens, usdcTotal, usdcLoading, usdcDecrypted, markUSDCxSpent,
+}: Props) {
   const pairConfig = getPair(pair);
-  const PROGRAM_ID = pairConfig.programId; // e.g. zkperp_v19.aleo / zkperp_v19b.aleo
+  const PROGRAM_ID = pairConfig.programId;
 
   const { address, connected } = useWallet();
   const openTx = useTransaction();
   const limitTx = useTransaction();
-  const {
-    positionSlots,
-    recordCount,
-    loading: slotsLoading,
-    decrypting,
-    decrypted,
-    fetchSlots,
-    decryptSlots,
-    initializeSlots,
-    getEmptyPositionSlot,
-    isInitializing,
-    initTx,
-    markSpent,
-  } = useSlots(PROGRAM_ID);
-
-  const {
-    tokens: usdcTokens,
-    total: usdcTotal,
-    loading: usdcLoading,
-    decrypted: usdcDecrypted,
-    fetchAndDecrypt: fetchUSDCx,
-    markSpent: markUSDCxSpent,
-  } = useUSDCx();
 
   const [orderMode, setOrderMode] = useState<'market' | 'limit'>('market');
   const [isLong, setIsLong] = useState(true);
@@ -107,11 +104,6 @@ export function TradingWidget({ pair, currentPrice }: Props) {
 
   const canTrade = connected && isValidLeverage && isValidSize && collateral > 0 && hasEmptySlot && usdcReady;
   const isBusy = openTx.status === 'submitting' || openTx.status === 'pending';
-
-  // Re-fetch slots when pair or connection changes
-  useEffect(() => {
-    if (connected) fetchSlots();
-  }, [connected, fetchSlots]);
 
   // Reset form when switching pairs
   useEffect(() => {
@@ -402,26 +394,17 @@ export function TradingWidget({ pair, currentPrice }: Props) {
             <div className="flex items-center justify-between">
               <div>
                 <span className="text-gray-400">USDCx Balance</span>
-                {usdcDecrypted && (
-                  <span className="ml-2 text-white">${formatUsdc(usdcTotal)}</span>
-                )}
+                {usdcDecrypted
+                  ? <span className="ml-2 text-white">${formatUsdc(usdcTotal)}</span>
+                  : <span className="ml-2 text-gray-500 text-xs">Unshield to view</span>
+                }
                 {usdcDecrypted && !bestUsdcToken && collateral > 0n && (
                   <span className="ml-2 text-yellow-400 text-xs">
                     (largest record: ${formatUsdc(usdcTokens[0]?.amount ?? 0n)})
                   </span>
                 )}
               </div>
-              <button
-                onClick={fetchUSDCx}
-                disabled={usdcLoading || !connected}
-                className="text-xs text-zkperp-accent hover:text-zkperp-accent/80 disabled:opacity-40 px-2 py-1 border border-zkperp-accent/30 rounded"
-              >
-                {usdcLoading ? '…' : usdcDecrypted ? '↻ Refresh' : '🔓 Scan USDCx'}
-              </button>
             </div>
-            {!usdcDecrypted && connected && (
-              <p className="text-xs text-gray-500 mt-1">Scan your USDCx records to enable trading</p>
-            )}
             {usdcDecrypted && !bestUsdcToken && collateral > 0n && (
               <p className="text-xs text-yellow-400 mt-1">
                 Enter a collateral amount ≤ your largest record, or consolidate USDCx first
@@ -438,8 +421,8 @@ export function TradingWidget({ pair, currentPrice }: Props) {
           />
 
           <button
-            onClick={!decrypted ? decryptSlots : handleSubmit}
-            disabled={decrypting || usdcLoading || isBusy || (decrypted && !canTrade)}
+            onClick={handleSubmit}
+            disabled={decrypting || usdcLoading || isBusy || !canTrade}
             className={`w-full py-4 rounded-lg font-semibold text-white transition-all disabled:cursor-not-allowed ${
               !decrypted
                 ? 'bg-zkperp-accent hover:bg-zkperp-accent/80 disabled:bg-zkperp-accent/30'
@@ -456,9 +439,9 @@ export function TradingWidget({ pair, currentPrice }: Props) {
               <span className="flex items-center justify-center gap-2"><Spinner />Confirming on-chain...</span>
             ) : !connected ? 'Connect Wallet'
             : recordCount === 0 ? 'Initialize account first'
-            : !decrypted ? `🔓 Decrypt ${recordCount} Slot${recordCount !== 1 ? 's' : ''} to Trade`
+            : !decrypted ? '🛡️ Unshield to Trade'
             : !hasEmptySlot ? `No ${isLong ? 'Long' : 'Short'} slot available`
-            : !usdcDecrypted ? '🔓 Scan USDCx to Trade'
+            : !usdcDecrypted ? '🛡️ Unshield to Trade'
             : !bestUsdcToken && collateral > 0n ? `Collateral exceeds record — max $${formatUsdc(usdcTokens[0]?.amount ?? 0n)}`
             : !isValidLeverage && leverage > 0 ? 'Leverage exceeds 20x'
             : `${isLong ? 'Long' : 'Short'} ${pairConfig.baseAsset}`}
@@ -605,12 +588,11 @@ export function TradingWidget({ pair, currentPrice }: Props) {
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-gray-400">USDCx Balance</span>
-                  {usdcDecrypted && <span className="ml-2 text-white">${formatUsdc(usdcTotal)}</span>}
+                  {usdcDecrypted
+                    ? <span className="ml-2 text-white">${formatUsdc(usdcTotal)}</span>
+                    : <span className="ml-2 text-gray-500 text-xs">Unshield to view</span>
+                  }
                 </div>
-                <button onClick={fetchUSDCx} disabled={usdcLoading || !connected}
-                  className="text-xs text-zkperp-accent hover:text-zkperp-accent/80 disabled:opacity-40 px-2 py-1 border border-zkperp-accent/30 rounded">
-                  {usdcLoading ? '…' : usdcDecrypted ? '↻ Refresh' : '🔓 Scan USDCx'}
-                </button>
               </div>
             </div>
 
@@ -623,15 +605,15 @@ export function TradingWidget({ pair, currentPrice }: Props) {
             />
 
             <button
-              onClick={!decrypted ? decryptSlots : handleLimitOrder}
-              disabled={decrypting || usdcLoading || isLimitBusy || (decrypted && !canLimitOrder)}
+              onClick={handleLimitOrder}
+              disabled={decrypting || usdcLoading || isLimitBusy || !canLimitOrder}
               className="w-full py-4 rounded-lg font-semibold text-white transition-all disabled:cursor-not-allowed bg-zkperp-accent hover:bg-zkperp-accent/80 disabled:bg-zkperp-accent/30"
             >
               {decrypting ? <span className="flex items-center justify-center gap-2"><Spinner />Decrypting...</span>
               : isLimitBusy ? <span className="flex items-center justify-center gap-2"><Spinner />Placing order...</span>
-              : !decrypted ? `🔓 Decrypt Slots`
+              : !decrypted ? '🛡️ Unshield to Trade'
               : !limitSlot ? `No ${limitIsLong ? 'Long' : 'Short'} slot available`
-              : !usdcDecrypted ? '🔓 Scan USDCx'
+              : !usdcDecrypted ? '🛡️ Unshield to Trade'
               : !canLimitOrder && triggerPrice === 0n ? 'Enter trigger price'
               : !canLimitOrder && !isValidLeverage ? 'Invalid leverage'
               : `Place ${limitIsLong ? 'Long' : 'Short'} ${pairConfig.baseAsset} Limit @ $${triggerPrice > 0n ? formatPrice(triggerPrice) : '—'}`

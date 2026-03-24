@@ -1,9 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
-import type { TransactionOptions } from '@provablehq/aleo-types';
-import { useTransaction } from '@/hooks/useTransaction';
-import { TransactionStatus } from '@/components/TransactionStatus';
-import { formatUsdc, formatPrice, PROGRAM_ID } from '@/utils/aleo';
+import { useState, useEffect } from 'react';
+import { formatUsdc, formatPrice } from '@/utils/aleo';
 
 const EXPLORER = 'https://api.explorer.provable.com/v1/testnet';
 
@@ -116,224 +112,9 @@ interface Props {
   shortOI: bigint;
 }
 
-const LIQUIDATION_THRESHOLD_PERCENT = 1;
-const LIQUIDATION_REWARD_BPS = 5000n;
-const ALEO_API = 'https://api.explorer.provable.com/v1/testnet';
-
-interface PositionData {
-  positionId: string;
-  trader: string;
-  isLong: boolean;
-  sizeUsdc: bigint;
-  collateralUsdc: bigint;
-  entryPrice: bigint;
-}
-
-interface LiqAuthWithCalc extends PositionData {
-  pnl: bigint;
-  marginRatio: number;
-  isLiquidatable: boolean;
-  reward: bigint;
-}
-
-interface BotStatus {
-  status: 'ok' | 'unreachable';
-  running: boolean;
-  pid: number | null;
-  startedAt: string | null;
-  stoppedAt: string | null;
-  restartCount: number;
-  currentPrice?: string;
-  positionCount?: number;
-  lastScanAt?: string | null;
-}
 
 export function SystemStatusPage({ currentPrice, poolLiquidity, longOI, shortOI }: Props) {
-  const { connected } = useWallet();
-  const MANAGER_API = import.meta.env.VITE_MANAGER_API_URL || 'http://localhost:3000';
-  const liquidateTx = useTransaction();
-
   const [activeTab, setActiveTab] = useState<'status' | 'liquidate' | 'oracle'>('status');
-  const [txId, setTxId] = useState('');
-  const [position, setPosition] = useState<PositionData | null>(null);
-  const [fetching, setFetching] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [calculation, setCalculation] = useState<{
-    pnl: bigint; marginRatio: number; isLiquidatable: boolean; reward: bigint;
-  } | null>(null);
-
-  const [liqAuths, setLiqAuths] = useState<LiqAuthWithCalc[]>([]);
-  const [orchLoading, setOrchLoading] = useState(false);
-  const [orchError, setOrchError] = useState<string | null>(null);
-  const [liquidatingId, setLiquidatingId] = useState<string | null>(null);
-  const [botStatus, setBotStatus] = useState<BotStatus | null>(null);
-  const [botActionBusy, setBotActionBusy] = useState(false);
-
-  useEffect(() => {
-    const fetchBotStatus = async () => {
-      try {
-        const res = await fetch(`${MANAGER_API}/health`);
-        if (!res.ok) throw new Error('non-200');
-        const managerData = await res.json();
-        let extra: Partial<BotStatus> = {};
-        if (managerData.botRunning) {
-          try {
-            const botRes = await fetch(`${MANAGER_API}/bot-health`);
-            if (botRes.ok) {
-              const botData = await botRes.json();
-              extra = { currentPrice: botData.currentPrice, positionCount: botData.positionCount, lastScanAt: botData.lastScanAt };
-            }
-          } catch { }
-        }
-        setBotStatus({ status: 'ok', running: managerData.botRunning, pid: managerData.botPid, startedAt: managerData.botStartedAt, stoppedAt: managerData.botStoppedAt, restartCount: managerData.restartCount, ...extra });
-      } catch {
-        setBotStatus(prev => prev
-          ? { ...prev, status: 'unreachable' }
-          : { status: 'unreachable', running: false, pid: null, startedAt: null, stoppedAt: null, restartCount: 0 });
-      }
-    };
-    fetchBotStatus();
-    const interval = setInterval(fetchBotStatus, 10000);
-    return () => clearInterval(interval);
-  }, [MANAGER_API]);
-
-  const handleBotToggle = useCallback(async () => {
-    if (!botStatus || botStatus.status === 'unreachable') return;
-    setBotActionBusy(true);
-    try {
-      const action = botStatus.running ? 'stop' : 'start';
-      const res = await fetch(`${MANAGER_API}/${action}`, { method: 'POST' });
-      const data = await res.json();
-      setBotStatus(prev => prev ? { ...prev, running: data.running } : prev);
-      setTimeout(async () => {
-        try {
-          const r = await fetch(`${MANAGER_API}/health`);
-          const d = await r.json();
-          setBotStatus(prev => prev ? { ...prev, running: d.botRunning, pid: d.botPid } : prev);
-        } catch { }
-      }, 2000);
-    } catch (err) {
-      console.error('Bot toggle failed:', err);
-    } finally {
-      setBotActionBusy(false);
-    }
-  }, [botStatus, MANAGER_API]);
-
-  const calcLiquidation = (pos: PositionData, price: bigint) => {
-    const priceDiff = price > pos.entryPrice ? price - pos.entryPrice : pos.entryPrice - price;
-    const pnlAbs = (pos.sizeUsdc * priceDiff) / (pos.entryPrice + 1n);
-    const traderProfits = (pos.isLong && price > pos.entryPrice) || (!pos.isLong && price < pos.entryPrice);
-    const pnl = traderProfits ? pnlAbs : -pnlAbs;
-    const remainingMargin = pos.collateralUsdc + pnl;
-    const marginRatio = Number(remainingMargin * 100n * 10000n / pos.sizeUsdc) / 10000;
-    const isLiquidatable = marginRatio < LIQUIDATION_THRESHOLD_PERCENT;
-    const reward = (pos.sizeUsdc * LIQUIDATION_REWARD_BPS) / 1_000_000n;
-    return { pnl, marginRatio, isLiquidatable, reward };
-  };
-
-  const fetchLiqAuths = useCallback(async () => {
-    setOrchLoading(true);
-    setOrchError(null);
-    try {
-      const res = await fetch(`${MANAGER_API}/api/liq-auths`);
-      if (!res.ok) throw new Error(`Bot API error: ${res.status}`);
-      const data = await res.json();
-      const results: LiqAuthWithCalc[] = (data.positions || []).map((p: any) => ({
-        positionId: p.positionId, trader: p.trader, isLong: p.isLong,
-        sizeUsdc: BigInt(p.sizeUsdc), collateralUsdc: BigInt(p.collateralUsdc), entryPrice: BigInt(p.entryPrice),
-        pnl: BigInt(p.pnl), marginRatio: p.marginRatio, isLiquidatable: p.isLiquidatable, reward: BigInt(p.reward),
-      }));
-      setLiqAuths(results);
-    } catch (err: any) {
-      setOrchError(err.message.includes('fetch') ? 'Bot API unreachable' : err.message);
-    } finally {
-      setOrchLoading(false);
-    }
-  }, [MANAGER_API]);
-
-  useEffect(() => {
-    if (liqAuths.length > 0 && currentPrice > 0n) {
-      setLiqAuths(prev => prev.map(auth => ({ ...auth, ...calcLiquidation(auth, currentPrice) })));
-    }
-  }, [currentPrice]);
-
-  const executeLiquidation = async (pos: PositionData) => {
-    if (!connected) return;
-    setError(null);
-    setLiquidatingId(pos.positionId);
-    try {
-      let reward = (pos.sizeUsdc * LIQUIDATION_REWARD_BPS) / 1_000_000n;
-      if (reward < 1n) reward = 1n;
-      const options: TransactionOptions = {
-        program: PROGRAM_ID, function: 'liquidate',
-        inputs: [pos.positionId, `${pos.isLong}`, `${pos.sizeUsdc}u64`, `${pos.collateralUsdc}u64`, `${pos.entryPrice}u64`, `${reward}u128`, pos.trader],
-        fee: 5_000_000, privateFee: false,
-      };
-      await liquidateTx.execute(options);
-      setLiqAuths(prev => prev.filter(a => a.positionId !== pos.positionId));
-    } catch (err: any) {
-      setError(err.message || 'Liquidation failed');
-    } finally {
-      setLiquidatingId(null);
-    }
-  };
-
-  const fetchTransaction = async (transactionId: string) => {
-    setFetching(true);
-    setError(null);
-    setPosition(null);
-    setCalculation(null);
-    try {
-      const response = await fetch(`${ALEO_API}/transaction/${transactionId.trim()}`);
-      if (!response.ok) throw new Error(`Transaction not found (${response.status})`);
-      const data = await response.json();
-      const transitions = data.execution?.transitions || [];
-      const t = transitions.find((t: any) => t.function === 'open_position' && t.program?.includes('zkperp'));
-      if (!t) throw new Error('No open_position call found in this transaction');
-      const pos = parsePositionFromTransition(t);
-      if (!pos) throw new Error('Could not parse position data');
-      setPosition(pos);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setFetching(false);
-    }
-  };
-
-  const parsePositionFromTransition = (transition: any): PositionData | null => {
-    try {
-      const futureOutput = (transition.outputs || []).find((o: any) => o.type === 'future');
-      if (!futureOutput?.value) return null;
-      const futureStr = String(futureOutput.value);
-      const innerBlockEnd = futureStr.indexOf('},');
-      const afterBlock = innerBlockEnd > -1 ? futureStr.substring(innerBlockEnd + 2) : '';
-      const posIdMatch = afterBlock.match(/(\d{30,})field/);
-      const traderMatch = afterBlock.match(/(aleo1[a-z0-9]+)/);
-      const u64Matches = afterBlock.match(/(\d+)u64/g) || [];
-      const u64Values = u64Matches.map((m: string) => BigInt(m.replace('u64', '')));
-      if (!posIdMatch || u64Values.length < 3) return null;
-      const sizeUsdc = u64Values[1], entryPrice = u64Values[2];
-      const collateralUsdc = u64Values.length >= 6 ? u64Values[5] : sizeUsdc / 10n;
-      const isLong = !afterBlock.includes('\n    false') && !afterBlock.match(/,\s*false\s*,/);
-      return { positionId: posIdMatch[0], trader: traderMatch?.[1] || '', isLong, sizeUsdc, collateralUsdc, entryPrice };
-    } catch { return null; }
-  };
-
-  useEffect(() => {
-    if (!position || currentPrice === 0n) { setCalculation(null); return; }
-    setCalculation(calcLiquidation(position, currentPrice));
-  }, [position, currentPrice]);
-
-  const isLiquidateBusy = liquidateTx.status === 'submitting' || liquidateTx.status === 'pending';
-  const fmtUsdc = (v: bigint) => (Number(v) / 1_000_000).toFixed(2);
-  const fmtPrice = (v: bigint) => (Number(v) / 100_000_000).toLocaleString();
-
-  const Spinner = ({ size = 4 }: { size?: number }) => (
-    <svg className={`animate-spin h-${size} w-${size}`} viewBox="0 0 24 24">
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-    </svg>
-  );
 
   const tabClass = (active: boolean) =>
     `px-4 py-2 rounded-lg text-sm font-medium transition-colors ${active
@@ -361,45 +142,6 @@ export function SystemStatusPage({ currentPrice, poolLiquidity, longOI, shortOI 
       {/* ── Protocol Status Tab ─────────────────────────────────── */}
       {activeTab === 'status' && (
         <div className="space-y-6">
-
-          {/* Bot status */}
-          <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className={`w-2.5 h-2.5 rounded-full ${
-                  botStatus?.status === 'unreachable' ? 'bg-gray-500' :
-                  botStatus?.running ? 'bg-zkperp-green animate-pulse' : 'bg-red-500'
-                }`} />
-                <div>
-                  <p className="text-sm font-medium text-white">Oracle &amp; Liquidation Bot</p>
-                  <p className="text-xs text-gray-500">
-                    {botStatus?.status === 'unreachable' ? 'Manager unreachable (port 3000)'
-                      : !botStatus?.running ? `Stopped${botStatus?.stoppedAt ? ` · stopped ${new Date(botStatus.stoppedAt).toLocaleTimeString()}` : ''}`
-                      : botStatus?.currentPrice
-                      ? `Running · BTC $${(Number(botStatus.currentPrice) / 1e8).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · ${botStatus.positionCount ?? 0} position(s) monitored`
-                      : `Running · PID ${botStatus.pid} · starting up...`}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={handleBotToggle}
-                disabled={botStatus?.status === 'unreachable' || botActionBusy}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 ${
-                  botStatus?.running
-                    ? 'bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-400'
-                    : 'bg-zkperp-green/20 hover:bg-zkperp-green/30 border border-zkperp-green/50 text-zkperp-green'
-                }`}
-              >
-                {botActionBusy ? '...' : botStatus?.running ? '⏹ Stop Bot' : '▶ Start Bot'}
-              </button>
-            </div>
-            {botStatus?.lastScanAt && botStatus.running && (
-              <p className="text-xs text-gray-600 mt-3">
-                Last scan: {new Date(botStatus.lastScanAt).toLocaleTimeString()} · Pushes price on-chain when deviation &gt;1% · Restarts: {botStatus.restartCount}
-              </p>
-            )}
-          </div>
-
           {/* Per-pair status */}
           <PairStatusGrid btcPrice={currentPrice} btcLiquidity={poolLiquidity} btcLongOI={longOI} btcShortOI={shortOI} />
 
@@ -434,15 +176,6 @@ export function SystemStatusPage({ currentPrice, poolLiquidity, longOI, shortOI 
               </div>
             </div>
 
-            <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-5">
-              <h3 className="font-semibold text-white mb-3">⚡ Liquidation Design</h3>
-              <div className="space-y-2 text-sm text-gray-400">
-                <p><span className="text-zkperp-accent font-medium">Threshold</span> — a position becomes liquidatable when margin ratio falls below 1% of position size.</p>
-                <p><span className="text-zkperp-accent font-medium">Reward</span> — liquidator earns 0.5% of the position size. Anyone can liquidate, not just the bot.</p>
-                <p><span className="text-zkperp-accent font-medium">Automation</span> — the orchestrator bot scans all LiquidationAuth records on every oracle tick and submits liquidations automatically.</p>
-                <p><span className="text-zkperp-accent font-medium">Privacy preserved</span> — position data is never exposed publicly. The bot decrypts its own LiquidationAuth records server-side using the orchestrator view key.</p>
-              </div>
-            </div>
           </div>
         </div>
       )}
@@ -481,123 +214,8 @@ export function SystemStatusPage({ currentPrice, poolLiquidity, longOI, shortOI 
               </div>
             </div>
           </div>
-          <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="font-semibold text-white">Orchestrator Dashboard</h3>
-                <p className="text-sm text-gray-500 mt-0.5">Positions fetched from bot API — no wallet prompts needed</p>
-              </div>
-              <button
-                onClick={fetchLiqAuths}
-                disabled={orchLoading}
-                className="flex items-center gap-2 px-4 py-2 bg-zkperp-accent/20 hover:bg-zkperp-accent/30 border border-zkperp-accent/50 rounded-lg text-sm font-medium text-zkperp-accent disabled:opacity-50 transition-colors"
-              >
-                {orchLoading ? <><Spinner />Scanning...</> : '🔍 Scan Positions'}
-              </button>
-            </div>
-
-            {orchError && <p className="text-sm text-red-400 mb-4">{orchError}</p>}
-
-            {liqAuths.length === 0 && !orchLoading && !orchError && (
-              <div className="text-center py-8 text-gray-500">
-                <p className="text-4xl mb-3">🔑</p>
-                <p className="text-sm">No LiquidationAuth records found</p>
-                <p className="text-xs mt-1">Click "Scan Positions" to load positions from the bot</p>
-              </div>
-            )}
-
-            {liqAuths.length > 0 && (
-              <div className="space-y-3">
-                {liqAuths.map(auth => (
-                  <div key={auth.positionId} className={`rounded-lg p-4 border ${
-                    auth.isLiquidatable ? 'border-red-500/40 bg-red-500/5' : 'border-zkperp-border bg-zkperp-dark'
-                  }`}>
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${auth.isLong ? 'bg-zkperp-green/20 text-zkperp-green' : 'bg-zkperp-red/20 text-zkperp-red'}`}>
-                          {auth.isLong ? 'LONG' : 'SHORT'}
-                        </span>
-                        <span className={`text-xs font-medium ${auth.isLiquidatable ? 'text-red-400' : 'text-gray-400'}`}>
-                          {auth.isLiquidatable ? '⚠ LIQUIDATABLE' : `Margin: ${auth.marginRatio.toFixed(2)}%`}
-                        </span>
-                      </div>
-                      {auth.isLiquidatable && (
-                        <button
-                          onClick={() => executeLiquidation(auth)}
-                          disabled={!connected || isLiquidateBusy || liquidatingId === auth.positionId}
-                          className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 rounded-lg text-xs font-medium text-red-400 disabled:opacity-50 transition-colors"
-                        >
-                          {liquidatingId === auth.positionId ? <Spinner size={3} /> : `Liquidate · Earn $${fmtUsdc(auth.reward)}`}
-                        </button>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-3 gap-3 text-xs">
-                      <div><p className="text-gray-500">Size</p><p className="text-white">${fmtUsdc(auth.sizeUsdc)}</p></div>
-                      <div><p className="text-gray-500">Entry</p><p className="text-white">${fmtPrice(auth.entryPrice)}</p></div>
-                      <div><p className="text-gray-500">PnL</p><p className={auth.pnl >= 0n ? 'text-zkperp-green' : 'text-zkperp-red'}>{auth.pnl >= 0n ? '+' : '-'}${fmtUsdc(auth.pnl >= 0n ? auth.pnl : -auth.pnl)}</p></div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* TX ID lookup */}
-          <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-6">
-            <h3 className="font-semibold text-white mb-1">Manual TX Lookup</h3>
-            <p className="text-sm text-gray-500 mb-4">Check any position by pasting its open_position transaction ID</p>
-            <div className="flex gap-3">
-              <input
-                type="text"
-                value={txId}
-                onChange={e => setTxId(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && txId.trim() && fetchTransaction(txId)}
-                placeholder="at1..."
-                className="flex-1 bg-zkperp-dark border border-zkperp-border rounded-lg px-4 py-2.5 text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:border-zkperp-accent"
-              />
-              <button
-                onClick={() => txId.trim() && fetchTransaction(txId)}
-                disabled={fetching || !txId.trim()}
-                className="px-4 py-2.5 bg-zkperp-accent/20 hover:bg-zkperp-accent/30 border border-zkperp-accent/50 rounded-lg text-sm font-medium text-zkperp-accent disabled:opacity-50 transition-colors"
-              >
-                {fetching ? <Spinner /> : 'Fetch'}
-              </button>
-            </div>
-
-            {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
-
-            {position && calculation && (
-              <div className={`mt-4 rounded-lg p-4 border ${calculation.isLiquidatable ? 'border-red-500/40 bg-red-500/5' : 'border-zkperp-green/30 bg-zkperp-green/5'}`}>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-4">
-                  <div><p className="text-gray-500">Size</p><p className="text-white">${fmtUsdc(position.sizeUsdc)}</p></div>
-                  <div><p className="text-gray-500">Entry Price</p><p className="text-white">${fmtPrice(position.entryPrice)}</p></div>
-                  <div><p className="text-gray-500">Margin Ratio</p><p className={calculation.marginRatio < 1 ? 'text-red-400' : 'text-white'}>{calculation.marginRatio.toFixed(2)}%</p></div>
-                  <div><p className="text-gray-500">Reward</p><p className="text-zkperp-accent">${fmtUsdc(calculation.reward)}</p></div>
-                </div>
-                <TransactionStatus status={liquidateTx.status} tempTxId={liquidateTx.tempTxId} onChainTxId={liquidateTx.onChainTxId} error={liquidateTx.error} onDismiss={liquidateTx.reset} />
-                <button
-                  onClick={() => position && executeLiquidation(position)}
-                  disabled={!connected || !calculation.isLiquidatable || isLiquidateBusy}
-                  className={`mt-3 w-full py-3 rounded-lg font-semibold text-sm transition-colors ${
-                    calculation.isLiquidatable ? 'bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-400' : 'bg-zkperp-dark border border-zkperp-border text-gray-500 cursor-not-allowed'
-                  }`}
-                >
-                  {!connected ? 'Connect Wallet' : !calculation.isLiquidatable ? 'Position is Healthy' : `Liquidate · Earn $${fmtUsdc(calculation.reward)}`}
-                </button>
-              </div>
-            )}
-          </div>
-
           {/* Liquidation explainer */}
           <div className="grid md:grid-cols-2 gap-4">
-            <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-5">
-              <h3 className="font-semibold text-white mb-3">How Liquidations Work</h3>
-              <div className="space-y-2 text-sm text-gray-400">
-                <p>A position is liquidatable when its <strong className="text-white">margin ratio drops below 1%</strong> — meaning remaining collateral is less than 1% of position size.</p>
-                <p>Formula: <code className="text-zkperp-accent text-xs bg-zkperp-dark px-1 rounded">remaining = collateral + unrealised_PnL</code>, then <code className="text-zkperp-accent text-xs bg-zkperp-dark px-1 rounded">margin_ratio = remaining / size × 100</code>.</p>
-                <p>The liquidator earns <strong className="text-white">0.5%</strong> of position size as reward. Anyone can liquidate — the bot does it automatically, but the dashboard above lets you do it manually too.</p>
-              </div>
-            </div>
             <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-5">
               <h3 className="font-semibold text-white mb-3">Keeper Bot</h3>
               <div className="space-y-2 text-sm text-gray-400">
@@ -605,6 +223,15 @@ export function SystemStatusPage({ currentPrice, poolLiquidity, longOI, shortOI 
                 <p><span className="text-zkperp-accent font-medium">Oracle updates</span> — fetches BTC/ETH/SOL prices from Binance and pushes on-chain when deviation exceeds 1%.</p>
                 <p><span className="text-zkperp-accent font-medium">Liquidations</span> — decrypts LiquidationAuth records and submits <code className="text-xs">liquidate()</code> when margin ratio &lt; 1%.</p>
                 <p><span className="text-zkperp-accent font-medium">TP/SL &amp; limit orders</span> — monitors PendingOrder records and executes when trigger conditions are met.</p>
+              </div>
+            </div>
+            <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-5">
+              <h3 className="font-semibold text-white mb-3">📐 Formula</h3>
+              <div className="space-y-2 text-sm text-gray-400">
+                <p>A position is liquidatable when its <strong className="text-white">margin ratio drops below 1%</strong> of position size.</p>
+                <p><code className="text-zkperp-accent text-xs bg-zkperp-dark px-1 rounded block mt-1 mb-1">remaining = collateral + unrealised_PnL</code></p>
+                <p><code className="text-zkperp-accent text-xs bg-zkperp-dark px-1 rounded block mb-1">margin_ratio = remaining / size × 100</code></p>
+                <p>The liquidator earns <strong className="text-white">0.5%</strong> of position size as reward.</p>
               </div>
             </div>
           </div>

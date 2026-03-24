@@ -7,7 +7,6 @@ import { useSlots, type PositionSlotRecord } from '@/hooks/useSlots';
 import { getPair } from '@/config/pairs';
 import type { PairId } from '@/config/pairs';
 import { useOrderReceipts } from '@/hooks/useOrderReceipts';
-import { PendingOrdersDisplayInner } from '@/components/PendingOrdersDisplay';
 import {
   formatUsdc,
   formatPrice,
@@ -28,7 +27,7 @@ const BOT_API = (import.meta as any).env?.VITE_BOT_API || 'http://localhost:3001
 export function PositionDisplay({ pair, currentPrice }: Props) {
   const pairConfig = getPair(pair);
   const PROGRAM_ID = pairConfig.programId;
-  const { connected, address, decrypt } = useWallet();
+  const { connected, address } = useWallet();
   const closeTx = useTransaction();
   const tpTx = useTransaction();
   const slTx = useTransaction();
@@ -47,18 +46,10 @@ export function PositionDisplay({ pair, currentPrice }: Props) {
     needsInitialization,
   } = useSlots(PROGRAM_ID);
 
-  // Receipts needed for cancel — loaded on mount, auto-decrypted when records arrive
-  const { receipts: orderReceipts, fetchRecords: fetchReceipts, decryptAll: decryptReceipts, recordCount: receiptCount, decrypted: receiptsDecrypted, decrypting: receiptsDecrypting } = useOrderReceipts();
+  // Receipts needed for TP/SL cancel
+  const { receipts: orderReceipts } = useOrderReceipts();
 
-  useEffect(() => {
-    if (connected) fetchReceipts();
-  }, [connected]);
 
-  useEffect(() => {
-    if (receiptCount && receiptCount > 0 && !receiptsDecrypted && !receiptsDecrypting) {
-      decryptReceipts();
-    }
-  }, [receiptCount, receiptsDecrypted, receiptsDecrypting]);
 
   const [closingId, setClosingId] = useState<string | null>(null);
   const [tpSlotId, setTpSlotId] = useState<string | null>(null);
@@ -160,32 +151,12 @@ export function PositionDisplay({ pair, currentPrice }: Props) {
     localStorage.setItem('zkperp_orders', JSON.stringify(updated));
   };
 
-  // Manual decrypt state
-  const [showManualDecrypt, setShowManualDecrypt] = useState(false);
-  const [ciphertextInput, setCiphertextInput] = useState('');
-  const [decryptError, setDecryptError] = useState<string | null>(null);
-  const [decryptLoading, setDecryptLoading] = useState(false);
-  const [manualPositions, setManualPositions] = useState<PositionSlotRecord[]>([]);
+  const [manualPositions] = useState<PositionSlotRecord[]>([]);
 
   // Only show open slots (is_open === true)
   const openSlots = positionSlots.filter(s => s.isOpen);
 
-  // Check if a position is closed on-chain (for manual decrypt only)
-  const checkPositionClosedOnChain = async (positionId: string): Promise<boolean> => {
-    try {
-      const cleanId = positionId.replace('.private', '').replace('.public', '');
-      const response = await fetch(
-        `${ALEO_API}/program/${PROGRAM_ID}/mapping/closed_positions/${cleanId}`
-      );
-      if (!response.ok) return false;
-      const data = await response.text();
-      return data.includes('true');
-    } catch {
-      return false;
-    }
-  };
-
-  // Cancel TP or SL — trader calls cancel_tp_sl directly on-chain
+  // Cancel TP or SL
   const handleCancelOrder = useCallback(async (
     positionId: string,
     orderType: 'tp' | 'sl',
@@ -409,74 +380,6 @@ export function PositionDisplay({ pair, currentPrice }: Props) {
     }
   }, [connected, currentPrice, closeTx, markSpent]);
 
-  // Manual decrypt handler (fallback for edge cases)
-  const handleManualDecrypt = async () => {
-    if (!decrypt || !ciphertextInput.trim()) return;
-
-    setDecryptLoading(true);
-    setDecryptError(null);
-
-    try {
-      const plaintext = await decrypt(ciphertextInput.trim());
-      if (!plaintext) {
-        setDecryptError('Could not decrypt — not your record?');
-        return;
-      }
-
-      const slotIdMatch    = plaintext.match(/slot_id:\s*(\d+)u8(?:\.private)?/);
-      const isOpenMatch    = plaintext.match(/is_open:\s*(true|false)(?:\.private)?/);
-      const posIdMatch     = plaintext.match(/position_id:\s*(\d+field)(?:\.private)?/);
-      const isLongMatch    = plaintext.match(/is_long:\s*(true|false)(?:\.private)?/);
-      const sizeMatch      = plaintext.match(/size_usdc:\s*(\d+)u64(?:\.private)?/);
-      const collMatch      = plaintext.match(/collateral_usdc:\s*(\d+)u(?:64|128)(?:\.private)?/);
-      const entryMatch     = plaintext.match(/entry_price:\s*(\d+)u64(?:\.private)?/);
-
-      if (!slotIdMatch || !sizeMatch) {
-        setDecryptError('Not a valid PositionSlot record');
-        return;
-      }
-
-      if (isOpenMatch?.[1] !== 'true') {
-        setDecryptError('This slot has no open position (is_open: false)');
-        return;
-      }
-
-      const posId = posIdMatch?.[1] || '0field';
-      const isClosedOnChain = await checkPositionClosedOnChain(posId);
-      if (isClosedOnChain) {
-        setDecryptError('This position has already been closed or liquidated');
-        return;
-      }
-
-      const manualSlot: PositionSlotRecord = {
-        id: `manual-${slotIdMatch[1]}-${Date.now()}`,
-        owner: '',
-        slotId: parseInt(slotIdMatch[1]),
-        isOpen: true,
-        positionId: posId,
-        isLong: isLongMatch?.[1] === 'true',
-        sizeUsdc: BigInt(sizeMatch[1]),
-        collateralUsdc: BigInt(collMatch?.[1] || '0'),
-        entryPrice: BigInt(entryMatch?.[1] || '0'),
-        plaintext,
-        ciphertext: ciphertextInput.trim(),
-        rawRecord: null,
-      };
-
-      setManualPositions(prev => {
-        const exists = prev.some(p => p.positionId === manualSlot.positionId);
-        return exists ? prev : [...prev, manualSlot];
-      });
-
-      setCiphertextInput('');
-      setShowManualDecrypt(false);
-    } catch (err) {
-      setDecryptError(err instanceof Error ? err.message : 'Decryption failed');
-    } finally {
-      setDecryptLoading(false);
-    }
-  };
-
   if (!connected) {
     return (
       <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-6">
@@ -500,15 +403,8 @@ export function PositionDisplay({ pair, currentPrice }: Props) {
   return (
     <>
     <div className="bg-zkperp-card rounded-xl border border-zkperp-border overflow-hidden">
-      <div className="flex items-center justify-between p-4 border-b border-zkperp-border">
+      <div className="p-4 border-b border-zkperp-border">
         <h2 className="text-lg font-semibold text-white">Your Positions</h2>
-        <button
-          onClick={fetchSlots}
-          disabled={loading}
-          className="text-sm text-zkperp-accent hover:text-zkperp-accent/80 disabled:opacity-50"
-        >
-          {loading ? 'Loading...' : 'Refresh'}
-        </button>
       </div>
 
       {/* Needs initialization */}
@@ -777,15 +673,6 @@ export function PositionDisplay({ pair, currentPrice }: Props) {
           </div>
           <p className="text-gray-500">No open positions</p>
           <p className="text-sm text-gray-600 mt-1">Open a trade to get started</p>
-          <ManualDecryptSection
-            show={showManualDecrypt}
-            onToggle={() => setShowManualDecrypt(v => !v)}
-            ciphertextInput={ciphertextInput}
-            onCiphertextChange={setCiphertextInput}
-            onDecrypt={handleManualDecrypt}
-            decryptLoading={decryptLoading}
-            decryptError={decryptError}
-          />
         </div>
       )}
 
@@ -794,15 +681,6 @@ export function PositionDisplay({ pair, currentPrice }: Props) {
         <div className="p-8 text-center">
           <p className="text-gray-500">No open positions</p>
           <p className="text-sm text-gray-600 mt-1">Open a trade to get started</p>
-          <ManualDecryptSection
-            show={showManualDecrypt}
-            onToggle={() => setShowManualDecrypt(v => !v)}
-            ciphertextInput={ciphertextInput}
-            onCiphertextChange={setCiphertextInput}
-            onDecrypt={handleManualDecrypt}
-            decryptLoading={decryptLoading}
-            decryptError={decryptError}
-          />
         </div>
       )}
 
@@ -825,50 +703,8 @@ export function PositionDisplay({ pair, currentPrice }: Props) {
         </div>
       )}
     </div>
-    <PendingOrdersDisplayInner receipts={orderReceipts} loading={receiptsDecrypting} onCancelled={markSpent} />
     </>
   );
 }
 
-// ── Manual decrypt sub-component ─────────────────────────────────────────────
-function ManualDecryptSection({
-  show, onToggle, ciphertextInput, onCiphertextChange, onDecrypt, decryptLoading, decryptError,
-}: {
-  show: boolean;
-  onToggle: () => void;
-  ciphertextInput: string;
-  onCiphertextChange: (v: string) => void;
-  onDecrypt: () => void;
-  decryptLoading: boolean;
-  decryptError: string | null;
-}) {
-  return (
-    <div className="mt-4 pt-4 border-t border-zkperp-border">
-      <button onClick={onToggle} className="text-xs text-zkperp-accent hover:underline">
-        {show ? 'Hide' : '🔑 Have a position record? Decrypt manually'}
-      </button>
-      {show && (
-        <div className="mt-3 text-left">
-          <p className="text-xs text-gray-500 mb-2">
-            Paste a PositionSlot record ciphertext:
-          </p>
-          <textarea
-            value={ciphertextInput}
-            onChange={(e) => onCiphertextChange(e.target.value)}
-            placeholder="record1qyqsq..."
-            rows={3}
-            className="w-full bg-zkperp-dark border border-zkperp-border rounded-lg px-3 py-2 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-zkperp-accent font-mono"
-          />
-          <button
-            onClick={onDecrypt}
-            disabled={decryptLoading || !ciphertextInput.trim()}
-            className="mt-2 w-full py-2 bg-zkperp-accent hover:bg-zkperp-accent/80 disabled:bg-zkperp-accent/30 rounded-lg text-sm font-medium text-white transition-colors"
-          >
-            {decryptLoading ? 'Decrypting...' : 'Decrypt Position'}
-          </button>
-          {decryptError && <p className="text-xs text-red-400 mt-2">{decryptError}</p>}
-        </div>
-      )}
-    </div>
-  );
-}
+

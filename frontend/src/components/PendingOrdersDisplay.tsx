@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import { useTransaction } from '@/hooks/useTransaction';
+import { useOrderReceipts, type OrderReceiptRecord } from '@/hooks/useOrderReceipts';
 import { TransactionStatus } from '@/components/TransactionStatus';
-import { type OrderReceiptRecord } from '@/hooks/useOrderReceipts';
 import { formatPrice, formatUsdc, PROGRAM_ID } from '@/utils/aleo';
 
 const EXPLORER_API = 'https://api.explorer.provable.com/v1/testnet';
 
-interface Props {
+interface InnerProps {
   receipts: OrderReceiptRecord[];
   loading?: boolean;
   onCancelled?: (receiptId: string) => void;
@@ -19,7 +19,7 @@ function compact(pt: string) {
     .replace(/\s*{\s*/g, '{').replace(/\s*}\s*/g, '}').trim();
 }
 
-export function PendingOrdersDisplayInner({ receipts, loading, onCancelled }: Props) {
+function PendingOrdersDisplayInner({ receipts, loading, onCancelled }: InnerProps) {
   const { connected } = useWallet();
   const cancelTx = useTransaction();
   const [cancellingId, setCancellingId] = useState<string | null>(null);
@@ -113,8 +113,7 @@ export function PendingOrdersDisplayInner({ receipts, loading, onCancelled }: Pr
                     disabled={isCancelling || cancelTx.status === 'submitting' || cancelTx.status === 'pending'}
                     className="w-full py-2 rounded-lg text-xs font-medium transition-colors border border-red-500/30 text-red-400 hover:bg-red-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {isCancelling ? '⏳ Cancelling...'
-                      : '✕ Cancel Limit Order'}
+                    {isCancelling ? '⏳ Cancelling...' : '✕ Cancel Limit Order'}
                   </button>
                   {cancelTx.status !== 'idle' && cancellingId === receipt.id && (
                     <div className="mt-2">
@@ -138,5 +137,43 @@ export function PendingOrdersDisplayInner({ receipts, loading, onCancelled }: Pr
 }
 
 export function PendingOrdersDisplay() {
-  return null;
+  const {
+    receipts, recordCount, loading, decrypting, decrypted,
+    fetchAndDecrypt, decryptAll, markSpent,
+  } = useOrderReceipts();
+
+  if (loading) return (
+    <div className="mt-4 p-4 text-sm text-gray-400">Scanning for orders...</div>
+  );
+
+  if (!recordCount && !decrypted) return (
+    <div className="mt-4">
+      <button
+        onClick={fetchAndDecrypt}
+        className="w-full py-2 rounded-lg text-xs font-medium border border-zkperp-border text-gray-400 hover:text-white hover:border-zkperp-accent transition-colors"
+      >
+        🔍 Scan for Pending Orders
+      </button>
+    </div>
+  );
+
+  if (recordCount && !decrypted) return (
+    <div className="mt-4">
+      <button
+        onClick={decryptAll}
+        disabled={decrypting}
+        className="w-full py-2 rounded-lg text-xs font-medium border border-zkperp-accent/50 text-zkperp-accent hover:bg-zkperp-accent/10 disabled:opacity-50 transition-colors"
+      >
+        {decrypting ? '⏳ Decrypting...' : `🔓 Decrypt ${recordCount} Order Record${recordCount > 1 ? 's' : ''}`}
+      </button>
+    </div>
+  );
+
+  return (
+    <PendingOrdersDisplayInner
+      receipts={receipts}
+      loading={decrypting}
+      onCancelled={markSpent}
+    />
+  );
 }

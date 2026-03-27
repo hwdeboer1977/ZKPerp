@@ -12,6 +12,14 @@ build/
 *records*
 *node_modules*
 
+leo/test_limitorder_v14/
+leo/test_liquidity_v13/
+leo/v12_full_priv/
+leo/v12_full_priv_usdcx/
+leo/v12_private/
+test_transfer/
+voice/
+
 # Old
 *OLD*
 *V9*

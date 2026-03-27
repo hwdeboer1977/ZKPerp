@@ -13,9 +13,9 @@ Relayer A ──┐
 Relayer B ──┼──► Coordinator (port 3010) ──► ZKPerp Bot (POST /oracle/update)
 Relayer C ──┘                                      │
                                                    ▼
-                                     Aleo: zkperp_v19.aleo   (BTC)
-                                           zkperp_v19b.aleo  (ETH)
-                                           zkperp_v19c.aleo  (SOL)
+                                     Aleo: zkperp_btc_v21.aleo  (BTC)
+                                           zkperp_eth_v21.aleo  (ETH)
+                                           zkperp_sol_v21.aleo  (SOL)
 ```
 
 Each relayer independently reads Chainlink feeds via `latestRoundData()`, signs
@@ -83,9 +83,9 @@ Add these to your zkperp-bot `.env`:
 
 ```bash
 ORACLE_TOKEN=same_value_as_ZKPERP_ORCHESTRATOR_TOKEN
-PROGRAM_ID_BTC=zkperp_v19.aleo
-PROGRAM_ID_ETH=zkperp_v19b.aleo
-PROGRAM_ID_SOL=zkperp_v19c.aleo
+PROGRAM_ID_BTC=zkperp_btc_v21.aleo
+PROGRAM_ID_ETH=zkperp_eth_v21.aleo
+PROGRAM_ID_SOL=zkperp_sol_v21.aleo
 ```
 
 ### 5. Run
@@ -160,7 +160,7 @@ Add an entry to `config/markets.json`:
 }
 ```
 
-Then add `PROGRAM_ID_ASSET=zkperp_vXX.aleo` to the bot `.env` and extend
+Then add `PROGRAM_ID_ASSET=zkperp_asset_v21.aleo` to the bot `.env` and extend
 `CONFIG.programs` in `zkperp-bot.mjs`.
 
 ---

@@ -1,0 +1,1405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZKPerp — Technical Whitepaper</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&family=Fraunces:ital,opsz,wght@0,9..144,200;0,9..144,400;0,9..144,600;1,9..144,300&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0d1117;
+    --ink-secondary: #3d4451;
+    --ink-muted: #6b7280;
+    --paper: #fafaf8;
+    --paper-warm: #f5f0e8;
+    --accent: #0ea5e9;
+    --accent-deep: #0369a1;
+    --green: #059669;
+    --amber: #d97706;
+    --red: #dc2626;
+    --rule: #e5e0d8;
+    --code-bg: #1a1f2e;
+    --code-text: #a8d8f0;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body { font-family: 'IBM Plex Sans', sans-serif; background: var(--paper); color: var(--ink); line-height: 1.7; font-size: 16px; }
+
+  .page-wrap { max-width: 920px; margin: 0 auto; padding: 0 2rem; }
+
+  /* Cover */
+  .cover { background: #1a2332; color: white; padding: 7rem 0 5rem; position: relative; overflow: hidden; }
+  .cover::before { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse 70% 60% at 80% 20%, rgba(14,165,233,0.28) 0%, transparent 60%), radial-gradient(ellipse 50% 60% at 10% 80%, rgba(5,150,105,0.18) 0%, transparent 50%); }
+  .cover-inner { position: relative; z-index: 1; }
+  .cover-label { font-family: 'DM Mono', monospace; font-size: 0.7rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--accent); margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.75rem; }
+  .cover-label::before { content: ''; display: block; width: 2rem; height: 1px; background: var(--accent); }
+  .cover h1 { font-family: 'Fraunces', serif; font-size: clamp(2.8rem, 6vw, 5rem); font-weight: 200; line-height: 1.1; letter-spacing: -0.02em; margin-bottom: 0.5rem; }
+  .cover h1 span { font-style: italic; color: var(--accent); font-weight: 300; }
+  .cover-subtitle { font-size: 1.05rem; color: rgba(255,255,255,0.6); font-weight: 300; margin-top: 1rem; max-width: 540px; line-height: 1.7; }
+  .cover-meta { margin-top: 3rem; display: flex; gap: 2.5rem; flex-wrap: wrap; }
+  .cover-meta-item .label { font-family: 'DM Mono', monospace; font-size: 0.65rem; color: rgba(255,255,255,0.35); text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 0.25rem; }
+  .cover-meta-item .value { font-family: 'DM Mono', monospace; font-size: 0.72rem; color: white; }
+  .cover-badge { display: inline-flex; align-items: center; gap: 0.4rem; background: rgba(14,165,233,0.15); border: 1px solid rgba(14,165,233,0.3); color: var(--accent); font-family: 'DM Mono', monospace; font-size: 0.65rem; padding: 0.25rem 0.6rem; border-radius: 3px; letter-spacing: 0.08em; }
+
+  /* TOC */
+  .toc { background: var(--paper-warm); border-top: 3px solid var(--ink); border-bottom: 1px solid var(--rule); padding: 3rem 0; }
+  .toc-title { font-family: 'DM Mono', monospace; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.2em; color: var(--ink-muted); margin-bottom: 1.5rem; }
+  .toc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 0.2rem 2rem; }
+  .toc-item { display: flex; align-items: baseline; gap: 0.5rem; padding: 0.3rem 0; text-decoration: none; color: var(--ink-secondary); font-size: 0.875rem; border-bottom: 1px solid transparent; transition: color 0.15s, border-color 0.15s; }
+  .toc-item:hover { color: var(--accent-deep); border-bottom-color: var(--accent); }
+  .toc-num { font-family: 'DM Mono', monospace; font-size: 0.65rem; color: var(--accent); min-width: 1.8rem; }
+
+  /* Sections */
+  .section { padding: 5rem 0; border-bottom: 1px solid var(--rule); }
+  .section-header { display: flex; align-items: flex-start; gap: 1.5rem; margin-bottom: 2.5rem; }
+  .section-num { font-family: 'Fraunces', serif; font-size: 3.5rem; font-weight: 200; color: var(--rule); line-height: 1; flex-shrink: 0; margin-top: -0.2rem; }
+  h2 { font-family: 'Fraunces', serif; font-size: 1.9rem; font-weight: 400; letter-spacing: -0.02em; line-height: 1.2; }
+  h3 { font-family: 'IBM Plex Sans', sans-serif; font-size: 1.05rem; font-weight: 600; margin: 2.25rem 0 0.75rem; color: var(--ink); }
+  h4 { font-family: 'DM Mono', monospace; font-size: 0.78rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent-deep); margin: 1.5rem 0 0.5rem; }
+  p { color: var(--ink-secondary); margin-bottom: 1rem; max-width: 72ch; }
+  p strong { color: var(--ink); font-weight: 600; }
+
+  /* Code */
+  pre { background: var(--code-bg); border-radius: 6px; padding: 1.25rem 1.5rem; overflow-x: auto; margin: 1.25rem 0; font-family: 'DM Mono', monospace; font-size: 0.78rem; line-height: 1.75; color: var(--code-text); border-left: 3px solid var(--accent); }
+  code { font-family: 'DM Mono', monospace; font-size: 0.82em; background: rgba(14,165,233,0.08); color: var(--accent-deep); padding: 0.1em 0.4em; border-radius: 3px; }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+
+  /* Tables */
+  .table-wrap { overflow-x: auto; margin: 1.5rem 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+  thead tr { background: var(--ink); color: white; }
+  th { font-family: 'DM Mono', monospace; font-size: 0.67rem; text-transform: uppercase; letter-spacing: 0.1em; padding: 0.75rem 1rem; text-align: left; font-weight: 500; }
+  td { padding: 0.7rem 1rem; border-bottom: 1px solid var(--rule); color: var(--ink-secondary); vertical-align: top; line-height: 1.5; }
+  td strong { color: var(--ink); }
+  tr:nth-child(even) td { background: var(--paper-warm); }
+
+  /* Callouts */
+  .callout { border-left: 3px solid var(--accent); background: rgba(14,165,233,0.04); padding: 1rem 1.25rem; margin: 1.5rem 0; border-radius: 0 6px 6px 0; }
+  .callout.warn { border-left-color: var(--amber); background: rgba(217,119,6,0.04); }
+  .callout.note { border-left-color: var(--ink-muted); background: rgba(107,114,128,0.04); }
+  .callout.green { border-left-color: var(--green); background: rgba(5,150,105,0.04); }
+  .callout p { margin: 0; max-width: none; font-size: 0.9rem; }
+  .callout-label { font-family: 'DM Mono', monospace; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.15em; color: var(--accent); margin-bottom: 0.4rem; display: block; }
+  .callout.warn .callout-label { color: var(--amber); }
+  .callout.note .callout-label { color: var(--ink-muted); }
+  .callout.green .callout-label { color: var(--green); }
+
+  /* Feature grid */
+  .feature-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; margin: 1.5rem 0; }
+  .feature-card { background: var(--paper); padding: 1.5rem; }
+  .feature-icon { font-size: 1.5rem; margin-bottom: 0.75rem; display: block; }
+  .feature-title { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.4rem; color: var(--ink); }
+  .feature-desc { font-size: 0.82rem; color: var(--ink-muted); line-height: 1.55; }
+
+  /* Compare columns */
+  .compare-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin: 1.5rem 0; }
+  .compare-col { border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+  .compare-head { padding: 0.75rem 1rem; font-family: 'DM Mono', monospace; font-size: 0.72rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.1em; }
+  .compare-head.bad  { background: rgba(220,38,38,0.1);  color: var(--red); }
+  .compare-head.good { background: rgba(5,150,105,0.1);  color: var(--green); }
+  .compare-head.mid  { background: rgba(14,165,233,0.1); color: var(--accent-deep); }
+  .compare-body { padding: 1rem; font-size: 0.84rem; color: var(--ink-secondary); }
+  .compare-body li { margin-bottom: 0.4rem; list-style: none; padding-left: 1.2rem; position: relative; }
+  .compare-body li::before { content: '→'; position: absolute; left: 0; color: var(--ink-muted); font-size: 0.75rem; }
+
+  /* Flow diagram */
+  .flow { background: var(--code-bg); border-radius: 6px; padding: 1.5rem; margin: 1.5rem 0; font-family: 'DM Mono', monospace; font-size: 0.76rem; line-height: 1.85; color: #8b9ab0; overflow-x: auto; }
+  .flow .hl  { color: var(--accent); }
+  .flow .grn { color: #6ee7b7; }
+  .flow .ylw { color: #fde68a; }
+  .flow .dim { color: #4b5563; }
+  .flow .red { color: #fca5a5; }
+
+  /* Roadmap */
+  .roadmap { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+  .roadmap-phase { border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+  .roadmap-head { padding: 0.6rem 1rem; background: var(--ink); color: white; font-family: 'DM Mono', monospace; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.12em; }
+  .roadmap-body { padding: 0.75rem 1rem; font-size: 0.82rem; color: var(--ink-secondary); }
+  .roadmap-body li { list-style: none; padding: 0.22rem 0 0.22rem 1.2rem; position: relative; }
+  .roadmap-body li::before { content: '·'; position: absolute; left: 0; color: var(--accent); }
+  .roadmap-body li.done { color: var(--green); }
+  .roadmap-body li.done::before { content: '✓'; }
+
+  /* Status rows */
+  .status-row { display: flex; align-items: flex-start; gap: 1rem; padding: 0.85rem 0; border-bottom: 1px solid var(--rule); }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 0.45rem; flex-shrink: 0; }
+  .status-dot.green  { background: var(--green); }
+  .status-dot.amber  { background: var(--amber); }
+  .status-dot.gray   { background: var(--ink-muted); }
+  .status-label { font-weight: 600; font-size: 0.88rem; margin-bottom: 0.2rem; }
+  .status-desc  { font-size: 0.82rem; color: var(--ink-muted); }
+
+  /* Key-value pairs */
+  .kv-grid { display: grid; grid-template-columns: auto 1fr; gap: 0.4rem 1.5rem; margin: 1rem 0; font-size: 0.875rem; }
+  .kv-key { font-family: 'DM Mono', monospace; font-size: 0.75rem; color: var(--accent-deep); padding-top: 0.1rem; white-space: nowrap; }
+  .kv-val { color: var(--ink-secondary); }
+
+  /* Two-col layout for sections */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1.5rem 0; }
+  .two-col > div { border: 1px solid var(--rule); border-radius: 6px; padding: 1.25rem; }
+  .two-col h4 { margin-top: 0; }
+
+  /* Lists */
+  ul.body-list { padding-left: 1.5rem; margin: 0.75rem 0 1rem; }
+  ul.body-list li { color: var(--ink-secondary); margin-bottom: 0.4rem; font-size: 0.9rem; line-height: 1.6; }
+  ul.body-list li strong { color: var(--ink); }
+  ol.body-list { padding-left: 1.5rem; margin: 0.75rem 0 1rem; }
+  ol.body-list li { color: var(--ink-secondary); margin-bottom: 0.4rem; font-size: 0.9rem; line-height: 1.7; }
+
+  /* Footer */
+  .footer { background: var(--ink); color: rgba(255,255,255,0.5); padding: 3rem 0; font-size: 0.82rem; }
+  .footer-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 2rem; }
+  .footer-title { font-family: 'DM Mono', monospace; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.15em; color: rgba(255,255,255,0.25); margin-bottom: 0.75rem; }
+  .footer a { color: var(--accent); text-decoration: none; }
+  .footer a:hover { text-decoration: underline; }
+  .footer-bottom { margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; }
+  .footer-logo { font-family: 'Fraunces', serif; font-size: 1.1rem; font-weight: 300; color: white; font-style: italic; }
+
+  hr.divider { border: none; border-top: 1px solid var(--rule); margin: 2rem 0; }
+
+  /* Style B watermark: shield + ZKPerp, fixed top-right */
+  .wm-corner {
+    position: fixed;
+    top: 1.5rem;
+    right: 2rem;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    opacity: 0.22;
+    pointer-events: none;
+  }
+  .wm-corner svg { width: 32px; height: 38px; }
+  .wm-corner span {
+    font-family: 'Fraunces', serif;
+    font-size: 1.6rem; font-style: italic; font-weight: 300;
+    color: #0369a1; letter-spacing: -0.02em;
+  }
+
+  @media (max-width: 640px) {
+    .compare-row, .two-col, .footer-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Style B watermark: fixed top-right on all pages -->
+<div class="wm-corner">
+  <svg viewBox="0 0 22 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M11 0L22 4.5V13C22 19.5 17 24.5 11 26C5 24.5 0 19.5 0 13V4.5L11 0Z" fill="#0369a1"/>
+    <path d="M7 13L10 16L15 10" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <span>ZKPerp</span>
+</div>
+
+<!-- ═══ COVER ═══════════════════════════════════════════════════════ -->
+<header class="cover">
+  <div class="page-wrap cover-inner">
+    <div class="cover-label">Technical Whitepaper</div>
+    <h1>ZKPerp — <span>Privacy-First</span><br>Perpetual Futures</h1>
+    <p class="cover-subtitle">A zero-knowledge perpetual DEX built natively on the Aleo blockchain. Position sizes, entry prices, leverage, and PnL are cryptographically private by default — hidden from all other market participants, including the protocol itself.</p>
+    <div class="cover-meta">
+      <div class="cover-meta-item"><div class="label">Protocol</div><div class="value">zkperp_btc_v21.aleo · zkperp_eth_v21.aleo · zkperp_sol_v21.aleo</div></div>
+      <div class="cover-meta-item"><div class="label">Network</div><div class="value">Aleo Testnet Beta</div></div>
+      <div class="cover-meta-item"><div class="label">Author</div><div class="value">Henk-Wim de Boer</div></div>
+      <div class="cover-meta-item"><div class="label">Version</div><div class="value">Wave 4 · March 2026</div></div>
+    </div>
+    <div style="margin-top: 2rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+      <span class="cover-badge">● Aleo Testnet Live</span>
+      <span class="cover-badge">● Zero-Knowledge Native</span>
+      <span class="cover-badge">● Leo v2.0</span>
+      <span class="cover-badge">● MIT License</span>
+      <span class="cover-badge">● Chainlink Oracle Relay</span>
+    </div>
+  </div>
+</header>
+
+<!-- ═══ TOC ══════════════════════════════════════════════════════════ -->
+<nav class="toc">
+  <div class="page-wrap">
+    <div class="toc-title">Contents</div>
+    <div class="toc-grid">
+      <a href="#abstract"      class="toc-item"><span class="toc-num">§0</span> Abstract</a>
+      <a href="#problem"       class="toc-item"><span class="toc-num">§1</span> The Privacy Problem in DeFi Trading</a>
+      <a href="#architecture"  class="toc-item"><span class="toc-num">§2</span> System Architecture</a>
+      <a href="#slot-model"    class="toc-item"><span class="toc-num">§3</span> Slot Record Model</a>
+      <a href="#lp-pool"       class="toc-item"><span class="toc-num">§4</span> LP Pool Design &amp; Withdrawal Guard</a>
+      <a href="#liquidation"   class="toc-item"><span class="toc-num">§5</span> Liquidation Architecture</a>
+      <a href="#orders"        class="toc-item"><span class="toc-num">§6</span> Advanced Order Types</a>
+      <a href="#oracle"        class="toc-item"><span class="toc-num">§7</span> Oracle Infrastructure (2-of-3 Chainlink)</a>
+      <a href="#darkpool"      class="toc-item"><span class="toc-num">§8</span> ZK Dark Pool</a>
+      <a href="#usdcx"         class="toc-item"><span class="toc-num">§9</span> USDCx &amp; Cross-Chain Bridge</a>
+      <a href="#limitations"   class="toc-item"><span class="toc-num">§10</span> Known Limitations</a>
+      <a href="#roadmap"       class="toc-item"><span class="toc-num">§11</span> Roadmap</a>
+      <a href="#security"      class="toc-item"><span class="toc-num">§12</span> Security Properties</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ═══ §0 ABSTRACT ════════════════════════════════════════════════ -->
+<section class="section" id="abstract">
+  <div class="page-wrap">
+    <div class="section-header"><span class="section-num">0</span><h2>Abstract</h2></div>
+
+    <p>ZKPerp is a decentralized perpetual futures exchange built natively on the <strong>Aleo blockchain</strong> — a Layer-1 network designed from the ground up around zero-knowledge proofs. Unlike existing perpetual DEX protocols (GMX, dYdX, Hyperliquid), where every position size, entry price, leverage ratio, and PnL figure is permanently visible on-chain, ZKPerp stores all position data in <strong>Aleo private records</strong>: encrypted UTXO-style objects readable only by the position owner's viewing key.</p>
+
+    <p>This is not a privacy layer bolted on top of a transparent system. ZKPerp is built in <strong>Leo</strong>, Aleo's native language, and leverages the platform's fundamental property: the Aleo VM can verify the mathematical correctness of any computation — that a position was opened at a valid price, with valid collateral, producing a valid PnL — entirely through a ZK proof, without the contract ever learning the underlying values.</p>
+
+    <p>This privacy guarantee creates a genuine engineering challenge: how do you liquidate a position you cannot see? How do you reserve pool liquidity against unrealised losses you cannot compute? How do you relay reliable prices from off-chain feeds without a single point of trust? This whitepaper describes the solutions ZKPerp has built and deployed on Aleo testnet to answer each of these questions.</p>
+
+    <div class="feature-grid" style="margin-top: 2rem;">
+      <div class="feature-card">
+        <span class="feature-icon">🔒</span>
+        <div class="feature-title">Position Privacy</div>
+        <div class="feature-desc">Size, entry price, leverage, and PnL are encrypted in Aleo private records. No one except the trader — not the protocol, not the LP, not the oracle — can read position data.</div>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🛡️</span>
+        <div class="feature-title">No Front-Running</div>
+        <div class="feature-desc">Order trigger prices are stored in private <code>PendingOrder</code> records — encrypted at the VM level, readable only by the orchestrator. The public mapping key is a BHP256 hash of the trigger price, so intent stays sealed until execution.</div>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">⚡</span>
+        <div class="feature-title">Up to 20× Leverage</div>
+        <div class="feature-desc">Oracle-based pricing eliminates AMM price impact — positions fill at the mark price, not against a bonding curve. A 0.1% opening fee applies in lieu of a spread.</div>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🤖</span>
+        <div class="feature-title">Fully Automated</div>
+        <div class="feature-desc">Liquidations, limit orders, take profit, and stop loss execute automatically via the keeper bot — the trader never needs to be online after submitting an order.</div>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">📡</span>
+        <div class="feature-title">2-of-3 Oracle Relay</div>
+        <div class="feature-desc">Chainlink price feeds (ETH Mainnet + Arbitrum) are relayed to Aleo via a live 3-relayer threshold signature system. No single point of price manipulation.</div>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🌑</span>
+        <div class="feature-title">ZK Dark Pool</div>
+        <div class="feature-desc">A companion batch-auction dark pool (<code>zkdarkpool_v2.aleo</code>) is deployed on testnet, enabling institutional-grade sealed-bid settlement at uniform clearing prices.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ §1 PROBLEM ══════════════════════════════════════════════════ -->
+<section class="section" id="problem">
+  <div class="page-wrap">
+    <div class="section-header"><span class="section-num">1</span><h2>The Privacy Problem in DeFi Trading</h2></div>
+
+    <p>Every perpetual DEX deployed on an EVM chain exposes all trading activity in full. Position opens, closes, liquidations, and LP deposits are written to public storage and indexed by dozens of data providers within seconds. This is not a minor inconvenience — it is a structural attack surface that fundamentally limits who can trade and on what terms.</p>
+
+    <h3>Concrete Attack Vectors</h3>
+
+    <div class="compare-row">
+      <div class="compare-col">
+        <div class="compare-head bad">Front-Running</div>
+        <div class="compare-body"><ul>
+          <li>A whale opens a $50M long on ETH. Bots see the pending tx in the mempool.</li>
+          <li>MEV bots buy ETH before the tx lands, then sell immediately after — pocketing the price impact at the whale's expense.</li>
+          <li>On GMX this is partially mitigated by execution price limits, but the position itself is instantly public once settled.</li>
+        </ul></div>
+      </div>
+      <div class="compare-col">
+        <div class="compare-head bad">Liquidation Hunting</div>
+        <div class="compare-body"><ul>
+          <li>Every open position's liquidation price is calculable from public data: entry price, collateral, and size are all on-chain.</li>
+          <li>Coordinated traders push price toward known liquidation clusters to trigger cascading liquidations and earn rewards.</li>
+          <li>This is documented behaviour on GMX, dYdX, and Hyperliquid.</li>
+        </ul></div>
+      </div>
+      <div class="compare-col">
+        <div class="compare-head bad">Strategy Copying</div>
+        <div class="compare-body"><ul>
+          <li>Every trade by a skilled trader is visible the moment it settles. Competitors can replicate positions in real-time.</li>
+          <li>Copy-trading platforms are built entirely on this transparency — by design in retail, but a leak for professionals.</li>
+          <li>Institutions cannot trade meaningful size without telegraphing their thesis to the entire market.</li>
+        </ul></div>
+      </div>
+    </div>
+
+    <h3>Why Existing Solutions Are Insufficient</h3>
+    <p>Several projects have attempted to add privacy to EVM perpetual trading. The approaches fall into two categories, both with fundamental weaknesses:</p>
+
+    <ul class="body-list">
+      <li><strong>Encrypted mempools / commit-reveal schemes</strong> — hide order intent briefly during submission, but position data is public once settled. Liquidation hunting still works; strategy copying still works.</li>
+      <li><strong>ZK proof layers on EVM</strong> — require the underlying EVM state to remain transparent (for EVM compatibility). Privacy is optional and per-transaction, not a system default. Position history leaks across time.</li>
+    </ul>
+
+    <h3>The Aleo Difference</h3>
+    <p>Aleo's programming model distinguishes between <strong>public state</strong> (mappings: readable by anyone, stored on-chain) and <strong>private records</strong> (UTXO-style encrypted objects, readable only by the owner's viewing key). ZKPerp stores all position data in private records — privacy is the default, not an option.</p>
+
+    <div class="callout">
+      <span class="callout-label">Fundamental Property</span>
+      <p>In Aleo, a smart contract transition can verify that an operation is mathematically correct — that a position was opened at a valid price with valid collateral — entirely via ZK proof, <em>without the contract ever learning the actual numbers</em>. The verifier learns only that the computation was correct, not what it computed over. This is not straightforward to replicate on EVM-compatible chains, where all contract state is inherently public and privacy requires additional layers that do not share this native property.</p>
+    </div>
+
+    <h3>What Remains Public in ZKPerp</h3>
+    <p>For full transparency, the following information is public on-chain in ZKPerp even with its privacy model:</p>
+    <ul class="body-list">
+      <li><strong>Oracle prices</strong> — required for correct settlement, unavoidably public</li>
+      <li><strong>Pool state</strong> — total liquidity, total LP tokens, aggregate long OI, aggregate short OI</li>
+      <li><strong>Order existence</strong> — a boolean in <code>pending_orders</code> indicating some order is active, but not its trigger price or direction</li>
+      <li><strong>Transaction counts</strong> — the number of positions opened/closed per block (not their contents)</li>
+    </ul>
+    <p>Everything else — position size, entry price, collateral, leverage, direction, PnL, and liquidation level — is encrypted.</p>
+  </div>
+</section>
+
+<!-- ═══ §2 ARCHITECTURE ═════════════════════════════════════════════ -->
+<section class="section" id="architecture">
+  <div class="page-wrap">
+    <div class="section-header"><span class="section-num">2</span><h2>System Architecture</h2></div>
+
+    <p>ZKPerp consists of four integrated layers communicating over authenticated HTTP APIs. Each layer has a clearly defined responsibility and trust boundary.</p>
+
+    <div style="margin: 1.5rem 0;">
+    <svg width="100%" viewBox="0 0 680 580" xmlns="http://www.w3.org/2000/svg" style="font-family: 'IBM Plex Sans', sans-serif;">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M2 1L8 5L2 9" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </marker>
+      </defs>
+
+      <!-- Layer 1: Frontend -->
+      <rect x="40" y="20" width="600" height="96" rx="10" fill="#e6f1fb" stroke="#185fa5" stroke-width="0.75"/>
+      <text x="340" y="46" text-anchor="middle" font-size="13" font-weight="600" fill="#0c447c">Frontend — React / TypeScript / Vercel</text>
+      <text x="340" y="64" text-anchor="middle" font-size="11" fill="#185fa5">zk-perp.vercel.app</text>
+      <!-- sub-boxes -->
+      <rect x="58" y="74" width="176" height="30" rx="5" fill="#b5d4f4" stroke="#185fa5" stroke-width="0.5"/>
+      <text x="146" y="93" text-anchor="middle" font-size="10" fill="#0c447c">TradingWidget · PositionDisplay</text>
+      <rect x="246" y="74" width="188" height="30" rx="5" fill="#b5d4f4" stroke="#185fa5" stroke-width="0.5"/>
+      <text x="340" y="93" text-anchor="middle" font-size="10" fill="#0c447c">UnshieldPanel · DarkpoolPage</text>
+      <rect x="446" y="74" width="176" height="30" rx="5" fill="#b5d4f4" stroke="#185fa5" stroke-width="0.5"/>
+      <text x="534" y="93" text-anchor="middle" font-size="10" fill="#0c447c">LiquidityPage · StatusPage</text>
+
+      <!-- Arrows down to Shield + Explorer -->
+      <line x1="200" y1="116" x2="130" y2="158" stroke="#6b7280" stroke-width="1" marker-end="url(#arr)"/>
+      <text x="148" y="144" font-size="9" fill="#6b7280" text-anchor="middle">requestRecords</text>
+      <line x1="480" y1="116" x2="556" y2="158" stroke="#6b7280" stroke-width="1" marker-end="url(#arr)"/>
+      <text x="536" y="144" font-size="9" fill="#6b7280" text-anchor="middle">fetch mappings</text>
+
+      <!-- Layer 2a: Shield Wallet -->
+      <rect x="40" y="158" width="200" height="64" rx="10" fill="#e1f5ee" stroke="#0f6e56" stroke-width="0.75"/>
+      <text x="140" y="182" text-anchor="middle" font-size="13" font-weight="600" fill="#085041">Shield Wallet</text>
+      <text x="140" y="200" text-anchor="middle" font-size="10" fill="#0f6e56">decrypt · sign · private records</text>
+
+      <!-- Layer 2b: Explorer API -->
+      <rect x="440" y="158" width="200" height="64" rx="10" fill="#e1f5ee" stroke="#0f6e56" stroke-width="0.75"/>
+      <text x="540" y="182" text-anchor="middle" font-size="13" font-weight="600" fill="#085041">Provable Explorer API</text>
+      <text x="540" y="200" text-anchor="middle" font-size="10" fill="#0f6e56">oracle_prices · pool_state</text>
+
+      <!-- Converging arrows to contracts -->
+      <line x1="140" y1="222" x2="240" y2="276" stroke="#6b7280" stroke-width="1" marker-end="url(#arr)"/>
+      <line x1="540" y1="222" x2="440" y2="276" stroke="#6b7280" stroke-width="1" marker-end="url(#arr)"/>
+
+      <!-- Layer 3: Leo Contracts -->
+      <rect x="40" y="276" width="600" height="100" rx="10" fill="#eeedfe" stroke="#534ab7" stroke-width="0.75"/>
+      <text x="340" y="302" text-anchor="middle" font-size="13" font-weight="600" fill="#3c3489">Leo Smart Contracts — Aleo Testnet Beta</text>
+      <!-- contract sub-boxes -->
+      <rect x="58" y="312" width="128" height="48" rx="6" fill="#afa9ec" stroke="#534ab7" stroke-width="0.5"/>
+      <text x="122" y="332" text-anchor="middle" font-size="10" font-weight="600" fill="#26215c">zkperp_btc_v21.aleo</text>
+      <text x="122" y="348" text-anchor="middle" font-size="10" fill="#3c3489">BTC / USDC</text>
+
+      <rect x="202" y="312" width="128" height="48" rx="6" fill="#afa9ec" stroke="#534ab7" stroke-width="0.5"/>
+      <text x="266" y="332" text-anchor="middle" font-size="10" font-weight="600" fill="#26215c">zkperp_eth_v21.aleo</text>
+      <text x="266" y="348" text-anchor="middle" font-size="10" fill="#3c3489">ETH / USDC</text>
+
+      <rect x="346" y="312" width="128" height="48" rx="6" fill="#afa9ec" stroke="#534ab7" stroke-width="0.5"/>
+      <text x="410" y="332" text-anchor="middle" font-size="10" font-weight="600" fill="#26215c">zkperp_sol_v21.aleo</text>
+      <text x="410" y="348" text-anchor="middle" font-size="10" fill="#3c3489">SOL / USDC</text>
+
+      <rect x="490" y="312" width="132" height="48" rx="6" fill="#afa9ec" stroke="#534ab7" stroke-width="0.5"/>
+      <text x="556" y="332" text-anchor="middle" font-size="10" font-weight="600" fill="#26215c">zkdarkpool_v2.aleo</text>
+      <text x="556" y="348" text-anchor="middle" font-size="10" fill="#3c3489">ZK Dark Pool</text>
+
+      <!-- Arrow up: Bot → Contracts -->
+      <line x1="340" y1="436" x2="340" y2="378" stroke="#6b7280" stroke-width="1" marker-end="url(#arr)"/>
+      <text x="352" y="414" font-size="9" fill="#6b7280">update_price · liquidate · execute</text>
+
+      <!-- Layer 4: Orchestrator Bot -->
+      <rect x="40" y="436" width="600" height="64" rx="10" fill="#faeeda" stroke="#854f0b" stroke-width="0.75"/>
+      <text x="340" y="460" text-anchor="middle" font-size="13" font-weight="600" fill="#633806">Orchestrator Bot — Node.js / Render</text>
+      <text x="340" y="478" text-anchor="middle" font-size="10" fill="#854f0b">update_price() · liquidate() · execute_limit_order() · update_net_pnl()</text>
+
+      <!-- Arrow up: Oracle → Bot -->
+      <line x1="340" y1="534" x2="340" y2="502" stroke="#6b7280" stroke-width="1" marker-end="url(#arr)"/>
+      <text x="352" y="522" font-size="9" fill="#6b7280">POST /oracle/update</text>
+
+      <!-- Layer 5: Oracle relay -->
+      <rect x="40" y="534" width="600" height="36" rx="10" fill="#faece7" stroke="#993c1d" stroke-width="0.75"/>
+      <text x="200" y="556" text-anchor="middle" font-size="12" font-weight="600" fill="#712b13">aleo-oracle relay — Render</text>
+      <text x="480" y="552" text-anchor="middle" font-size="10" fill="#993c1d">Relayer A + B + C → Coordinator</text>
+      <text x="480" y="564" text-anchor="middle" font-size="10" fill="#993c1d">2-of-3 quorum · Chainlink ETH + Arbitrum</text>
+    </svg>
+    </div>
+
+    <h3>Deployed Contracts</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Contract</th><th>Market</th><th>Oracle Key</th><th>Pool Key</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td><code>zkperp_btc_v21.aleo</code></td><td><strong>BTC/USDC</strong></td><td><code>0field</code></td><td><code>0field</code></td><td>Live</td></tr>
+          <tr><td><code>zkperp_eth_v21.aleo</code></td><td><strong>ETH/USDC</strong></td><td><code>0field</code></td><td><code>0field</code></td><td>Live</td></tr>
+          <tr><td><code>zkperp_sol_v21.aleo</code></td><td><strong>SOL/USDC</strong></td><td><code>0field</code></td><td><code>0field</code></td><td>Live</td></tr>
+          <tr><td><code>zkdarkpool_v2.aleo</code></td><td><strong>BTC (batch)</strong></td><td>—</td><td>—</td><td>Live (no frontend yet)</td></tr>
+          <tr><td><code>test_usdcx_stablecoin.aleo</code></td><td>Collateral token</td><td>—</td><td>—</td><td>Official Aleo testnet token</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Protocol Parameters</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Parameter</th><th>Value</th><th>Enforced</th></tr></thead>
+        <tbody>
+          <tr><td>Max leverage</td><td>20×</td><td>On-chain assertion in <code>open_position</code></td></tr>
+          <tr><td>Opening fee</td><td>0.10% of position size</td><td>Deducted from collateral in finalize</td></tr>
+          <tr><td>Liquidation reward</td><td>0.50% of position size</td><td>Paid to liquidator in <code>liquidate()</code></td></tr>
+          <tr><td>Liquidation threshold</td><td>margin ratio &lt; 1%</td><td>Verified against live oracle in finalize</td></tr>
+          <tr><td>Max long OI</td><td>50% of total liquidity</td><td>On-chain assertion in <code>open_position</code></td></tr>
+          <tr><td>Max short OI</td><td>50% of total liquidity</td><td>On-chain assertion in <code>open_position</code></td></tr>
+          <tr><td>LP withdrawal buffer</td><td>10% of total liquidity</td><td>On-chain in <code>finalize_remove_liquidity</code></td></tr>
+          <tr><td>Oracle deviation threshold</td><td>1% from on-chain price</td><td>Bot-side check before submitting tx</td></tr>
+          <tr><td>Price decimals</td><td>8 (i.e. $69,000 = 6900000000000u64)</td><td>All Leo math uses integer arithmetic</td></tr>
+          <tr><td>USDC decimals</td><td>6 (1 USDC = 1_000_000u64)</td><td>Matches <code>test_usdcx_stablecoin.aleo</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Leo Language Notes</h3>
+    <p>Leo is a statically-typed, ZK-native language that compiles to Aleo instructions. Two quirks are significant for ZKPerp's implementation:</p>
+    <ul class="body-list">
+      <li><strong>Ternary both-branch evaluation</strong> — Leo evaluates <em>both</em> branches of a ternary before selecting one. This means <code>a > b ? a - b : 0u64</code> will overflow if <code>a &lt; b</code>, even though the false branch would be selected. All subtraction in ZKPerp uses the safe-subtraction pattern: cap first, then subtract.</li>
+      <li><strong>32-call-per-transaction limit</strong> — Aleo limits the number of program calls in a single transaction. This caps bulk operations (e.g. bulk aid distribution in HumanityLink) at 16 recipients per tx, with batching at the orchestrator layer.</li>
+    </ul>
+    <pre><span style="color:#6ee7b7">// ❌ UNSAFE — Leo evaluates a - b even when a &lt;= b</span>
+let result: u64 = a > b ? a - b : 0u64;
+
+<span style="color:#6ee7b7">// ✅ SAFE — cap first, then subtract (always valid)</span>
+let capped_b: u64 = b &lt;= a ? b : a;
+let result: u64 = a - capped_b;</pre>
+  </div>
+</section>
+
+<!-- ═══ §3 SLOT MODEL ═══════════════════════════════════════════════ -->
+<section class="section" id="slot-model">
+  <div class="page-wrap">
+    <div class="section-header"><span class="section-num">3</span><h2>Slot Record Model</h2></div>
+
+    <p>Aleo's UTXO record model creates a unique UX problem: every blockchain operation that produces output creates a new record in the wallet. Without mitigation, a trader who makes N round-trip trades accumulates 2N records — one <code>PositionSlot</code> and one <code>LiquidationAuth</code> per trade. The wallet has no reliable way to know which records are spent without querying the chain, so on every session load it must request decryption of all N records, triggering N Shield Wallet approval popups. At 10 trades this is annoying; at 50 trades it is completely unusable.</p>
+
+    <h3>Root Cause: UTXO Accumulation</h3>
+    <p>Aleo records are consumed and reissued — they cannot be modified in place. Every <code>open_position</code> creates two new records (PositionSlot + LiquidationAuth). Every <code>close_position</code> consumes the PositionSlot but returns nothing, leaving the wallet to infer from the <code>closed_positions</code> mapping that the record is spent. The wallet's record scanner sees a growing list of ciphertexts and must decrypt all of them to find the live ones.</p>
+
+    <h3>Solution: Persistent Fixed-Count Slots (v12+)</h3>
+    <p>ZKPerp v12 introduced the slot model: each trader initialises exactly <strong>three records</strong> once, which persist for the lifetime of their account. The record count never grows.</p>
+
+    <div class="two-col">
+      <div>
+        <h4>Records Issued at Initialization</h4>
+        <ul class="body-list">
+          <li><strong>PositionSlot (slot_id: 0)</strong> — Long position slot</li>
+          <li><strong>PositionSlot (slot_id: 1)</strong> — Short position slot</li>
+          <li><strong>LPSlot</strong> — Liquidity provider position, always merged into existing record</li>
+        </ul>
+      </div>
+      <div>
+        <h4>Invariant Maintained</h4>
+        <p style="font-size:0.88rem; color:var(--ink-secondary);">Every transition that touches a slot is exactly <strong>one slot in, one slot out</strong>. The record is technically new each time (Aleo's UTXO model requires this) but the count stays constant. After 1000 trades, the wallet holds exactly 3 records — the same as day one.</p>
+      </div>
+    </div>
+
+    <div style="margin:1.5rem 0;">
+    <svg width="100%" viewBox="0 0 680 300" xmlns="http://www.w3.org/2000/svg" style="font-family:monospace;">
+      <defs><marker id="a1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+      <!-- column headers -->
+      <text x="170" y="22" text-anchor="middle" font-size="11" font-weight="600" fill="#059669">Transition</text>
+      <text x="380" y="22" text-anchor="middle" font-size="11" font-weight="600" fill="#0369a1">Input (consumed)</text>
+      <text x="580" y="22" text-anchor="middle" font-size="11" font-weight="600" fill="#7c3aed">Output (reissued)</text>
+      <line x1="40" y1="28" x2="640" y2="28" stroke="#e5e0d8" stroke-width="0.75"/>
+      <!-- Row 1: initialize_slots -->
+      <rect x="40" y="38" width="260" height="38" rx="6" fill="#d1fae5" stroke="#059669" stroke-width="0.5"/>
+      <text x="170" y="61" text-anchor="middle" font-size="11" font-weight="600" fill="#065f46">initialize_slots()</text>
+      <text x="380" y="61" text-anchor="middle" font-size="11" fill="#6b7280">— no inputs —</text>
+      <rect x="310" y="38" width="330" height="38" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.5"/>
+      <text x="475" y="55" text-anchor="middle" font-size="10" fill="#4c1d95">PositionSlot(0) · PositionSlot(1) · LPSlot</text>
+      <text x="475" y="70" text-anchor="middle" font-size="10" fill="#6d28d9">all is_open: false, data zeroed</text>
+      <!-- Row 2: open_position -->
+      <rect x="40" y="90" width="260" height="50" rx="6" fill="#d1fae5" stroke="#059669" stroke-width="0.5"/>
+      <text x="170" y="113" text-anchor="middle" font-size="11" font-weight="600" fill="#065f46">open_position()</text>
+      <text x="170" y="130" text-anchor="middle" font-size="10" fill="#059669">→ creates 2 records</text>
+      <rect x="310" y="90" width="150" height="50" rx="6" fill="#dbeafe" stroke="#1d4ed8" stroke-width="0.5"/>
+      <text x="385" y="113" text-anchor="middle" font-size="10" fill="#1e3a8a">PositionSlot</text>
+      <text x="385" y="130" text-anchor="middle" font-size="10" fill="#1d4ed8">is_open: false ✓</text>
+      <rect x="470" y="90" width="170" height="24" rx="5" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.5"/>
+      <text x="555" y="106" text-anchor="middle" font-size="10" fill="#4c1d95">PositionSlot (is_open: true)</text>
+      <rect x="470" y="118" width="170" height="22" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="0.5"/>
+      <text x="555" y="133" text-anchor="middle" font-size="10" fill="#92400e">LiquidationAuth → orchestrator</text>
+      <!-- Row 3: close_position -->
+      <rect x="40" y="156" width="260" height="38" rx="6" fill="#d1fae5" stroke="#059669" stroke-width="0.5"/>
+      <text x="170" y="179" text-anchor="middle" font-size="11" font-weight="600" fill="#065f46">close_position()</text>
+      <rect x="310" y="156" width="150" height="38" rx="6" fill="#dbeafe" stroke="#1d4ed8" stroke-width="0.5"/>
+      <text x="385" y="173" text-anchor="middle" font-size="10" fill="#1e3a8a">PositionSlot</text>
+      <text x="385" y="188" text-anchor="middle" font-size="10" fill="#1d4ed8">is_open: true ✓</text>
+      <rect x="470" y="156" width="170" height="38" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.5"/>
+      <text x="555" y="173" text-anchor="middle" font-size="10" fill="#4c1d95">PositionSlot</text>
+      <text x="555" y="188" text-anchor="middle" font-size="10" fill="#6d28d9">is_open: false, data zeroed</text>
+      <!-- Row 4: add_liquidity -->
+      <rect x="40" y="210" width="260" height="38" rx="6" fill="#d1fae5" stroke="#059669" stroke-width="0.5"/>
+      <text x="170" y="233" text-anchor="middle" font-size="11" font-weight="600" fill="#065f46">add_liquidity()</text>
+      <rect x="310" y="210" width="150" height="38" rx="6" fill="#dbeafe" stroke="#1d4ed8" stroke-width="0.5"/>
+      <text x="385" y="227" text-anchor="middle" font-size="10" fill="#1e3a8a">LPSlot</text>
+      <text x="385" y="242" text-anchor="middle" font-size="10" fill="#1d4ed8">existing amount</text>
+      <rect x="470" y="210" width="170" height="38" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.5"/>
+      <text x="555" y="227" text-anchor="middle" font-size="10" fill="#4c1d95">LPSlot</text>
+      <text x="555" y="242" text-anchor="middle" font-size="10" fill="#6d28d9">existing + new_lp_tokens</text>
+      <!-- footer note -->
+      <text x="340" y="278" text-anchor="middle" font-size="10" fill="#6b7280">Every transition: one slot in → one slot out. Wallet always holds exactly 3 records.</text>
+    </svg>
+    </div>
+
+    <h3>Slot Constraint and Enforcement</h3>
+    <p>A slot can only hold one position at a time. The Leo contract asserts <code>!slot.is_open</code> inside <code>open_position</code> and <code>place_limit_order</code> — if the slot is already open, the transaction reverts. A long slot (slot_id 0) cannot hold two simultaneous long positions. This is a deliberate design constraint that trades multi-position complexity for the UX guarantee of fixed record count.</p>
+
+    <h3>Spent Record Detection</h3>
+    <p>Before v12, the frontend used <code>localStorage</code> to track which records were spent — fragile and browser-dependent. v12 replaced this with the <code>closed_positions</code> on-chain mapping: a <code>field => bool</code> that is set when a position is closed or liquidated. The frontend now pre-filters records by querying this mapping before requesting wallet decryption, reducing popups to only genuinely active records.</p>
+
+    <div class="callout green">
+      <span class="callout-label">UX Result</span>
+      <p>After 1,000 trades, the wallet holds 3 records. Every session requires clicking <strong>Unshield All Private Info</strong> once — one Shield Wallet approval — to decrypt all 3 slots simultaneously. The UX is identical on day one and year five.</p>
+    </div>
+
+    <h3>Onboarding Flow</h3>
+    <ol class="body-list">
+      <li>New trader visits Trade page → sees <strong>Initialize Account</strong> modal</li>
+      <li>Single wallet approval → <code>initialize_slots()</code> mints 3 slot records on-chain</li>
+      <li>On next visit: click <strong>🛡 Unshield All Private Info</strong> → one approval decrypts all slots</li>
+      <li>USDCx balance, positions, and LP amount are now visible in the UI</li>
+      <li>Trading and LP operations pass the slot plaintext as the first argument to each transition</li>
+      <li>Every subsequent session: same 3 records, same single approval</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ═══ §4 LP POOL ══════════════════════════════════════════════════ -->
+<section class="section" id="lp-pool">
+  <div class="page-wrap">
+    <div class="section-header"><span class="section-num">4</span><h2>LP Pool Design &amp; Withdrawal Guard</h2></div>
+
+    <p>The ZKPerp liquidity pool is a <strong>single-sided USDC pool</strong>. LPs deposit USDCx and receive proportional LP tokens. The pool acts as the direct counterparty to all traders — when a trader profits, the pool pays; when a trader loses, the pool earns. There is no impermanent loss from token price divergence because the pool holds only one asset.</p>
+
+    <h3>LP Token Minting and Redemption</h3>
+    <p>LP tokens are minted on deposit and burned on withdrawal using a standard proportional formula with a guard against first-deposit division by zero:</p>
+    <pre>// Minting
+lp_to_mint = deposit_amount × (total_lp_tokens + 1) / (total_liquidity + 1)
+
+// Redemption
+usdc_out = amount_to_burn × total_liquidity / (total_lp_tokens + 1)</pre>
+    <p>For the first LP depositor, <code>lp_to_mint ≈ deposit_amount</code>, establishing 1:1 token-to-USDC parity at inception. Subsequent depositors receive slightly fewer LP tokens per USDC if the pool has grown from accumulated fees or trader losses — the standard AMM dilution protection.</p>
+
+    <h3>The Withdrawal Guard — Full Formula</h3>
+    <p>This is the core LP protection mechanism. Available withdrawable liquidity is not simply "my pro-rata share of the pool". It must account for four components, all enforced on-chain inside <code>finalize_remove_liquidity</code>:</p>
+    <pre>available = total_liquidity
+          − long_open_interest      // full notional locked, not netted
+          − short_open_interest     // full notional locked, not netted
+          − pnl_liability           // max(net_unrealised_pnl, 0)
+          − safety_buffer           // 10% × total_liquidity</pre>
+
+    <p>A withdrawal that would leave the pool below this threshold is rejected by the Leo contract — the transaction reverts with a failed assertion. The LP's tokens are not consumed.</p>
+
+    <h3>Example with Numbers</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Component</th><th>Value</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>Total liquidity</td><td>$21.00</td><td>$20 deposit + $1 collected collateral</td></tr>
+          <tr><td>Long open interest</td><td>$5.00</td><td>One active long position</td></tr>
+          <tr><td>Short open interest</td><td>$0.00</td><td>No active shorts</td></tr>
+          <tr><td>Net unrealised PnL</td><td>+$0.50</td><td>Trader is 10% up — real liability</td></tr>
+          <tr><td>Safety buffer (10%)</td><td>$2.10</td><td>10% of $21.00</td></tr>
+          <tr><td><strong>Min remaining</strong></td><td><strong>$7.60</strong></td><td>5.00 + 0.00 + 0.50 + 2.10</td></tr>
+          <tr><td><strong>Max withdrawable</strong></td><td><strong>$13.40</strong></td><td>21.00 − 7.60</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Asymmetric PnL Treatment</h3>
+    <p>The most important design decision in the pool: unrealised PnL is treated <strong>asymmetrically</strong>. This mirrors the approach in GMX V2 and is the correct conservative design.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Trader State</th><th>Pool Treatment</th><th>LP Withdrawal Capacity</th></tr></thead>
+        <tbody>
+          <tr><td>Traders up +10%</td><td>Real liability — reserved as <code>pnl_liability</code></td><td style="color:var(--red)">Decreases</td></tr>
+          <tr><td>Traders flat</td><td>Zero liability</td><td>Unchanged (baseline)</td></tr>
+          <tr><td>Traders down −10%</td><td>Floored at zero — not a real asset yet</td><td>Unchanged — not increased</td></tr>
+          <tr><td>Position closed at profit</td><td>Realised — pool pays USDC to trader</td><td>Decreases by payout amount</td></tr>
+          <tr><td>Position closed at loss</td><td>Realised — pool earns collateral</td><td>Increases as total_liquidity grows</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>When traders are losing, the pool holds paper gains — but these are not yet a real asset. Prices can recover before positions close. If LPs could withdraw based on paper gains and the market then reversed, the pool could become undercollateralised. The floor at zero prevents this:</p>
+    <pre>let pnl_liability: u64 = net_pnl > 0i64 ? net_pnl as u64 : 0u64;</pre>
+
+    <h3>Why Long OI and Short OI Are Not Netted</h3>
+    <p>Both sides are locked independently and summed — they do <em>not</em> net off against each other. A book with $5M long and $5M short appears balanced on paper, but in a correlated market shock both sides can move simultaneously against the pool. A sudden 30% ETH drop liquidates longs and potentially forces the pool to cover both sides' losses. Netting would dramatically understate the true capital requirement. The full <code>long_oi + short_oi</code> lock is the conservative, correct approach — adopted by all professional perp DEX designs.</p>
+
+    <h3>The 10% Safety Buffer</h3>
+    <p>The buffer (<code>WITHDRAWAL_BUFFER_BPS = 100_000</code> out of 1,000,000) serves three purposes:</p>
+    <ul class="body-list">
+      <li><strong>Oracle lag</strong> — the on-chain price may be up to one oracle tick behind the real market. The buffer absorbs the gap between a price move and the next oracle update.</li>
+      <li><strong>Liquidation shortfall</strong> — if a position is liquidated but the trader's collateral is insufficient to cover the loss (extreme price spike), the pool absorbs the deficit. The buffer is the first line of defence.</li>
+      <li><strong>Withdrawal race conditions</strong> — if multiple LPs attempt to withdraw simultaneously near the limit, the buffer prevents a race where the last withdrawal leaves the pool insolvent.</li>
+    </ul>
+
+    <h3>Trusted PnL Aggregation</h3>
+    <p>Because position data is stored in private Aleo records, the Leo contract cannot compute unrealised PnL on-chain by itself — it cannot read the position data. The orchestrator bot holds <code>LiquidationAuth</code> records for every open position (these contain the same position fields) and computes net PnL off-chain on each oracle tick:</p>
+    <pre>// Orchestrator off-chain computation (Node.js)
+net_pnl = Σ positions {
+  if is_long:  pnl_i = size × (current_price − entry_price) / entry_price
+  if is_short: pnl_i = size × (entry_price − current_price) / entry_price
+}
+
+// Submitted on-chain
+await updateNetPnl(net_pnl)  // calls update_net_pnl(net_pnl: i64) on Leo contract</pre>
+
+    <div class="callout warn">
+      <span class="callout-label">Known Limitation — Trusted Aggregator</span>
+      <p>The on-chain contract can verify only that the caller is the registered orchestrator (<code>assert_eq(caller, orchestrator)</code>). It cannot verify the mathematical correctness of the submitted <code>net_pnl</code>. This is documented honestly. The failure mode is safe: if the orchestrator is offline and never submits PnL, <code>Mapping::get_or_use(0i64)</code> defaults to zero, enforcing the conservative baseline (<code>full OI + safety buffer</code>) — the pool cannot be over-withdrawn. The path to trustless PnL is a ZK proof over <code>LiquidationAuth</code> records — a future research direction.</p>
+    </div>
+
+    <h3>Comparison with GMX V2 and Competitors</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Property</th><th>GMX V2</th><th>dYdX v4</th><th>Hyperliquid</th><th>ZKPerp</th></tr></thead>
+        <tbody>
+          <tr><td>Position storage</td><td>Public EVM mappings</td><td>Off-chain order book</td><td>Off-chain HLP vault</td><td><strong>Private Aleo records</strong></td></tr>
+          <tr><td>Position privacy</td><td>None</td><td>None</td><td>None</td><td><strong>Full encryption</strong></td></tr>
+          <tr><td>PnL computation</td><td>On-chain, trustless</td><td>Off-chain engine</td><td>Off-chain engine</td><td>Orchestrator (trusted)</td></tr>
+          <tr><td>OI netting</td><td>Reserve factor</td><td>N/A (CLOB)</td><td>N/A (vault)</td><td>No netting — full lock</td></tr>
+          <tr><td>Liquidity type</td><td>GM pools (2-token)</td><td>Insurance fund</td><td>HLP vault (fees)</td><td>Single-sided USDC</td></tr>
+          <tr><td>Withdrawal guard</td><td><code>MAX_PNL_FACTOR</code></td><td>N/A</td><td>N/A</td><td>OI + PnL + 10% buffer</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ §5 LIQUIDATION ══════════════════════════════════════════════ -->
+<section class="section" id="liquidation">
+  <div class="page-wrap">
+    <div class="section-header"><span class="section-num">5</span><h2>Liquidation Architecture</h2></div>
+
+    <p>Liquidation is the hardest unsolved problem in any privacy-preserving perpetual DEX. The fundamental conflict: positions are private records readable only by their owner, yet a liquidator must read the position to assess its health and must pass the record into the Leo transition to consume it. Solving this without compromising trader privacy requires a carefully designed dual-record architecture.</p>
+
+    <h3>Why View Keys Are Not Enough</h3>
+    <p>An Aleo view key lets the holder decrypt and <em>read</em> records — but not <em>spend</em> them. Passing a record into a Leo transition requires consuming it on-chain, which requires the record owner's private key. Even if the orchestrator could read the trader's position via view key, it could not pass that record into <code>liquidate()</code> — the transaction would be invalid because the orchestrator does not own the record.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Action</th><th>Who Calls</th><th>Owns the Record?</th><th>Works?</th></tr></thead>
+        <tbody>
+          <tr><td><code>close_position(slot)</code></td><td>Trader</td><td>Yes — it's their slot</td><td>✅ Yes</td></tr>
+          <tr><td><code>liquidate(slot)</code> (view key only)</td><td>Orchestrator</td><td>No — trader owns slot</td><td>❌ No</td></tr>
+          <tr><td><code>liquidate(liq_auth)</code> (dual record)</td><td>Orchestrator</td><td>Yes — orchestrator owns LiquidationAuth</td><td>✅ Yes</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Dual-Record Architecture</h3>
+    <p>Every <code>open_position()</code> call creates exactly two private records simultaneously in a single atomic transaction:</p>
+
+    <div style="margin:1.5rem 0;">
+    <svg width="100%" viewBox="0 0 680 260" xmlns="http://www.w3.org/2000/svg" style="font-family:monospace;">
+      <defs><marker id="a2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+      <!-- Title -->
+      <text x="340" y="22" text-anchor="middle" font-size="12" font-weight="600" fill="#3d4451">open_position() — one transaction, two private records</text>
+      <!-- Record 1: PositionSlot -->
+      <rect x="40" y="36" width="270" height="130" rx="8" fill="#d1fae5" stroke="#059669" stroke-width="0.75"/>
+      <text x="175" y="56" text-anchor="middle" font-size="11" font-weight="600" fill="#065f46">Record 1: PositionSlot</text>
+      <text x="175" y="72" text-anchor="middle" font-size="10" fill="#059669">owner: TRADER</text>
+      <line x1="60" y1="80" x2="290" y2="80" stroke="#059669" stroke-width="0.5"/>
+      <text x="70" y="97" font-size="10" fill="#065f46">position_id · slot_id · is_open: true</text>
+      <text x="70" y="113" font-size="10" fill="#065f46">is_long · size_usdc · collateral_usdc</text>
+      <text x="70" y="129" font-size="10" fill="#065f46">entry_price · open_block</text>
+      <!-- Record 2: LiquidationAuth -->
+      <rect x="370" y="36" width="270" height="130" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="0.75"/>
+      <text x="505" y="56" text-anchor="middle" font-size="11" font-weight="600" fill="#92400e">Record 2: LiquidationAuth</text>
+      <text x="505" y="72" text-anchor="middle" font-size="10" fill="#d97706">owner: ORCHESTRATOR</text>
+      <line x1="390" y1="80" x2="620" y2="80" stroke="#d97706" stroke-width="0.5"/>
+      <text x="400" y="97" font-size="10" fill="#92400e">position_id (same ID)</text>
+      <text x="400" y="113" font-size="10" fill="#92400e">is_long · size_usdc · collateral_usdc</text>
+      <text x="400" y="129" font-size="10" fill="#92400e">entry_price · open_block</text>
+      <!-- Arrows down -->
+      <line x1="175" y1="166" x2="175" y2="205" stroke="#059669" stroke-width="1" marker-end="url(#a2)"/>
+      <line x1="505" y1="166" x2="505" y2="205" stroke="#d97706" stroke-width="1" marker-end="url(#a2)"/>
+      <!-- Bottom actions -->
+      <rect x="40" y="206" width="270" height="40" rx="6" fill="#d1fae5" stroke="#059669" stroke-width="0.5"/>
+      <text x="175" y="222" text-anchor="middle" font-size="10" font-weight="600" fill="#065f46">close_position · place_take_profit</text>
+      <text x="175" y="238" text-anchor="middle" font-size="10" fill="#059669">Trader calls, any time</text>
+      <rect x="370" y="206" width="270" height="40" rx="6" fill="#fef3c7" stroke="#d97706" stroke-width="0.5"/>
+      <text x="505" y="222" text-anchor="middle" font-size="10" font-weight="600" fill="#92400e">liquidate(liq_auth)</text>
+      <text x="505" y="238" text-anchor="middle" font-size="10" fill="#d97706">Bot calls when margin_ratio &lt; 1%</text>
+    </svg>
+    </div>
+
+    <p>The orchestrator is a single registered wallet address stored on-chain in the <code>roles</code> mapping. It owns the <code>LiquidationAuth</code> record — a mirror of the position data — and can pass it into <code>liquidate()</code> without ever touching or seeing the trader's <code>PositionSlot</code>.</p>
+
+    <h3>Liquidation Formula</h3>
+    <pre>// Margin remaining at current oracle price
+pnl = is_long
+  ? size × (oracle_price − entry_price) / entry_price
+  : size × (entry_price − oracle_price) / entry_price
+
+remaining_margin = collateral + pnl  // pnl may be negative
+
+// Liquidation condition (verified on-chain in finalize_liquidate)
+margin_ratio = remaining_margin / size × 100
+assert(margin_ratio &lt; 1)  // reverts if position is healthy</pre>
+
+    <h3>Liquidation Flow End-to-End</h3>
+    <ol class="body-list">
+      <li>Orchestrator bot polls Provable Record Scanner API for <code>LiquidationAuth</code> records owned by the orchestrator wallet</li>
+      <li>For each record, bot computes <code>margin_ratio</code> using the current on-chain oracle price</li>
+      <li>If <code>margin_ratio &lt; 1%</code>, bot submits <code>liquidate(liq_auth)</code> transaction</li>
+      <li><code>finalize_liquidate</code> re-verifies the margin condition against the live oracle mapping — the bot cannot fabricate or front-run this check</li>
+      <li>On success: <code>LiquidationAuth</code> consumed; trader's position mapping entry cleared; fresh empty <code>PositionSlot</code> atomically returned to trader's address; 0.5% reward paid to liquidator; remaining collateral returned to LP pool</li>
+      <li>Trader's wallet count is unchanged: they still hold 3 records (now with empty position slots)</li>
+    </ol>
+
+    <h3>Replay and Double-Execution Prevention</h3>
+    <p>The <code>active_position_ids</code> mapping stores a <code>field => bool</code> for every live position ID. Both <code>close_position</code> and <code>liquidate</code> assert that the position ID is active before processing, then clear it atomically. This prevents:</p>
+    <ul class="body-list">
+      <li><strong>Double-liquidation</strong> — a position that was already liquidated cannot be liquidated again, even if a stale <code>LiquidationAuth</code> record is replayed</li>
+      <li><strong>Close + liquidate race</strong> — if a trader closes their position and a liquidation tx lands in the same block, only one will succeed; the other will revert on the mapping check</li>
+      <li><strong>Stale TP/SL execution</strong> — <code>execute_take_profit</code> and <code>execute_stop_loss</code> also check <code>active_position_ids</code>, preventing execution of orders for positions that were already closed or liquidated</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ═══ §6 ORDERS ═══════════════════════════════════════════════════ -->
+<section class="section" id="orders">
+  <div class="page-wrap">
+    <div class="section-header"><span class="section-num">6</span><h2>Advanced Order Types</h2></div>
+
+    <p>ZKPerp supports three advanced order types beyond spot market open/close. All follow the same <strong>keeper-executed pattern</strong>: the trader submits order parameters, the orchestrator receives a <code>PendingOrder</code> private record, monitors the oracle, and submits execution when the trigger condition is met on-chain. The trader never needs to be online after placing an order.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Order Type</th><th>Purpose</th><th>Long Trigger</th><th>Short Trigger</th><th>Fill Price</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Limit Order</strong></td><td>Open at a better price than market</td><td><code>oracle ≤ trigger</code></td><td><code>oracle ≥ trigger</code></td><td>Trigger price (limit guarantee)</td></tr>
+          <tr><td><strong>Take Profit</strong></td><td>Close profitable position at target</td><td><code>oracle ≥ trigger</code></td><td><code>oracle ≤ trigger</code></td><td>Trigger price (limit guarantee)</td></tr>
+          <tr><td><strong>Stop Loss</strong></td><td>Cap downside loss at threshold</td><td><code>oracle ≤ trigger</code></td><td><code>oracle ≥ trigger</code></td><td>Oracle at execution time (market)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Privacy Model for Orders</h3>
+    <p>Order trigger prices, sizes, and directions are <em>never published on-chain before execution</em>. The only on-chain footprint of a pending order is a single boolean in the <code>pending_orders</code> mapping, keyed by a BHP256 commitment hash:</p>
+    <pre>struct OrderIdInput {
+  trader: address,
+  nonce: field,
+  trigger_price: u64,
+}
+order_id = BHP256::hash_to_field(OrderIdInput { trader, nonce, trigger_price })
+
+// On-chain: only this is stored
+pending_orders: field => bool   // true = order active, null = executed/cancelled</pre>
+    <p>An observer can see that <em>some</em> order exists, but cannot determine the trigger price, direction, or size from the commitment hash. The <code>PendingOrder</code> record itself is sent to the orchestrator as a private record — only the orchestrator can read or consume it.</p>
+
+    <h3>Order Flows</h3>
+    <div style="margin:1.5rem 0;">
+    <svg width="100%" viewBox="0 0 680 310" xmlns="http://www.w3.org/2000/svg" style="font-family:monospace;">
+      <defs><marker id="a3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+      <!-- Column headers -->
+      <text x="80"  y="18" text-anchor="middle" font-size="11" font-weight="600" fill="#3d4451">Trader</text>
+      <text x="340" y="18" text-anchor="middle" font-size="11" font-weight="600" fill="#3d4451">On-chain (Leo)</text>
+      <text x="590" y="18" text-anchor="middle" font-size="11" font-weight="600" fill="#3d4451">Orchestrator Bot</text>
+      <line x1="40" y1="24" x2="640" y2="24" stroke="#e5e0d8" stroke-width="0.75"/>
+
+      <!-- LIMIT ORDER -->
+      <text x="340" y="44" text-anchor="middle" font-size="11" font-weight="600" fill="#0369a1">Limit Order Flow</text>
+      <!-- place_limit_order -->
+      <rect x="40" y="52" width="160" height="36" rx="5" fill="#dbeafe" stroke="#1d4ed8" stroke-width="0.5"/>
+      <text x="120" y="68" text-anchor="middle" font-size="10" font-weight="600" fill="#1e3a8a">place_limit_order()</text>
+      <text x="120" y="82" text-anchor="middle" font-size="9" fill="#1d4ed8">trigger $90k · margin locked</text>
+      <line x1="200" y1="70" x2="258" y2="70" stroke="#6b7280" stroke-width="1" marker-end="url(#a3)"/>
+      <rect x="260" y="52" width="160" height="36" rx="5" fill="#f0f9ff" stroke="#0369a1" stroke-width="0.5"/>
+      <text x="340" y="68" text-anchor="middle" font-size="9" fill="#0369a1">pending_orders[id] = true</text>
+      <text x="340" y="82" text-anchor="middle" font-size="9" fill="#0369a1">slot reserved (is_open:true)</text>
+      <line x1="420" y1="70" x2="478" y2="70" stroke="#6b7280" stroke-width="1" marker-end="url(#a3)"/>
+      <rect x="480" y="52" width="155" height="36" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="0.5"/>
+      <text x="557" y="68" text-anchor="middle" font-size="9" fill="#92400e">PendingOrder record</text>
+      <text x="557" y="82" text-anchor="middle" font-size="9" fill="#d97706">type:0 · trigger:$90k</text>
+      <!-- oracle drops label -->
+      <text x="340" y="108" text-anchor="middle" font-size="9" fill="#6b7280" font-style="italic">oracle drops to $90k …</text>
+      <!-- execute_limit_order -->
+      <line x1="557" y1="114" x2="422" y2="126" stroke="#d97706" stroke-width="1" marker-end="url(#a3)"/>
+      <rect x="260" y="120" width="160" height="44" rx="5" fill="#f0f9ff" stroke="#0369a1" stroke-width="0.5"/>
+      <text x="340" y="136" text-anchor="middle" font-size="9" font-weight="600" fill="#0369a1">execute_limit_order()</text>
+      <text x="340" y="150" text-anchor="middle" font-size="9" fill="#0369a1">oracle(90k)≤trigger(90k) ✓</text>
+      <text x="340" y="162" text-anchor="middle" font-size="9" fill="#6b7280">pending[id] = null</text>
+      <line x1="260" y1="142" x2="202" y2="142" stroke="#059669" stroke-width="1" marker-end="url(#a3)"/>
+      <rect x="40" y="128" width="160" height="36" rx="5" fill="#d1fae5" stroke="#059669" stroke-width="0.5"/>
+      <text x="120" y="144" text-anchor="middle" font-size="9" font-weight="600" fill="#065f46">filled PositionSlot</text>
+      <text x="120" y="158" text-anchor="middle" font-size="9" fill="#059669">entry_price: $90k (limit)</text>
+
+      <line x1="340" y1="178" x2="340" y2="192" stroke="#e5e0d8" stroke-width="1" stroke-dasharray="4"/>
+
+      <!-- TP / SL FLOW -->
+      <text x="340" y="210" text-anchor="middle" font-size="11" font-weight="600" fill="#7c3aed">Take Profit / Stop Loss Flow</text>
+      <!-- place_take_profit -->
+      <rect x="40" y="218" width="160" height="36" rx="5" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.5"/>
+      <text x="120" y="234" text-anchor="middle" font-size="9" font-weight="600" fill="#4c1d95">place_take_profit()</text>
+      <text x="120" y="248" text-anchor="middle" font-size="9" fill="#7c3aed">trigger: $100k</text>
+      <line x1="200" y1="236" x2="258" y2="236" stroke="#6b7280" stroke-width="1" marker-end="url(#a3)"/>
+      <rect x="260" y="218" width="160" height="36" rx="5" fill="#f5f3ff" stroke="#7c3aed" stroke-width="0.5"/>
+      <text x="340" y="234" text-anchor="middle" font-size="9" fill="#7c3aed">pending_orders[id] = true</text>
+      <text x="340" y="248" text-anchor="middle" font-size="9" fill="#6b7280">slot unchanged</text>
+      <line x1="420" y1="236" x2="478" y2="236" stroke="#6b7280" stroke-width="1" marker-end="url(#a3)"/>
+      <rect x="480" y="218" width="155" height="36" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="0.5"/>
+      <text x="557" y="234" text-anchor="middle" font-size="9" fill="#92400e">PendingOrder record</text>
+      <text x="557" y="248" text-anchor="middle" font-size="9" fill="#d97706">type:1 · trigger:$100k</text>
+      <!-- oracle rises -->
+      <text x="340" y="272" text-anchor="middle" font-size="9" fill="#6b7280" font-style="italic">oracle rises to $104k …</text>
+      <!-- execute_take_profit -->
+      <line x1="557" y1="278" x2="422" y2="288" stroke="#d97706" stroke-width="1" marker-end="url(#a3)"/>
+      <rect x="260" y="282" width="160" height="20" rx="5" fill="#f5f3ff" stroke="#7c3aed" stroke-width="0.5"/>
+      <text x="340" y="295" text-anchor="middle" font-size="9" fill="#7c3aed">PnL at $100k · pending[id]=null</text>
+      <line x1="260" y1="292" x2="202" y2="292" stroke="#059669" stroke-width="1" marker-end="url(#a3)"/>
+      <rect x="40" y="282" width="160" height="20" rx="5" fill="#d1fae5" stroke="#059669" stroke-width="0.5"/>
+      <text x="120" y="295" text-anchor="middle" font-size="9" fill="#065f46">empty slot + USDC payout</text>
+    </svg>
+    </div>
+
+    <h3>TP vs SL Execution Price — Why They Differ</h3>
+    <p>Take Profit fills at the <strong>trigger price</strong> (limit semantics): the trader sets a target and gets exactly that price regardless of where the oracle is at the moment of execution. Stop Loss fills at the <strong>oracle price at execution time</strong> (market semantics): the trigger activates the close, but the actual fill is at whatever price the keeper submits the transaction at. Speed of execution matters more than exact price when stopping losses.</p>
+
+    <div class="two-col">
+      <div>
+        <h4>Take Profit (Long, entry $95k, TP $100k)</h4>
+        <pre style="font-size:0.72rem">Oracle at execution: $104,500
+PnL calculated at: $100,000 (trigger)
+pnl = 5M × (100k − 95k) / 95k = +263,157
+payout = collateral + pnl = 1,258,157</pre>
+        <p style="font-size:0.82rem;color:var(--ink-muted);">Trader gets exactly the price they set. Oracle overshoot is irrelevant.</p>
+      </div>
+      <div>
+        <h4>Stop Loss (Long, entry $95k, SL $92k)</h4>
+        <pre style="font-size:0.72rem">Oracle at execution: $90,000
+PnL calculated at: $90,000 (market oracle)
+pnl = 5M × (90k − 95k) / 95k = −263,157
+payout = collateral + pnl = 731,843</pre>
+        <p style="font-size:0.82rem;color:var(--ink-muted);">SL trigger fired at $92k but filled at $90k — slippage risk in fast markets.</p>
+      </div>
+    </div>
+
+    <h3>Security: Keeper Cannot Fabricate Execution</h3>
+    <p>The oracle price condition is verified inside <code>finalize_execute_*</code> using the live on-chain oracle mapping — not a value supplied by the keeper. The keeper cannot claim a trigger was met when it wasn't; the Aleo finalize layer will revert if the oracle price does not satisfy the condition at the time the transaction is processed.</p>
+  </div>
+</section>
+
+<!-- ═══ §7 ORACLE ═══════════════════════════════════════════════════ -->
+<section class="section" id="oracle">
+  <div class="page-wrap">
+    <div class="section-header"><span class="section-num">7</span><h2>Oracle Infrastructure — 2-of-3 Chainlink Relay</h2></div>
+
+    <p>ZKPerp requires tamper-resistant price feeds for BTC, ETH, and SOL. Chainlink and Pyth do not natively support Aleo. Rather than using a single centralised price bot (a single point of manipulation), ZKPerp operates a live <strong>2-of-3 signed quorum relay</strong> that bridges Chainlink's institutional-grade EVM price feeds to the Aleo blockchain.</p>
+
+    <div class="callout green">
+      <span class="callout-label">Live on Testnet</span>
+      <p><code>aleo-oracle</code> — a 3-relayer Chainlink relay with coordinator quorum — is deployed on Render and actively feeding prices to all three ZKPerp contracts. This is not a planned feature; it is operational today.</p>
+    </div>
+
+    <h3>Full Architecture</h3>
+    <div style="margin:1.5rem 0;">
+    <svg width="100%" viewBox="0 0 680 270" xmlns="http://www.w3.org/2000/svg" style="font-family:monospace;">
+      <defs><marker id="a4" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+      <!-- Chainlink sources -->
+      <rect x="40" y="20" width="185" height="70" rx="8" fill="#e6f1fb" stroke="#185fa5" stroke-width="0.75"/>
+      <text x="132" y="40" text-anchor="middle" font-size="11" font-weight="600" fill="#0c447c">Chainlink ETH Mainnet</text>
+      <text x="132" y="56" text-anchor="middle" font-size="9" fill="#185fa5">BTC/USD · 0xF4030086...</text>
+      <text x="132" y="70" text-anchor="middle" font-size="9" fill="#185fa5">ETH/USD · 0x5f4eC3Df...</text>
+      <rect x="40" y="100" width="185" height="50" rx="8" fill="#e6f1fb" stroke="#185fa5" stroke-width="0.75"/>
+      <text x="132" y="122" text-anchor="middle" font-size="11" font-weight="600" fill="#0c447c">Chainlink Arbitrum</text>
+      <text x="132" y="138" text-anchor="middle" font-size="9" fill="#185fa5">SOL/USD · 0x24ceA4b8...</text>
+      <!-- Relayers -->
+      <line x1="225" y1="46" x2="268" y2="56" stroke="#6b7280" stroke-width="0.75" marker-end="url(#a4)"/>
+      <line x1="225" y1="65" x2="268" y2="75" stroke="#6b7280" stroke-width="0.75" marker-end="url(#a4)"/>
+      <line x1="225" y1="120" x2="268" y2="88" stroke="#6b7280" stroke-width="0.75" marker-end="url(#a4)"/>
+      <rect x="270" y="42" width="110" height="22" rx="5" fill="#d1fae5" stroke="#059669" stroke-width="0.5"/>
+      <text x="325" y="57" text-anchor="middle" font-size="10" font-weight="600" fill="#065f46">Relayer A</text>
+      <rect x="270" y="68" width="110" height="22" rx="5" fill="#d1fae5" stroke="#059669" stroke-width="0.5"/>
+      <text x="325" y="83" text-anchor="middle" font-size="10" font-weight="600" fill="#065f46">Relayer B</text>
+      <rect x="270" y="94" width="110" height="22" rx="5" fill="#d1fae5" stroke="#059669" stroke-width="0.5"/>
+      <text x="325" y="109" text-anchor="middle" font-size="10" font-weight="600" fill="#065f46">Relayer C</text>
+      <text x="325" y="128" text-anchor="middle" font-size="9" fill="#6b7280">sign (assetId|price|roundId|updatedAt)</text>
+      <!-- Coordinator -->
+      <line x1="380" y1="53" x2="416" y2="78" stroke="#6b7280" stroke-width="0.75" marker-end="url(#a4)"/>
+      <line x1="380" y1="79" x2="416" y2="82" stroke="#6b7280" stroke-width="0.75" marker-end="url(#a4)"/>
+      <line x1="380" y1="105" x2="416" y2="86" stroke="#6b7280" stroke-width="0.75" marker-end="url(#a4)"/>
+      <rect x="418" y="60" width="135" height="50" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="0.75"/>
+      <text x="485" y="80" text-anchor="middle" font-size="11" font-weight="600" fill="#92400e">Coordinator</text>
+      <text x="485" y="96" text-anchor="middle" font-size="9" fill="#d97706">2-of-3 quorum · dedup</text>
+      <!-- Bot -->
+      <line x1="553" y1="85" x2="588" y2="85" stroke="#6b7280" stroke-width="1" marker-end="url(#a4)"/>
+      <text x="570" y="76" text-anchor="middle" font-size="8" fill="#6b7280">POST /oracle/update</text>
+      <rect x="590" y="60" width="80" height="50" rx="8" fill="#faece7" stroke="#993c1d" stroke-width="0.75"/>
+      <text x="630" y="80" text-anchor="middle" font-size="10" font-weight="600" fill="#712b13">ZKPerp</text>
+      <text x="630" y="96" text-anchor="middle" font-size="9" fill="#993c1d">Bot</text>
+      <!-- 1% guard label -->
+      <text x="630" y="122" text-anchor="middle" font-size="8" fill="#6b7280">1% deviation guard</text>
+      <!-- Fan out to contracts -->
+      <line x1="630" y1="130" x2="630" y2="150" stroke="#6b7280" stroke-width="0.75"/>
+      <line x1="630" y1="150" x2="160" y2="150" stroke="#6b7280" stroke-width="0.75"/>
+      <line x1="160" y1="150" x2="160" y2="168" stroke="#6b7280" stroke-width="0.75" marker-end="url(#a4)"/>
+      <line x1="340" y1="150" x2="340" y2="168" stroke="#6b7280" stroke-width="0.75" marker-end="url(#a4)"/>
+      <line x1="520" y1="150" x2="520" y2="168" stroke="#6b7280" stroke-width="0.75" marker-end="url(#a4)"/>
+      <!-- Three contracts -->
+      <rect x="60" y="170" width="200" height="36" rx="6" fill="#eeedfe" stroke="#534ab7" stroke-width="0.5"/>
+      <text x="160" y="186" text-anchor="middle" font-size="10" font-weight="600" fill="#3c3489">zkperp_btc_v21.aleo (BTC)</text>
+      <text x="160" y="200" text-anchor="middle" font-size="9" fill="#534ab7">update_price()</text>
+      <rect x="240" y="170" width="200" height="36" rx="6" fill="#eeedfe" stroke="#534ab7" stroke-width="0.5"/>
+      <text x="340" y="186" text-anchor="middle" font-size="10" font-weight="600" fill="#3c3489">zkperp_eth_v21.aleo (ETH)</text>
+      <text x="340" y="200" text-anchor="middle" font-size="9" fill="#534ab7">update_price()</text>
+      <rect x="420" y="170" width="200" height="36" rx="6" fill="#eeedfe" stroke="#534ab7" stroke-width="0.5"/>
+      <text x="520" y="186" text-anchor="middle" font-size="10" font-weight="600" fill="#3c3489">zkperp_sol_v21.aleo (SOL)</text>
+      <text x="520" y="200" text-anchor="middle" font-size="9" fill="#534ab7">update_price()</text>
+      <!-- note -->
+      <text x="340" y="240" text-anchor="middle" font-size="9" fill="#6b7280">Sequential fan-out: BTC → ETH → SOL with 3s gap · assert(caller == ORACLE_ADMIN)</text>
+    </svg>
+    </div>
+
+    <h3>Chainlink Feed Configuration</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Market</th><th>Chain</th><th>Proxy Address</th><th>Heartbeat</th><th>RPC Env Var</th></tr></thead>
+        <tbody>
+          <tr><td><strong>BTC/USD</strong></td><td>ETH Mainnet (1)</td><td><code>0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c</code></td><td>1h / 0.5%</td><td><code>EVM_RPC_URL</code></td></tr>
+          <tr><td><strong>ETH/USD</strong></td><td>ETH Mainnet (1)</td><td><code>0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419</code></td><td>1h / 0.5%</td><td><code>EVM_RPC_URL</code></td></tr>
+          <tr><td><strong>SOL/USD</strong></td><td>Arbitrum (42161)</td><td><code>0x24ceA4b8ce57cdA5058b924B9B9987992450590c</code></td><td>1h / 0.5%</td><td><code>EVM_RPC_URL_ARB</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>All addresses are Chainlink <strong>proxy</strong> addresses — always use the proxy, never the underlying aggregator. The 1-hour heartbeat is a maximum interval; Chainlink updates immediately on &gt;0.5% price deviation. Polling every 15 seconds means ZKPerp catches price moves within 15 seconds of Chainlink publishing them.</p>
+
+    <h3>Quorum Protocol Detail</h3>
+    <p>Each relayer independently reads its assigned Chainlink feeds and signs a canonical payload using a dedicated secp256k1 key — completely separate from any Aleo wallet key. The coordinator maintains an allowlist of the three relayer Ethereum addresses and rejects submissions from any unknown source. When 2-of-3 relayers agree on the identical 4-tuple <code>(assetId, price, roundId, updatedAt)</code>, the quorum fires.</p>
+
+    <div class="two-col">
+      <div>
+        <h4>What Prevents a False Price?</h4>
+        <ul class="body-list">
+          <li>All 3 relayers read directly from Chainlink — they have no mechanism to inject arbitrary prices independently of the feed</li>
+          <li>2-of-3 must agree on the <em>identical</em> payload — a single rogue relayer is outvoted</li>
+          <li>The coordinator checks relayer addresses against its allowlist</li>
+          <li>The bot applies a 1% deviation guard before submitting to Aleo</li>
+          <li>The Leo contract asserts <code>caller == ORACLE_ADMIN</code></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Failure Modes</h4>
+        <ul class="body-list">
+          <li><strong>1 relayer offline</strong> — 2 remaining reach quorum, no impact</li>
+          <li><strong>2 relayers offline</strong> — quorum fails, no price update; Binance fallback activates for BTC only</li>
+          <li><strong>Coordinator offline</strong> — no price updates; existing on-chain price used; withdrawal guard conservative baseline applies</li>
+          <li><strong>All 3 compromised</strong> — false price possible; mitigated by key separation and monitoring</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Key Design Decisions</h3>
+    <ul class="body-list">
+      <li><strong>1% deviation guard (bot-side)</strong> — the bot only submits an Aleo transaction if the new price differs ≥1% from the current on-chain value. This keeps testnet transaction fees manageable. The 1% threshold is a configuration parameter.</li>
+      <li><strong>Sequential fan-out, 3s gap</strong> — BTC, ETH, and SOL updates are submitted one at a time with a 3-second interval to avoid hitting Provable API rate limits on the Aleo submission layer.</li>
+      <li><strong>Deduplication on (assetId, roundId, updatedAt)</strong> — the coordinator will not resubmit the same Chainlink round twice, even after a restart. This prevents duplicate Aleo transactions.</li>
+      <li><strong>Key separation</strong> — relayer secp256k1 keys are used only for coordinator authentication. A stolen relayer key cannot submit Aleo transactions directly — it is not an Aleo private key.</li>
+      <li><strong>Binance fallback (BTC only)</strong> — if the oracle relay is offline, the bot falls back to Binance/CoinGecko spot price for BTC, maintaining basic liquidation functionality for the largest market.</li>
+    </ul>
+
+    <h3>Adding New Markets</h3>
+    <p>The relay is configurable via <code>config/markets.json</code>. Adding a new market (e.g. AVAX/USD) requires:</p>
+    <ol class="body-list">
+      <li>Add the Chainlink feed address and chain to <code>markets.json</code></li>
+      <li>Deploy a new Leo program (e.g. <code>zkperp_avax_v21.aleo</code>)</li>
+      <li>Set <code>PROGRAM_ID_AVAX=zkperp_avax_v21.aleo</code> in the bot environment</li>
+      <li>Extend <code>CONFIG.programs</code> routing in <code>zkperp-bot.mjs</code></li>
+    </ol>
+    <p>No changes are needed to the coordinator or relayer code — the asset routing is handled entirely in the bot layer.</p>
+
+    <div class="callout note">
+      <span class="callout-label">Path to Full On-Chain Verification</span>
+      <p>The current relay reduces trust surface compared to a single oracle bot — a single compromised relayer cannot influence the price — but it remains a federated, off-chain coordination system. The quorum result is forwarded to the bot, which the Leo contract trusts by role check (<code>assert_eq(caller, ORACLE_ADMIN)</code>), not by cryptographic proof.</p>
+      <p>One exploratory direction for stronger guarantees would be to have the Leo contract verify the 3 secp256k1 signatures directly inside <code>finalize_update_price</code>. If feasible within Aleo's constraint system, this would make the quorum check part of the ZK proof rather than an off-chain coordination step — meaning the coordinator's honesty would no longer be a trust assumption. This is not a near-term roadmap item; secp256k1 verification inside a Leo finalize is a non-trivial research and engineering problem.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ §8 DARKPOOL ═════════════════════════════════════════════════ -->
+<section class="section" id="darkpool">
+  <div class="page-wrap">
+    <div class="section-header"><span class="section-num">8</span><h2>ZK Dark Pool</h2></div>
+
+    <p>ZKDarkPool (<code>zkdarkpool_v2.aleo</code>) is a companion protocol to ZKPerp, deployed and verified on Aleo testnet. It implements institutional-grade <strong>batch auction settlement</strong> where all bids and asks are sealed until a uniform clearing price is computed and proven. The first live on-chain settlement matched a BTC buy/sell order at a clearing price of $49,500.</p>
+
+    <h3>The Problem with Continuous Order Books</h3>
+    <p>In a continuous limit order book (CLOB), order placement and cancellation are public events. Large institutional orders must be broken up into small slices to avoid telegraphing intent — a well-understood practice called "iceberg orders" in traditional finance. Even sliced orders are visible in the order flow data after the fact. MEV bots can detect large buy-side pressure building up and front-run each slice. The result: institutional traders pay significant implicit costs that retail liquidity ultimately absorbs.</p>
+
+    <h3>Batch Auction Mechanics</h3>
+    <p>A batch auction sidesteps the continuous book entirely. All orders submitted during a fixed interval are settled simultaneously at a single price:</p>
+
+    <div style="margin:1.5rem 0;">
+    <svg width="100%" viewBox="0 0 680 210" xmlns="http://www.w3.org/2000/svg" style="font-family:monospace;">
+      <defs><marker id="a5" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+      <!-- Phase boxes -->
+      <rect x="40"  y="20" width="120" height="80" rx="8" fill="#e6f1fb" stroke="#185fa5" stroke-width="0.75"/>
+      <text x="100" y="44"  text-anchor="middle" font-size="10" font-weight="600" fill="#0c447c">Phase 1</text>
+      <text x="100" y="58"  text-anchor="middle" font-size="9"  fill="#0c447c">Order Submission</text>
+      <text x="100" y="72"  text-anchor="middle" font-size="9"  fill="#185fa5">Sealed bids/asks</text>
+      <text x="100" y="86"  text-anchor="middle" font-size="9"  fill="#185fa5">Encrypted records</text>
+      <line x1="160" y1="60" x2="193" y2="60" stroke="#6b7280" stroke-width="1" marker-end="url(#a5)"/>
+      <rect x="195" y="20" width="120" height="80" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="0.75"/>
+      <text x="255" y="44"  text-anchor="middle" font-size="10" font-weight="600" fill="#92400e">Phase 2</text>
+      <text x="255" y="58"  text-anchor="middle" font-size="9"  fill="#92400e">Window Closes</text>
+      <text x="255" y="72"  text-anchor="middle" font-size="9"  fill="#d97706">No new orders</text>
+      <text x="255" y="86"  text-anchor="middle" font-size="9"  fill="#d97706">State frozen</text>
+      <line x1="315" y1="60" x2="348" y2="60" stroke="#6b7280" stroke-width="1" marker-end="url(#a5)"/>
+      <rect x="350" y="20" width="140" height="80" rx="8" fill="#fdf2f8" stroke="#9d174d" stroke-width="0.75"/>
+      <text x="420" y="44"  text-anchor="middle" font-size="10" font-weight="600" fill="#831843">Phase 3</text>
+      <text x="420" y="58"  text-anchor="middle" font-size="9"  fill="#831843">Off-chain Matching</text>
+      <text x="420" y="72"  text-anchor="middle" font-size="9"  fill="#9d174d">Uniform clearing price P*</text>
+      <text x="420" y="86"  text-anchor="middle" font-size="9"  fill="#9d174d">Max volume matched</text>
+      <line x1="490" y1="60" x2="523" y2="60" stroke="#6b7280" stroke-width="1" marker-end="url(#a5)"/>
+      <rect x="525" y="20" width="115" height="80" rx="8" fill="#d1fae5" stroke="#059669" stroke-width="0.75"/>
+      <text x="582" y="44"  text-anchor="middle" font-size="10" font-weight="600" fill="#065f46">Phase 4</text>
+      <text x="582" y="58"  text-anchor="middle" font-size="9"  fill="#065f46">On-chain Settlement</text>
+      <text x="582" y="72"  text-anchor="middle" font-size="9"  fill="#059669">settle_match()</text>
+      <text x="582" y="86"  text-anchor="middle" font-size="9"  fill="#059669">Atomic token swap</text>
+      <!-- Key formula -->
+      <rect x="240" y="120" width="200" height="34" rx="6" fill="#f0fdf4" stroke="#059669" stroke-width="0.5"/>
+      <text x="340" y="136" text-anchor="middle" font-size="10" font-weight="600" fill="#065f46">Clearing price P*</text>
+      <text x="340" y="150" text-anchor="middle" font-size="9" fill="#059669">Σ buy_qty(≥P*) = Σ sell_qty(≤P*)</text>
+      <!-- Bottom note -->
+      <text x="340" y="185" text-anchor="middle" font-size="9" fill="#6b7280">All orders submitted blind — no information leakage before settlement — no front-running possible</text>
+    </svg>
+    </div>
+
+    <h3>Key Properties</h3>
+    <ul class="body-list">
+      <li><strong>Zero price impact for large orders</strong> — all orders at the clearing price receive the same execution, regardless of size or submission time within the window</li>
+      <li><strong>Time priority eliminated</strong> — submitting 1 second before window close is as good as submitting 59 seconds before. This removes the incentive for latency arms races.</li>
+      <li><strong>No information leakage pre-settlement</strong> — only the buyer and seller know their own order details. The matcher decrypts only its own records (as the orchestrator), not other participants'.</li>
+      <li><strong>Permissionless settlement</strong> — anyone who can construct a valid proof of a matched pair can call <code>settle_match()</code>, not just the operator</li>
+    </ul>
+
+    <h3>Live Testnet Results</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Settlement</th><th>Buyer</th><th>Seller</th><th>Clearing Price</th><th>Volume</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>Batch #1</td><td>Test account A</td><td>Test account B</td><td>$49,500</td><td>1.0 BTC</td><td>✅ On-chain confirmed</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Engineering Challenges Resolved</h3>
+    <ul class="body-list">
+      <li><strong>Leo 3.5.0 / GLIBC incompatibility</strong> — Leo 3.5.0 would not run on the Render Ubuntu instance. Resolved by building Leo 3.4.0 from source in the deployment environment.</li>
+      <li><strong>Validator gossip race conditions</strong> — <code>settle_match()</code> transactions were failing with HTTP 500 on local devnet due to node gossip timing. Resolved by moving settlement to public testnet where block confirmation is reliable.</li>
+      <li><strong>Collateral overflow in u64</strong> — fill_size × clearing_price overflows u64 at realistic market prices. Resolved by using u128 for intermediate multiplication before dividing back to u64.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ═══ §9 USDCX ════════════════════════════════════════════════════ -->
+<section class="section" id="usdcx">
+  <div class="page-wrap">
+    <div class="section-header"><span class="section-num">9</span><h2>USDCx &amp; Cross-Chain Bridge</h2></div>
+
+    <p>ZKPerp uses <strong>USDCx</strong> (<code>test_usdcx_stablecoin.aleo</code>) — the official Aleo testnet stablecoin — as its collateral and settlement token. USDCx is Aleo's native USDC equivalent, issued by Provable and integrated with real cross-chain bridging infrastructure.</p>
+
+    <h3>Integration Points</h3>
+    <ul class="body-list">
+      <li><strong>LP deposits</strong> — call <code>transfer_from_public(trader → zkperp_btc_v21.aleo)</code> to move USDCx into the pool</li>
+      <li><strong>Position collateral</strong> — transferred to the contract address at <code>open_position</code> time</li>
+      <li><strong>Position payouts</strong> — transferred from pool to trader on <code>close_position</code> via <code>transfer_public</code></li>
+      <li><strong>Liquidation rewards</strong> — 0.5% of position size paid to the liquidator address in USDCx</li>
+      <li><strong>Limit order margin</strong> — held by <code>self.address</code> (the Leo program) during the pending period, not by the orchestrator</li>
+    </ul>
+
+    <h3>Obtaining USDCx — ETH → Aleo Bridge</h3>
+    <p>Traders obtain USDCx by bridging USDC from Ethereum Sepolia testnet to Aleo. ZKPerp's frontend provides a guided bridge flow:</p>
+
+    <div style="margin:1.5rem 0;">
+    <svg width="100%" viewBox="0 0 680 110" xmlns="http://www.w3.org/2000/svg" style="font-family:monospace;">
+      <defs><marker id="a6" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+      <!-- Step 1 -->
+      <rect x="40" y="20" width="170" height="60" rx="8" fill="#e6f1fb" stroke="#185fa5" stroke-width="0.75"/>
+      <text x="125" y="42" text-anchor="middle" font-size="10" font-weight="600" fill="#0c447c">Step 1 — Sepolia</text>
+      <text x="125" y="58" text-anchor="middle" font-size="9" fill="#185fa5">executeBridgeTransfer()</text>
+      <text x="125" y="72" text-anchor="middle" font-size="9" fill="#6b7280">HumanityLinkVault.sol</text>
+      <line x1="210" y1="50" x2="258" y2="50" stroke="#6b7280" stroke-width="1" marker-end="url(#a6)"/>
+      <text x="234" y="44" text-anchor="middle" font-size="8" fill="#6b7280">USDC</text>
+      <!-- Step 2 -->
+      <rect x="260" y="20" width="160" height="60" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="0.75"/>
+      <text x="340" y="42" text-anchor="middle" font-size="10" font-weight="600" fill="#92400e">Step 2 — xReserve Bridge</text>
+      <text x="340" y="58" text-anchor="middle" font-size="9" fill="#d97706">0x008888878f94...</text>
+      <text x="340" y="72" text-anchor="middle" font-size="9" fill="#6b7280">5–15 min settlement</text>
+      <line x1="420" y1="50" x2="468" y2="50" stroke="#6b7280" stroke-width="1" marker-end="url(#a6)"/>
+      <text x="444" y="44" text-anchor="middle" font-size="8" fill="#6b7280">USDCx</text>
+      <!-- Step 3 -->
+      <rect x="470" y="20" width="170" height="60" rx="8" fill="#d1fae5" stroke="#059669" stroke-width="0.75"/>
+      <text x="555" y="42" text-anchor="middle" font-size="10" font-weight="600" fill="#065f46">Step 3 — Aleo</text>
+      <text x="555" y="58" text-anchor="middle" font-size="9" fill="#059669">USDCx in Shield Wallet</text>
+      <text x="555" y="72" text-anchor="middle" font-size="9" fill="#6b7280">Ready to trade / provide LP</text>
+      <!-- note -->
+      <text x="340" y="100" text-anchor="middle" font-size="9" fill="#6b7280">Live test: ~81 USDC bridged successfully in under 15 minutes</text>
+    </svg>
+    </div>
+
+    <p>The "Bridge USDCx →" button in the ZKPerp frontend links directly to the bridge UI and provides step-by-step guidance. Live test: ~81 USDC bridged successfully to Aleo testnet in under 15 minutes.</p>
+
+    <h3>USDCx in Transactions</h3>
+    <p>Because <code>test_usdcx_stablecoin.aleo</code> is a separate program, all ZKPerp transitions that move USDCx emit a <strong>cross-program call</strong> which is returned as a <code>Future</code> and awaited in the Leo finalize layer. This pattern ensures atomicity: if the token transfer fails for any reason, the entire position operation reverts.</p>
+
+    <pre>// Example: open_position atomically locks collateral
+async transition open_position(
+  slot: PositionSlot,
+  public collateral: u64,
+  ...
+) -> (PositionSlot, LiquidationAuth, Future) {
+  let f: Future = test_usdcx_stablecoin.aleo/transfer_from_public(
+    self.caller, self.address, collateral
+  );
+  return (new_slot, liq_auth, finalize_open_position(f, ...));
+}
+
+async function finalize_open_position(transfer_future: Future, ...) {
+  transfer_future.await();  // reverts if USDC transfer failed
+  // ... update pool state mappings
+}</pre>
+  </div>
+</section>
+
+<!-- ═══ §10 LIMITATIONS ══════════════════════════════════════════════ -->
+<section class="section" id="limitations">
+  <div class="page-wrap">
+    <div class="section-header"><span class="section-num">10</span><h2>Known Limitations</h2></div>
+    <p>ZKPerp is testnet software. The following limitations are documented in full as part of the protocol's commitment to transparency.</p>
+
+    <div class="status-row">
+      <div class="status-dot green"></div>
+      <div><div class="status-label">Resolved — USDCx Token Integration</div><div class="status-desc">Fully integrated with <code>test_usdcx_stablecoin.aleo</code>. All collateral flows use real token transfers. ETH → Aleo bridge via xReserve tested live.</div></div>
+    </div>
+    <div class="status-row">
+      <div class="status-dot green"></div>
+      <div><div class="status-label">Resolved — Record Accumulation (Slot Model)</div><div class="status-desc">v12 slot model: wallet holds exactly 3 records regardless of trading history. Introduced in Wave 3, fully deployed.</div></div>
+    </div>
+    <div class="status-row">
+      <div class="status-dot green"></div>
+      <div><div class="status-label">Resolved — Liquidation Mechanism</div><div class="status-desc">Dual-record (Option D) architecture fully implemented and live. Automated keeper bot handles all liquidations. Manual liquidation also possible by anyone.</div></div>
+    </div>
+    <div class="status-row">
+      <div class="status-dot green"></div>
+      <div><div class="status-label">Resolved — Single Oracle (Single Point of Failure)</div><div class="status-desc">2-of-3 Chainlink relay now live on testnet. Three independent relayers must agree before a price update fires.</div></div>
+    </div>
+    <div class="status-row">
+      <div class="status-dot green"></div>
+      <div><div class="status-label">Resolved — Maximum Privacy Contract (v21)</div><div class="status-desc">v21 strips all position parameters from <code>finalize</code> functions. Only hashes and nonces are exposed on-chain. Business logic (leverage, slippage, margin) is proven entirely in the ZK transition. Pool state is updated via orchestrator-only <code>update_pool_state</code> calls.</div></div>
+    </div>
+    <div class="status-row">
+      <div class="status-dot amber"></div>
+      <div><div class="status-label">Open — Trusted PnL Aggregation</div><div class="status-desc">Net unrealised PnL submitted by orchestrator is not cryptographically verified on-chain. Failure mode is safe (defaults to zero = conservative baseline). Trustless ZK PnL proof is a future research direction.</div></div>
+    </div>
+    <div class="status-row">
+      <div class="status-dot amber"></div>
+      <div><div class="status-label">Open — Single Orchestrator</div><div class="status-desc">One wallet controls liquidations and order execution. If offline, no automatic actions fire (traders can still close manually). Multi-orchestrator rotation is planned.</div></div>
+    </div>
+    <div class="status-row">
+      <div class="status-dot amber"></div>
+      <div><div class="status-label">Open — No Funding Rate</div><div class="status-desc">Current fee model is a flat borrow rate per block. Dynamic funding rates (GMX/Perp style: longs pay shorts when long OI > short OI) are planned for mainnet. Without funding rates, prolonged OI imbalance costs LPs.</div></div>
+    </div>
+    <div class="status-row">
+      <div class="status-dot green"></div>
+      <div><div class="status-label">Resolved — Cancel Order Transitions</div><div class="status-desc"><code>cancel_tp_sl</code> and <code>cancel_limit_order</code> are live in v21. Traders can cancel any active TP, SL, or limit order by presenting their <code>PositionSlot</code> and <code>OrderReceipt</code>. No orchestrator involvement required.</div></div>
+    </div>
+    <div class="status-row">
+      <div class="status-dot amber"></div>
+      <div><div class="status-label">Open — No Partial Close</div><div class="status-desc">Positions must be closed in full. Partial close (reduce size by X%) is architecturally supported by the slot model and will be added in a future Leo version.</div></div>
+    </div>
+    <div class="status-row">
+      <div class="status-dot gray"></div>
+      <div><div class="status-label">Language — Leo Ternary Both-Branch Evaluation</div><div class="status-desc">Leo evaluates both branches of ternary operators before selecting. All subtraction operations use safe-subtraction patterns throughout the codebase to prevent arithmetic underflow.</div></div>
+    </div>
+    <div class="status-row">
+      <div class="status-dot gray"></div>
+      <div><div class="status-label">Language — 32-Call-Per-Transaction Limit</div><div class="status-desc">Aleo's VM caps cross-program calls per transaction at 32, which limits bulk operations to ~16 recipients in a single tx. Batching is handled at the orchestrator/PostgreSQL layer.</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ §11 ROADMAP ══════════════════════════════════════════════════ -->
+<section class="section" id="roadmap">
+  <div class="page-wrap">
+    <div class="section-header"><span class="section-num">11</span><h2>Roadmap</h2></div>
+    <div class="roadmap">
+      <div class="roadmap-phase">
+        <div class="roadmap-head">✅ Completed</div>
+        <div class="roadmap-body"><ul>
+          <li class="done">Core perpetuals (open / close / liquidate)</li>
+          <li class="done">Slot model — 3 records, forever</li>
+          <li class="done">Dual-record liquidation (Option D)</li>
+          <li class="done">USDCx token integration</li>
+          <li class="done">2-of-3 Chainlink oracle relay</li>
+          <li class="done">Limit orders / TP / SL</li>
+          <li class="done">LP pool with withdrawal guard</li>
+          <li class="done">Shield Wallet integration</li>
+          <li class="done">BTC, ETH, SOL markets</li>
+          <li class="done">ZK Dark Pool (testnet)</li>
+          <li class="done">ETH → Aleo bridge tested</li>
+          <li class="done">Unshield UX — single button</li>
+          <li class="done">Cancel TP / SL / limit order transitions</li>
+          <li class="done">Maximum privacy v21 contract (zero position data in finalize)</li>
+          <li class="done">Portfolio &amp; Compliance pages</li>
+          <li class="done">Whitepaper v1 published</li>
+        </ul></div>
+      </div>
+      <div class="roadmap-phase">
+        <div class="roadmap-head">📋 Wave 5 (Next)</div>
+        <div class="roadmap-body"><ul>
+          <li>Trade history &amp; portfolio analytics</li>
+          <li>Verifiable performance proofs (ZK circuit)</li>
+          <li>Compliance dashboard — decrypt &amp; audit ComplianceRecords</li>
+          <li>Leaderboard (opt-in, privacy-preserving)</li>
+          <li>Multi-orchestrator rotation</li>
+          <li>Admin controls (pause, fee update)</li>
+          <li>On-chain secp256k1 oracle signature verification</li>
+        </ul></div>
+      </div>
+      <div class="roadmap-phase">
+        <div class="roadmap-head">📋 Phase 2 — Testnet Mature</div>
+        <div class="roadmap-body"><ul>
+          <li>Trustless ZK PnL aggregation</li>
+          <li>Dynamic funding rates</li>
+          <li>Partial close support</li>
+          <li>LP withdrawal cooldowns</li>
+          <li>Privacy copy trading</li>
+          <li>On-chain secp256k1 oracle verification</li>
+        </ul></div>
+      </div>
+      <div class="roadmap-phase">
+        <div class="roadmap-head">🔐 Phase 3 — Security</div>
+        <div class="roadmap-body"><ul>
+          <li>Formal Leo contract verification</li>
+          <li>Third-party security audit</li>
+          <li>Bug bounty program</li>
+          <li>Extended oracle quorum (5-of-7)</li>
+        </ul></div>
+      </div>
+      <div class="roadmap-phase">
+        <div class="roadmap-head">🚀 Phase 4 — Mainnet</div>
+        <div class="roadmap-body"><ul>
+          <li>Aleo Mainnet deployment</li>
+          <li>Native Chainlink/Pyth (if Aleo supported)</li>
+          <li>Cross-margin / portfolio margin</li>
+          <li>Mobile application</li>
+          <li>DAO governance</li>
+          <li>Institutional dark pool access</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ §12 SECURITY ═════════════════════════════════════════════════ -->
+<section class="section" id="security">
+  <div class="page-wrap">
+    <div class="section-header"><span class="section-num">12</span><h2>Security Properties</h2></div>
+
+    <h3>On-Chain Guarantees — What the Leo Contract Enforces</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Property</th><th>Mechanism</th><th>Where Enforced</th></tr></thead>
+        <tbody>
+          <tr><td>No double-close or double-liquidation</td><td><code>active_position_ids[id]</code> checked and cleared atomically</td><td><code>finalize_close_position</code>, <code>finalize_liquidate</code></td></tr>
+          <tr><td>No healthy position liquidated</td><td>Margin ratio computed against live oracle mapping inside finalize</td><td><code>finalize_liquidate</code></td></tr>
+          <tr><td>No unauthorized oracle update</td><td><code>assert_eq(self.caller, ORACLE_ADMIN)</code></td><td><code>finalize_update_price</code></td></tr>
+          <tr><td>No LP over-withdrawal</td><td>Full guard formula checked; tx reverts if breached</td><td><code>finalize_remove_liquidity</code></td></tr>
+          <tr><td>No order replay</td><td><code>used_nonces</code> mapping checked on every place/execute</td><td>All <code>finalize_place_*</code></td></tr>
+          <tr><td>No stale TP/SL execution</td><td><code>active_position_ids</code> verified before consuming PendingOrder</td><td><code>finalize_execute_*</code></td></tr>
+          <tr><td>Oracle condition must be met at execution</td><td>Trigger condition verified against live oracle in finalize — keeper cannot fake it</td><td><code>finalize_execute_*</code></td></tr>
+          <tr><td>Limit order margin held by contract</td><td>USDC transferred to <code>self.address</code>, not orchestrator, at placement</td><td><code>finalize_place_limit_order</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>What the Keeper Bot Cannot Do</h3>
+    <ul class="body-list">
+      <li>Liquidate a healthy position — margin condition verified on-chain against live oracle</li>
+      <li>Execute a TP/SL when trigger not met — oracle condition verified in finalize layer</li>
+      <li>Execute an order for a closed/liquidated position — <code>active_position_ids</code> check prevents this</li>
+      <li>Steal locked margin from limit orders — margin held by the Leo program address, not the orchestrator key</li>
+      <li>Read the trader's <code>PositionSlot</code> — the orchestrator does not own this record; it cannot decrypt it</li>
+    </ul>
+
+    <h3>Privacy Guarantees</h3>
+    <ul class="body-list">
+      <li><strong>Position size, entry price, leverage, PnL, liquidation level</strong> — encrypted in Aleo private records; readable only by the position owner's viewing key</li>
+      <li><strong>Order trigger prices</strong> — sealed behind BHP256 commitment hashes; never published before execution</li>
+      <li><strong>LP balances</strong> — stored in private LP slot records; only the LP can see their own position</li>
+      <li><strong>Orchestrator's knowledge</strong> — limited to the data in <code>LiquidationAuth</code> and <code>PendingOrder</code> records it owns. It cannot access the trader's <code>PositionSlot</code> or LP slot.</li>
+    </ul>
+
+    <div class="callout warn">
+      <span class="callout-label">Audit Status</span>
+      <p>ZKPerp has <strong>not been formally audited</strong>. This is testnet software intended for development and demonstration purposes. Do not use it with real funds. A third-party security audit is planned before any mainnet deployment. If you identify a vulnerability, please contact the team via GitHub issues.</p>
+    </div>
+
+    <h3>Responsible Disclosure</h3>
+    <p>The team is committed to transparent disclosure of all known limitations and vulnerabilities. The LIMITATIONS.md document in the GitHub repository is updated continuously. This whitepaper reflects the protocol's state as of Wave 4 (March 2026) and will be updated with each significant protocol change.</p>
+  </div>
+</section>
+
+<!-- ═══ FOOTER ═══════════════════════════════════════════════════════ -->
+<footer class="footer">
+  <div class="page-wrap">
+    <div class="footer-grid">
+      <div>
+        <div class="footer-title">Protocol</div>
+        <p style="color:rgba(255,255,255,0.5);font-size:0.82rem;margin:0;line-height:1.8;">
+          ZKPerp — Privacy-First Perpetuals on Aleo<br>
+          <code style="color:rgba(255,255,255,0.3);font-size:0.75rem;">zkperp_btc_v21.aleo · zkperp_eth_v21.aleo · zkperp_sol_v21.aleo</code><br>
+          <code style="color:rgba(255,255,255,0.3);font-size:0.75rem;">zkdarkpool_v2.aleo</code>
+        </p>
+      </div>
+      <div>
+        <div class="footer-title">Links</div>
+        <div style="display:flex;flex-direction:column;gap:0.35rem;font-size:0.82rem;">
+          <a href="https://zk-perp.vercel.app">zk-perp.vercel.app</a>
+          <a href="https://github.com/hwdeboer1977/ZKPerp">github.com/hwdeboer1977/ZKPerp</a>
+          <a href="https://testnet.explorer.provable.com">Provable Explorer</a>
+          <a href="https://www.shieldwallet.xyz/">Shield Wallet</a>
+        </div>
+      </div>
+      <div>
+        <div class="footer-title">Author</div>
+        <p style="color:rgba(255,255,255,0.5);font-size:0.82rem;margin:0;line-height:1.8;">
+          Henk-Wim de Boer<br>
+          Discord: @lupo1977<br>
+          <code style="color:rgba(255,255,255,0.3);font-size:0.72rem;">aleo1d9es6d8kuzg65dlfdpx9zxchcs...</code>
+        </p>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span class="footer-logo">ZKPerp</span>
+      <span style="font-size:0.78rem;">MIT License · Aleo Testnet Beta · Wave 4 · March 2026</span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

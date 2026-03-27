@@ -83,6 +83,10 @@ const CONFIG = {
   liquidationRewardBps:    5000n,   // 0.5%
 };
 
+// All known program IDs — scanner matches records from any market
+const ALL_PROGRAM_IDS = new Set(Object.values(CONFIG.programs));
+ALL_PROGRAM_IDS.add(CONFIG.programId); // also include legacy PROGRAM_ID
+
 // ═══════════════════════════════════════════════════════════════
 // STATE: In-memory position store
 // ═══════════════════════════════════════════════════════════════
@@ -646,13 +650,13 @@ async function scanViaProvableScanner() {
     const allRecords = await provableClient.getOwnedRecords({ decrypt: true, unspent: true });
     const allList = Array.isArray(allRecords) ? allRecords : (allRecords?.records || []);
     const liquidationRecords = allList
-      .filter(r => r.program_name === CONFIG.programId && r.record_name === 'LiquidationAuth')
+      .filter(r => ALL_PROGRAM_IDS.has(r.program_name) && r.record_name === 'LiquidationAuth')
       .slice(0, MAX_RECORDS_PER_SCAN);
     log('SCAN', `Provable Scanner: ${liquidationRecords.length} LiquidationAuth records (cap=${MAX_RECORDS_PER_SCAN})`);
 
     // Scan ExecTPSLAuth records — orchestrator uses these to execute TP/SL (no PositionSlot needed)
     const authRecords = allList
-      .filter(r => r.program_name === CONFIG.programId && r.record_name === 'ExecTPSLAuth')
+      .filter(r => ALL_PROGRAM_IDS.has(r.program_name) && r.record_name === 'ExecTPSLAuth')
       .slice(0, MAX_RECORDS_PER_SCAN);
     log('SCAN', `Provable Scanner: ${authRecords.length} ExecTPSLAuth records`);
 
@@ -692,7 +696,7 @@ async function scanViaProvableScanner() {
 
     // Scan ExecLimitAuth records — orchestrator executes limit orders when price triggers
     const limitAuthRecords = allList
-      .filter(r => r.program_name === CONFIG.programId && r.record_name === 'ExecLimitAuth')
+      .filter(r => ALL_PROGRAM_IDS.has(r.program_name) && r.record_name === 'ExecLimitAuth')
       .slice(0, MAX_RECORDS_PER_SCAN);
     log('SCAN', `Provable Scanner: ${limitAuthRecords.length} ExecLimitAuth records`);
 
@@ -726,7 +730,7 @@ async function scanViaProvableScanner() {
 
     // Also scan PendingOrder records (limit orders only)
     const orderRecords = allList
-      .filter(r => r.program_name === CONFIG.programId && r.record_name === 'PendingOrder')
+      .filter(r => ALL_PROGRAM_IDS.has(r.program_name) && r.record_name === 'PendingOrder')
       .slice(0, MAX_RECORDS_PER_SCAN);
     log('SCAN', `Provable Scanner: ${orderRecords.length} PendingOrder records (limit orders)`);
 
@@ -881,9 +885,9 @@ async function recoverPendingOrders() {
     const allRecords = await provableClient.getOwnedRecords({ decrypt: true, unspent: true });
     const allList = Array.isArray(allRecords) ? allRecords : (allRecords?.records || []);
 
-    const authRecords       = allList.filter(r => r.program_name === CONFIG.programId && r.record_name === 'ExecTPSLAuth');
-    const limitAuthRecords  = allList.filter(r => r.program_name === CONFIG.programId && r.record_name === 'ExecLimitAuth');
-    const orderRecords      = allList.filter(r => r.program_name === CONFIG.programId && r.record_name === 'PendingOrder');
+    const authRecords       = allList.filter(r => ALL_PROGRAM_IDS.has(r.program_name) && r.record_name === 'ExecTPSLAuth');
+    const limitAuthRecords  = allList.filter(r => ALL_PROGRAM_IDS.has(r.program_name) && r.record_name === 'ExecLimitAuth');
+    const orderRecords      = allList.filter(r => ALL_PROGRAM_IDS.has(r.program_name) && r.record_name === 'PendingOrder');
 
     log('RECOVER', `Found ${authRecords.length} ExecTPSLAuth + ${limitAuthRecords.length} ExecLimitAuth + ${orderRecords.length} PendingOrder record(s)`);
 

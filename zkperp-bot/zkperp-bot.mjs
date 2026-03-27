@@ -202,8 +202,9 @@ async function fetchText(url) {
   });
 }
 
-async function getMapping(mapping, key) {
-  return fetchText(`${CONFIG.apiEndpoint}/program/${CONFIG.programId}/mapping/${mapping}/${key}`);
+async function getMapping(mapping, key, programId) {
+  const pid = programId || CONFIG.programId;
+  return fetchText(`${CONFIG.apiEndpoint}/program/${pid}/mapping/${mapping}/${key}`);
 }
 
 async function fetchJsonPost(url, body) {
@@ -704,6 +705,8 @@ async function scanViaProvableScanner() {
     const liquidationRecords = allList
       .filter(r => ALL_PROGRAM_IDS.has(r.program_name) && r.record_name === 'LiquidationAuth')
       .slice(0, MAX_RECORDS_PER_SCAN);
+    // Map record → programId for use in liquidation execution
+    const liqProgramMap = new Map(liquidationRecords.map(r => [r, r.program_name || CONFIG.programId]));
     log('SCAN', `Provable Scanner: ${liquidationRecords.length} LiquidationAuth records (cap=${MAX_RECORDS_PER_SCAN})`);
 
     // Scan ExecTPSLAuth records — orchestrator uses these to execute TP/SL (no PositionSlot needed)
@@ -729,7 +732,8 @@ async function scanViaProvableScanner() {
 
       // Verify order still active on-chain
       try {
-        const activeRaw = await getMapping('pending_orders', auth.orderId);
+        const tpslPid = record.program_name || CONFIG.programId;
+        const activeRaw = await getMapping('pending_orders', auth.orderId, tpslPid);
         if (!activeRaw || activeRaw === 'null' || activeRaw.includes('false')) {
           log('SCAN', `Skipping inactive ExecTPSLAuth ${auth.orderId.slice(0,20)}`);
           execTPSLAuthStore.delete(auth.orderId);
@@ -742,7 +746,8 @@ async function scanViaProvableScanner() {
         .replace(/:\s+/g, ':').replace(/,\s+/g, ',')
         .replace(/\s*{\s*/g, '{').replace(/\s*}\s*/g, '}').trim();
 
-      execTPSLAuthStore.set(auth.orderId, { ...auth, plaintext: compactPt, scannedAt: new Date().toISOString() });
+      const tpslProgramId = record.program_name || CONFIG.programId;
+      execTPSLAuthStore.set(auth.orderId, { ...auth, plaintext: compactPt, programId: tpslProgramId, scannedAt: new Date().toISOString() });
     }
     log('SCAN', `ExecTPSLAuth store: ${execTPSLAuthStore.size} active TP/SL auth(s)`);
 
@@ -970,7 +975,8 @@ async function recoverPendingOrders() {
         .replace(/\s*{\s*/g, '{').replace(/\s*}\s*/g, '}').trim();
 
       const typeStr = auth.orderType === 1 ? 'TP' : 'SL';
-      execTPSLAuthStore.set(auth.orderId, { ...auth, plaintext: compactPt, scannedAt: new Date().toISOString() });
+      const tpslProgramId = record.program_name || CONFIG.programId;
+      execTPSLAuthStore.set(auth.orderId, { ...auth, plaintext: compactPt, programId: tpslProgramId, scannedAt: new Date().toISOString() });
       recoveredAuths++;
       log('RECOVER', `✅ Restored ${typeStr} ExecTPSLAuth ${auth.orderId.slice(0, 20)} | trigger: $${(Number(auth.triggerPrice) / 1e8).toFixed(0)} | trader: ${auth.trader.slice(0, 20)}`);
     }
@@ -1139,9 +1145,10 @@ async function liquidatePosition(position) {
   log('LIQUIDATE', `Plaintext preview: ${plaintext?.substring(0, 150)}`);
 
   try {
+    const liqProgramId = position.programId || CONFIG.programId;
     await provableClient.executeTransaction({
       privateKey:    CONFIG.privateKey,
-      programId:     CONFIG.programId,
+      programId:     liqProgramId,
       functionName:  'liquidate',
       inputs:        [plaintext, `${reward}u128`],
       useFeeMaster:  CONFIG.execUseFeeMaster,
@@ -1237,6 +1244,7 @@ async function liquidationTick() {
         entryPrice:    pos.entryPrice,
         slotNonce:     pos.slotNonce,      // needed for TP/SL slot reconstruction
         slotId:        pos.slotId,
+        programId:     pos.programId || CONFIG.programId,  // which market this position belongs to
         scannedAt:     pos.scannedAt || new Date().toISOString(),
       });
     }
@@ -1495,9 +1503,11 @@ async function executeTPSLAuth(auth, price) {
   const expectedPayout = calcExpectedPayout(auth, execPrice);
 
   const functionName = orderType === 1 ? 'execute_take_profit' : 'execute_stop_loss';
+  const tpslProgramId = auth.programId || CONFIG.programId;
+  log('ORDER', `Using program: ${tpslProgramId}`);
   await provableClient.executeTransaction({
     privateKey:   CONFIG.privateKey,
-    programId:    CONFIG.programId,
+    programId:    tpslProgramId,
     functionName,
     inputs: [
       auth.plaintext,

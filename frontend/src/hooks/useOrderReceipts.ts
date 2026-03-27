@@ -119,10 +119,31 @@ export function useOrderReceipts(programId?: string) {
       }
 
       const filtered = parsed.filter(r => !spentIds.has(r.id));
-      // Chain verification removed — wallet holding the record IS the proof of ownership.
-      // Spent records are filtered via spentIds after cancel/execute.
-      console.log(`OrderReceipts: ${filtered.length} active`);
-      setReceipts(filtered);
+
+      // Chain-verify limit receipts only (orderType 0) — bot executes them on-chain
+      // which doesn't mark the wallet record as spent. TP/SL receipts are NOT verified
+      // here because we need their plaintext available for the cancel flow.
+      const EXPLORER = 'https://api.explorer.provable.com/v1/testnet';
+      const verified = await Promise.all(
+        filtered.map(async (r) => {
+          if (r.orderType !== 0) return r; // only check limit receipts
+          try {
+            const res = await fetch(`${EXPLORER}/program/${PROGRAM_ID}/mapping/pending_orders/${r.orderId}`);
+            const val = await res.text();
+            if (!val || val === 'null' || val.includes('false') || res.status === 404) {
+              console.log(`LimitReceipt ${r.orderId.slice(0,20)} executed/cancelled on-chain — hiding`);
+              return null;
+            }
+            return r;
+          } catch {
+            return r; // network error — keep it
+          }
+        })
+      );
+      const active = verified.filter(Boolean) as typeof filtered;
+
+      console.log(`OrderReceipts: ${active.length} active (${filtered.length - active.length} limit orders executed/hidden)`);
+      setReceipts(active);
       setDecrypted(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to decrypt OrderReceipt records');
@@ -210,8 +231,22 @@ export function useOrderReceipts(programId?: string) {
         });
       }
       const filtered = parsed.filter(r => !spentIds.has(r.id));
-      // Chain verification removed — wallet holding the record IS the proof of ownership.
-      setReceipts(filtered);
+
+      // Chain-verify limit receipts only — hide executed ones
+      const EXPLORER = 'https://api.explorer.provable.com/v1/testnet';
+      const verified = await Promise.all(
+        filtered.map(async (r) => {
+          if (r.orderType !== 0) return r;
+          try {
+            const res = await fetch(`${EXPLORER}/program/${PROGRAM_ID}/mapping/pending_orders/${r.orderId}`);
+            const val = await res.text();
+            if (!val || val === 'null' || val.includes('false') || res.status === 404) return null;
+            return r;
+          } catch { return r; }
+        })
+      );
+      const active = verified.filter(Boolean) as typeof filtered;
+      setReceipts(active);
       setDecrypted(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to decrypt OrderReceipt records');

@@ -3,6 +3,8 @@
 // All data is client-side only — reconstructed from decrypted private records.
 
 import { useState } from 'react';
+import { usePrivateData } from '@/contexts/PrivateDataContext';
+import { formatUsdc, formatPrice } from '@/utils/aleo';
 
 type Tab = 'portfolio' | 'history';
 
@@ -17,7 +19,7 @@ const MOCK_HISTORY = [
 
 export function PortfolioPage() {
   const [activeTab, setActiveTab] = useState<Tab>('portfolio');
- 
+  const { orders } = usePrivateData();
 
   const tabClass = (active: boolean) =>
     `px-4 py-2 rounded-lg text-sm font-medium transition-colors ${

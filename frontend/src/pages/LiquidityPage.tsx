@@ -107,7 +107,10 @@ export function LiquidityPage({ pair, poolLiquidity, totalLPTokens, longOI, shor
     ? Number((totalOI * BigInt(100)) / poolLiquidity)
     : 0;
 
-  const availableLiquidity = poolLiquidity > totalOI ? poolLiquidity - totalOI : 0n;
+  // Safety buffer: 10% of total liquidity (WITHDRAWAL_BUFFER_BPS = 100_000 / 1_000_000)
+  const safetyBuffer = (poolLiquidity * 100_000n) / 1_000_000n;
+  const totalLocked = totalOI + safetyBuffer;
+  const availableLiquidity = poolLiquidity > totalLocked ? poolLiquidity - totalLocked : 0n;
   const availablePercent = poolLiquidity > 0n
     ? Number((availableLiquidity * 100n) / poolLiquidity)
     : 0;
@@ -341,7 +344,7 @@ export function LiquidityPage({ pair, poolLiquidity, totalLPTokens, longOI, shor
             ${formatUsdc(availableLiquidity)}
           </p>
           <p className="text-xs text-gray-500 mt-1">
-            {availablePercent.toFixed(1)}% free · ${formatUsdc(totalOI)} locked
+            {availablePercent.toFixed(1)}% free · ${formatUsdc(totalOI)} OI · ${formatUsdc(safetyBuffer)} buffer
           </p>
         </div>
       </div>
@@ -624,7 +627,7 @@ export function LiquidityPage({ pair, poolLiquidity, totalLPTokens, longOI, shor
                                     <p className={`text-xs ${maxWithdraw === 0n ? 'text-red-400' : 'text-gray-500'}`}>
                                       Max withdraw: ${formatUsdc(maxWithdraw)}
                                       {maxWithdraw < maxEntitled && (
-                                        <span className="text-yellow-500 ml-1">(locked: ${formatUsdc(totalOI)})</span>
+                                        <span className="text-yellow-500 ml-1">(locked: ${formatUsdc(totalOI)} OI + ${formatUsdc(safetyBuffer)} buffer)</span>
                                       )}
                                     </p>
                                   </div>

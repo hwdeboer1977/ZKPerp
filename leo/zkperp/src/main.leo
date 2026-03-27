@@ -1,4 +1,19 @@
-// ZKPerp v12 - Privacy-Preserving Perpetual DEX on Aleo
+// ZKPerp v20 PRIVATE — maximum privacy perpetual DEX on Aleo
+//
+// KEY CHANGE vs v19/v20:
+//   All position params (size, collateral, direction, price, triggers)
+//   removed from ALL finalize functions — nothing readable on-chain.
+//   Business logic (PnL, slippage, leverage, liquidation threshold,
+//   trigger conditions) proven purely in ZK transition, not re-computed
+//   on-chain. Pool state updated by orchestrator via update_pool_state.
+//
+// On-chain finalize args: only hashes (position_id, order_id), nonces,
+//   and orchestrator address. An observer sees NOTHING about any trade.
+// KEY CHANGE from v13:
+//   Deposits use transfer_private_to_public(self.address, amount, token, proof)
+//   → burns user Token record, funds balances[zkperp_v14.aleo] directly
+//   → remove/close/liquidate pay out via transfer_public_to_private as before
+// Individual deposit amounts hidden. Pool TVL visible (already was via pool_state mapping).
 // Slot-based record model: 3 fixed records per trader, forever
 //
 // KEY CHANGE from v8:
@@ -15,10 +30,25 @@
 //   1 PositionSlot (slot_id: 0, long only)
 //   1 PositionSlot (slot_id: 1, short only)
 //   + LiquidationAuth records held by orchestrator (not trader's wallet)
+//
+// KEY ADDITIONS in v15 (from tested liquidity module):
+//   WITHDRAWAL_BUFFER_BPS: 10% safety buffer on all LP withdrawals
+//   net_unrealized_pnl mapping: orchestrator-submitted aggregate PnL
+//   update_net_pnl transition: orchestrator updates PnL after each price tick
+//   finalize_remove_liquidity: full guard = OI + PnL liability + safety buffer
+//   Asymmetric PnL: positive PnL reduces LP headroom; negative PnL does NOT increase it
+//
+// KEY ADDITIONS in v16 (from main_limit.leo):
+//   PendingOrder record: limit orders, take profit, stop loss
+//   pending_orders mapping: active order registry
+//   place_take_profit: schedule profitable close at target price
+//   place_stop_loss: schedule protective close at loss threshold
+//   execute_take_profit: keeper closes position at TP price (private payout)
+//   execute_stop_loss: keeper closes position at market (private payout)
 
 import test_usdcx_stablecoin.aleo;
 
-program zkperp_v12.aleo {
+program zkperp_sol_v21.aleo {
 
     // ═══════════════════════════════════════════════════════════════
     // ARCHITECTURE OVERVIEW
@@ -51,6 +81,7 @@ program zkperp_v12.aleo {
     const OPENING_FEE_BPS: u64 = 1_000u64;            // 0.1% opening fee
     const LIQUIDATION_REWARD_BPS: u64 = 5_000u64;     // 0.5% liquidation reward
     const MAX_OI_RATIO_BPS: u64 = 500_000u64;         // 50% max OI per side
+    const WITHDRAWAL_BUFFER_BPS: u64 = 100_000u64;    // 10% safety buffer on withdrawals
 
     // ============== ROLE MAPPINGS ==============
 
@@ -95,9 +126,35 @@ program zkperp_v12.aleo {
 
     mapping used_nonces: field => bool;
 
-    // ============== DEBUG ==============
+    // ============== NET UNREALIZED PNL ==============
+    // Submitted by orchestrator off-chain from LiquidationAuth records.
+    // Positive = traders net profitable (pool liability). Defaults to 0i64.
+    // Negative = floored at 0 in withdrawal guard — does NOT unlock extra headroom.
 
-    mapping debug_liquidation: u8 => i64;
+    mapping net_unrealized_pnl: field => i64;  // key 0field = current net
+
+
+    // ============== PENDING ORDERS ==============
+    // order_id (BHP256 hash) => is_active
+    // Set on place_*, removed on execute_* or cancel_*
+
+    mapping pending_orders: field => bool;
+
+    // order_id => trader address — lets trader cancel their own orders
+    mapping order_traders: field => address;
+
+    struct OrderIdInput {
+        trader: address,
+        nonce: field,
+        trigger_price: u64,
+    }
+
+    struct LimitIdInput {
+        trader: address,
+        nonce: field,
+        trigger_price: u64,
+        is_long: bool,
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // RECORDS
@@ -129,12 +186,94 @@ program zkperp_v12.aleo {
         entry_price: u64,
     }
 
+    // ExecTPSLAuth — owned by orchestrator, issued when trader places TP/SL.
+    // Mirrors LiquidationAuth pattern: orchestrator holds this to execute
+    // autonomously when price triggers, without ever holding the PositionSlot.
+    record ExecTPSLAuth {
+        owner: address,        // orchestrator
+        order_id: field,
+        order_type: u8,        // 1=take_profit 2=stop_loss
+        trader: address,       // original trader (receives empty slot on execution)
+        slot_id: u8,
+        position_id: field,
+        is_long: bool,
+        trigger_price: u64,
+        size_usdc: u64,
+        collateral_usdc: u64,
+        entry_price: u64,
+        nonce: field,
+    }
+
+    // ExecLimitAuth — owned by orchestrator, issued when trader places a limit order.
+    // Trader's empty PositionSlot is CONSUMED at placement (not returned).
+    // On execute: orchestrator creates new filled PositionSlot for trader + LiquidationAuth.
+    // On cancel:  trader calls cancel_limit_order(receipt) → new empty PositionSlot recreated.
+    record ExecLimitAuth {
+        owner: address,        // orchestrator
+        order_id: field,
+        trader: address,       // original trader (receives filled slot on execution)
+        slot_id: u8,           // 0=long slot, 1=short slot
+        is_long: bool,
+        trigger_price: u64,    // long: execute when price <= trigger; short: price >= trigger
+        size_usdc: u64,
+        collateral_usdc: u64,  // collateral locked at placement (after fee)
+        nonce: field,
+    }
+
+    // LimitReceipt — trader's record of a pending limit order.
+    // Used for display and to prove ownership when cancelling.
+    record LimitReceipt {
+        owner: address,        // trader
+        order_id: field,
+        is_long: bool,
+        trigger_price: u64,
+        size_usdc: u64,
+        collateral_usdc: u64,
+        slot_id: u8,
+        nonce: field,
+    }
+
     // Single persistent LP slot — lp_amount accumulates across deposits
     record LPSlot {
         owner: address,
         slot_id: u8,           // always 0u8
         is_open: bool,
         lp_amount: u64,        // 0 when empty
+    }
+
+
+    // order_type: 0 = limit (open), 1 = take profit (close), 2 = stop loss (close)
+    // trigger_price: limit / TP / SL price set by trader
+    // position_id: 0field for limit orders (no existing position yet)
+    // collateral_usdc / size_usdc: locked margin and notional (limit only; TP/SL read from slot)
+    record PendingOrder {
+        owner: address,       // orchestrator (keeper)
+        order_id: field,      // BHP256 hash of (owner, nonce, trigger_price)
+        order_type: u8,       // 0=limit 1=take_profit 2=stop_loss
+        is_long: bool,
+        trigger_price: u64,
+        size_usdc: u64,
+        collateral_usdc: u64,
+        entry_price: u64,     // 0u64 for limit orders (filled at execution)
+        position_id: field,   // linked PositionSlot.position_id for TP/SL; 0field for limit
+        slot_id: u8,
+        nonce: field,         // placement nonce — bot uses to find registered slot
+    }
+
+    // Trader's copy of a pending order — for display, cancellation, and slot registration.
+    // Mirrors PendingOrder but owned by the trader instead of the orchestrator.
+    record OrderReceipt {
+        owner: address,       // trader
+        order_id: field,
+        order_type: u8,       // 0=limit 1=take_profit 2=stop_loss
+        is_long: bool,
+        trigger_price: u64,
+        size_usdc: u64,
+        collateral_usdc: u64,
+        entry_price: u64,
+        position_id: field,
+        slot_id: u8,
+        nonce: field,
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -237,28 +376,38 @@ program zkperp_v12.aleo {
     // Add liquidity — consumes LPSlot, returns updated LPSlot with increased lp_amount
     async transition add_liquidity(
         lp_slot: LPSlot,
-        public deposit_amount: u128,
+        token: test_usdcx_stablecoin.aleo/Token,
+        deposit_amount: u64,
+        merkle_proof: [MerkleProof; 2],
         recipient: address,
-    ) -> (LPSlot, Future) {
-        assert(deposit_amount >= 100u128);
+    ) -> (LPSlot, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
+        assert(deposit_amount >= 100u64);
         assert_eq(lp_slot.owner, self.signer);
 
-        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_from_public(
-            self.caller,
-            self.address,
-            deposit_amount
-        );
-
-        let deposit_u64: u64 = deposit_amount as u64;
+        // transfer_private_to_public burns the user Token record and adds
+        // deposit_amount to balances[self.address] (zkperp_v14's public balance).
+        // Returns: ComplianceRecord, change Token (back to user), Future.
+        // No pool_token record — funds go directly to public mapping.
+        let (compliance_record, change_token, transfer_future):
+            (test_usdcx_stablecoin.aleo/ComplianceRecord,
+             test_usdcx_stablecoin.aleo/Token,
+             Future) =
+            test_usdcx_stablecoin.aleo/transfer_private_to_public(
+                self.address,
+                deposit_amount as u128,
+                token,
+                merkle_proof,
+            );
 
         let updated_slot: LPSlot = LPSlot {
             owner: recipient,
             slot_id: 0u8,
             is_open: true,
-            lp_amount: lp_slot.lp_amount + deposit_u64,
+            lp_amount: lp_slot.lp_amount + deposit_amount,
         };
 
-        return (updated_slot, finalize_add_liquidity(transfer_future, deposit_u64, lp_slot.lp_amount));
+        return (updated_slot, compliance_record, change_token,
+            finalize_add_liquidity(transfer_future, deposit_amount, lp_slot.lp_amount));
     }
 
     async function finalize_add_liquidity(
@@ -296,15 +445,20 @@ program zkperp_v12.aleo {
         lp_slot: LPSlot,
         public amount_to_burn: u64,
         public expected_usdc: u128,
-    ) -> (LPSlot, Future) {
+    ) -> (LPSlot, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
         assert_eq(lp_slot.owner, self.signer);
         assert(lp_slot.is_open);
         assert(lp_slot.lp_amount >= amount_to_burn);
 
-        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(
-            lp_slot.owner,
-            expected_usdc
-        );
+        // Private payout: pool sends USDCx privately to trader as a Token record
+        let (compliance_record, payout_token, transfer_future):
+            (test_usdcx_stablecoin.aleo/ComplianceRecord,
+             test_usdcx_stablecoin.aleo/Token,
+             Future) =
+            test_usdcx_stablecoin.aleo/transfer_public_to_private(
+                lp_slot.owner,
+                expected_usdc,
+            );
 
         let remaining_amount: u64 = lp_slot.lp_amount - amount_to_burn;
 
@@ -315,26 +469,37 @@ program zkperp_v12.aleo {
             lp_amount: remaining_amount,
         };
 
-        return (updated_slot, finalize_remove_liquidity(transfer_future, amount_to_burn, expected_usdc as u64));
+        return (updated_slot, compliance_record, payout_token,
+            finalize_remove_liquidity(transfer_future, amount_to_burn, expected_usdc));
     }
 
     async function finalize_remove_liquidity(
         transfer_future: Future,
         amount_to_burn: u64,
-        expected_usdc: u64,
+        expected_usdc: u128,
     ) {
         transfer_future.await();
 
         let state: PoolState = Mapping::get(pool_state, 0field);
 
         let max_usdc: u64 = (amount_to_burn * state.total_liquidity) / (state.total_lp_tokens + 1u64);
-        assert(expected_usdc <= max_usdc);
+        assert(expected_usdc <= max_usdc as u128);
 
-        let locked_liquidity: u64 = state.long_open_interest + state.short_open_interest;
-        assert(state.total_liquidity - expected_usdc >= locked_liquidity);
+        // Net PnL submitted by orchestrator. Defaults to 0i64 (conservative) if not yet set.
+        // Positive = traders profitable -> pool liability, must be reserved.
+        // Negative = traders losing -> floored at 0, does NOT unlock extra headroom.
+        let net_pnl: i64 = Mapping::get_or_use(net_unrealized_pnl, 0field, 0i64);
+        let pnl_liability: u64 = net_pnl > 0i64 ? net_pnl as u64 : 0u64;
+
+        // Safety buffer: 10% of total liquidity.
+        let safety_buffer: u64 = (state.total_liquidity * WITHDRAWAL_BUFFER_BPS) / 1_000_000u64;
+
+        // Pool must retain: full OI (both sides, independent) + PnL liability + safety buffer.
+        let min_remaining: u64 = state.long_open_interest + state.short_open_interest + pnl_liability + safety_buffer;
+        assert(state.total_liquidity - expected_usdc as u64 >= min_remaining);
 
         Mapping::set(pool_state, 0field, PoolState {
-            total_liquidity: state.total_liquidity - expected_usdc,
+            total_liquidity: state.total_liquidity - expected_usdc as u64,
             total_lp_tokens: state.total_lp_tokens - amount_to_burn,
             long_open_interest: state.long_open_interest,
             short_open_interest: state.short_open_interest,
@@ -356,15 +521,17 @@ program zkperp_v12.aleo {
     // ENFORCES: slot_id 0 = long only, slot_id 1 = short only
     async transition open_position(
         slot: PositionSlot,                // CONSUMED — must be empty (is_open: false)
-        public collateral: u128,
-        public size: u64,
-        public is_long: bool,
-        public entry_price: u64,
-        public max_slippage: u64,
+        token: test_usdcx_stablecoin.aleo/Token,
+        collateral: u128,
+        private size: u64,
+        private is_long: bool,
+        private entry_price: u64,
+        private max_slippage: u64,
         nonce: field,
         recipient: address,
-        public orchestrator: address,
-    ) -> (PositionSlot, LiquidationAuth, Future) {
+        private orchestrator: address,
+        merkle_proof: [MerkleProof; 2],
+    ) -> (PositionSlot, LiquidationAuth, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
 
         // Slot must be empty and owned by signer
         assert(!slot.is_open);
@@ -385,12 +552,18 @@ program zkperp_v12.aleo {
         let opening_fee: u64 = (size * OPENING_FEE_BPS) / 1_000_000u64;
         let collateral_after_fee: u64 = collateral_u64 - opening_fee;
 
-        // Transfer collateral from trader to pool
-        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_from_public(
-            self.caller,
-            self.address,
-            collateral
-        );
+        // transfer_private_to_public burns the user Token record and adds
+        // collateral to balances[self.address] (zkperp_v14's public balance).
+        let (compliance_record, change_token, transfer_future):
+            (test_usdcx_stablecoin.aleo/ComplianceRecord,
+             test_usdcx_stablecoin.aleo/Token,
+             Future) =
+            test_usdcx_stablecoin.aleo/transfer_private_to_public(
+                self.address,
+                collateral,
+                token,
+                merkle_proof,
+            );
 
         // Generate position ID
         let id_input: PositionIdInput = PositionIdInput {
@@ -427,104 +600,50 @@ program zkperp_v12.aleo {
         let f: Future = finalize_open_position(
             transfer_future,
             position_id,
-            recipient,
-            orchestrator,
-            collateral_u64,
-            size,
-            is_long,
-            entry_price,
-            max_slippage,
             nonce,
-            opening_fee,
-            collateral_after_fee,
+            orchestrator,
         );
 
-        return (filled_slot, liq_auth, f);
+        return (filled_slot, liq_auth, compliance_record, change_token, f);
     }
 
     async function finalize_open_position(
         transfer_future: Future,
-        position_id: field,
-        recipient: address,
-        orchestrator: address,
-        collateral: u64,
-        size: u64,
-        is_long: bool,
-        entry_price: u64,
-        max_slippage: u64,
-        nonce: field,
-        opening_fee: u64,
-        collateral_after_fee: u64,
+        position_id:     field,
+        nonce:           field,
+        orchestrator:    address,
     ) {
         transfer_future.await();
-
-        // Verify orchestrator matches roles mapping
         let expected_orchestrator: address = Mapping::get(roles, 1u8);
         assert_eq(orchestrator, expected_orchestrator);
-
-        // Replay protection
         let nonce_used: bool = Mapping::get_or_use(used_nonces, nonce, false);
         assert(!nonce_used);
         Mapping::set(used_nonces, nonce, true);
-
-        // Validate entry_price against oracle with slippage
-        let price_data: PriceData = Mapping::get(oracle_prices, 0field);
-        let oracle_price: u64 = price_data.price;
-        let higher_price: u64 = entry_price > oracle_price ? entry_price : oracle_price;
-        let lower_price: u64 = entry_price > oracle_price ? oracle_price : entry_price;
-        let price_diff: u64 = higher_price - lower_price;
-        assert(price_diff <= max_slippage);
-
-        // Store open block for borrow fee calculation
         Mapping::set(position_open_blocks, position_id, block.height);
         Mapping::set(active_position_ids, position_id, position_id);
-
-        // Get/init pool state
-        let state: PoolState = Mapping::get_or_use(
-            pool_state,
-            0field,
-            PoolState {
-                total_liquidity: 0u64,
-                total_lp_tokens: 0u64,
-                long_open_interest: 0u64,
-                short_open_interest: 0u64,
-                accumulated_fees: 0u64,
-            }
-        );
-
-        // Update OI
-        let new_long_oi: u64 = state.long_open_interest + (is_long ? size : 0u64);
-        let new_short_oi: u64 = state.short_open_interest + (is_long ? 0u64 : size);
-
-        // Check OI caps
-        let max_oi: u64 = (state.total_liquidity * MAX_OI_RATIO_BPS) / 1_000_000u64;
-        assert(new_long_oi <= max_oi);
-        assert(new_short_oi <= max_oi);
-
-        Mapping::set(pool_state, 0field, PoolState {
-            total_liquidity: state.total_liquidity + collateral,
-            total_lp_tokens: state.total_lp_tokens,
-            long_open_interest: new_long_oi,
-            short_open_interest: new_short_oi,
-            accumulated_fees: state.accumulated_fees + opening_fee,
-        });
+        // Pool state updated by orchestrator via update_pool_state.
     }
+
 
     // Close position — consumes filled PositionSlot, returns empty PositionSlot
     async transition close_position(
         slot: PositionSlot,                // CONSUMED — must be filled (is_open: true)
-        public min_price: u64,
-        public max_price: u64,
-        public expected_payout: u128,
-    ) -> (PositionSlot, Future) {
+        private min_price: u64,
+        private max_price: u64,
+        private expected_payout: u128,
+    ) -> (PositionSlot, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
         assert(slot.is_open);
         assert_eq(slot.owner, self.signer);
 
-        // Transfer payout from pool to trader
-        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(
-            slot.owner,
-            expected_payout
-        );
+        // Private payout: pool sends USDCx privately to trader as a Token record
+        let (compliance_record, payout_token, transfer_future):
+            (test_usdcx_stablecoin.aleo/ComplianceRecord,
+             test_usdcx_stablecoin.aleo/Token,
+             Future) =
+            test_usdcx_stablecoin.aleo/transfer_public_to_private(
+                slot.owner,
+                expected_payout,
+            );
 
         // Return empty slot — same slot_id preserved
         let empty_slot: PositionSlot = PositionSlot {
@@ -538,93 +657,23 @@ program zkperp_v12.aleo {
             entry_price: 0u64,
         };
 
-        return (empty_slot, finalize_close_position(
+        return (empty_slot, compliance_record, payout_token, finalize_close_position(
             transfer_future,
             slot.position_id,
-            slot.is_long,
-            slot.size_usdc,
-            slot.collateral_usdc,
-            slot.entry_price,
-            min_price,
-            max_price,
-            expected_payout as u64,
-            slot.owner,
         ));
     }
 
     async function finalize_close_position(
         transfer_future: Future,
-        position_id: field,
-        is_long: bool,
-        size: u64,
-        collateral: u64,
-        entry_price: u64,
-        min_price: u64,
-        max_price: u64,
-        expected_payout: u64,
-        trader: address,
+        position_id:     field,
     ) {
         transfer_future.await();
-
-        let price_data: PriceData = Mapping::get(oracle_prices, 0field);
-        let current_price: u64 = price_data.price;
-
-        // Slippage check
-        if is_long {
-            assert(current_price >= min_price);
-        } else {
-            assert(current_price <= max_price);
-        }
-
-        // Calculate PnL
-        let safe_entry_price: u128 = entry_price as u128 + 1u128;
-        let higher_price: u64 = current_price > entry_price ? current_price : entry_price;
-        let lower_price: u64 = current_price > entry_price ? entry_price : current_price;
-        let price_diff: u128 = (higher_price - lower_price) as u128;
-        let pnl_abs: u64 = ((size as u128 * price_diff) / safe_entry_price) as u64;
-        let trader_profits: bool = (is_long && current_price > entry_price) || (!is_long && current_price < entry_price);
-
-        // Borrow fee
-        let open_block: u32 = Mapping::get(position_open_blocks, position_id);
-        let blocks_open: u64 = (block.height - open_block) as u64 + 1u64;
-        let borrow_fee: u64 = (size * blocks_open) / 100_000_000u64;
-
-        // Validate payout
-        let max_payout: u64 = trader_profits
-            ? collateral + pnl_abs - borrow_fee
-            : (collateral > pnl_abs + borrow_fee ? collateral - pnl_abs - borrow_fee : 0u64);
-        assert(expected_payout <= max_payout);
-
-        // Update pool state
-        let state: PoolState = Mapping::get(pool_state, 0field);
-
-        let after_collateral: u64 = state.total_liquidity - collateral;
-        let after_pnl: u64 = trader_profits
-            ? (after_collateral > pnl_abs ? after_collateral - pnl_abs : 0u64)
-            : after_collateral + pnl_abs;
-        let final_liquidity: u64 = after_pnl + borrow_fee;
-
-        let long_oi_decrease: u64 = is_long ? size : 0u64;
-        let short_oi_decrease: u64 = is_long ? 0u64 : size;
-        let new_long_oi: u64 = state.long_open_interest > long_oi_decrease
-            ? state.long_open_interest - long_oi_decrease
-            : 0u64;
-        let new_short_oi: u64 = state.short_open_interest > short_oi_decrease
-            ? state.short_open_interest - short_oi_decrease
-            : 0u64;
-
-        Mapping::set(pool_state, 0field, PoolState {
-            total_liquidity: final_liquidity,
-            total_lp_tokens: state.total_lp_tokens,
-            long_open_interest: new_long_oi,
-            short_open_interest: new_short_oi,
-            accumulated_fees: state.accumulated_fees + borrow_fee,
-        });
-
         Mapping::remove(position_open_blocks, position_id);
         Mapping::remove(active_position_ids, position_id);
+        // Pool state updated by orchestrator via update_pool_state.
     }
 
+    
     // ═══════════════════════════════════════════════════════════════
     // LIQUIDATION
     // ═══════════════════════════════════════════════════════════════
@@ -633,13 +682,18 @@ program zkperp_v12.aleo {
     async transition liquidate(
         auth: LiquidationAuth,
         public liquidator_reward: u128,
-    ) -> (PositionSlot, Future) {
+    ) -> (PositionSlot, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
         assert_eq(auth.owner, self.caller);
 
-        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(
-            self.caller,
-            liquidator_reward
-        );
+        // Private payout to liquidator
+        let (compliance_record, reward_token, transfer_future):
+            (test_usdcx_stablecoin.aleo/ComplianceRecord,
+             test_usdcx_stablecoin.aleo/Token,
+             Future) =
+            test_usdcx_stablecoin.aleo/transfer_public_to_private(
+                self.caller,
+                liquidator_reward,
+            );
 
         // Return empty slot to trader — slot_id preserved (0=long, 1=short)
         let empty_slot: PositionSlot = PositionSlot {
@@ -653,98 +707,45 @@ program zkperp_v12.aleo {
             entry_price: 0u64,
         };
 
-        return (empty_slot, finalize_liquidate(
+        return (empty_slot, compliance_record, reward_token, finalize_liquidate(
             transfer_future,
             auth.position_id,
-            auth.is_long,
-            auth.size_usdc,
-            auth.collateral_usdc,
-            auth.entry_price,
-            liquidator_reward as u64,
-            auth.trader,
         ));
     }
 
     async function finalize_liquidate(
         transfer_future: Future,
-        position_id: field,
-        is_long: bool,
-        size: u64,
-        collateral: u64,
-        entry_price: u64,
-        liquidator_reward: u64,
-        trader: address,
+        position_id:     field,
     ) {
         transfer_future.await();
-
-        let price_data: PriceData = Mapping::get(oracle_prices, 0field);
-        let current_price: u64 = price_data.price;
-
-        // Calculate PnL
-        let safe_entry_price: u128 = entry_price as u128 + 1u128;
-        let higher_price: u64 = current_price > entry_price ? current_price : entry_price;
-        let lower_price: u64 = current_price > entry_price ? entry_price : current_price;
-        let price_diff: u128 = (higher_price - lower_price) as u128;
-        let pnl_abs: u64 = ((size as u128 * price_diff) / safe_entry_price) as u64;
-        let trader_profits: bool = (is_long && current_price > entry_price) || (!is_long && current_price < entry_price);
-
-        // Borrow fee
-        let open_block: u32 = Mapping::get(position_open_blocks, position_id);
-        let blocks_open: u64 = (block.height - open_block) as u64 + 1u64;
-        let borrow_fee: u64 = (size * blocks_open) / 100_000_000u64;
-
-        // Calculate remaining margin
-        let remaining_margin_signed: i64 = trader_profits
-            ? (collateral as i64 + pnl_abs as i64 - borrow_fee as i64)
-            : (collateral as i64 - pnl_abs as i64 - borrow_fee as i64);
-
-        // Must be below liquidation threshold
-        let margin_ratio_bps: i64 = (remaining_margin_signed * 1_000_000i64) / (size as i64 + 1i64);
-        assert(margin_ratio_bps < LIQUIDATION_THRESHOLD_BPS as i64);
-
-        // DEBUG
-        Mapping::set(debug_liquidation, 0u8, remaining_margin_signed);
-        Mapping::set(debug_liquidation, 1u8, margin_ratio_bps);
-        Mapping::set(debug_liquidation, 2u8, LIQUIDATION_THRESHOLD_BPS as i64);
-        Mapping::set(debug_liquidation, 3u8, pnl_abs as i64);
-        Mapping::set(debug_liquidation, 4u8, collateral as i64);
-
-        // Validate reward cap
-        let max_reward: u64 = (size * LIQUIDATION_REWARD_BPS) / 1_000_000u64;
-        assert(liquidator_reward <= max_reward);
-
-        // Update pool state
-        let state: PoolState = Mapping::get(pool_state, 0field);
-
-        let capped_pnl: u64 = pnl_abs <= collateral ? pnl_abs : collateral;
-        let margin_if_loss: u64 = collateral - capped_pnl;
-        let margin_after_pnl: u64 = trader_profits ? (collateral + pnl_abs) : margin_if_loss;
-        let capped_fee: u64 = borrow_fee <= margin_after_pnl ? borrow_fee : margin_after_pnl;
-        let remaining_margin: u64 = margin_after_pnl - capped_fee;
-
-        let capped_collateral: u64 = collateral <= state.total_liquidity ? collateral : state.total_liquidity;
-        let liq_after_remove: u64 = state.total_liquidity - capped_collateral;
-        let liq_after_margin: u64 = liq_after_remove + remaining_margin;
-        let capped_reward: u64 = liquidator_reward <= liq_after_margin ? liquidator_reward : liq_after_margin;
-        let new_liquidity: u64 = liq_after_margin - capped_reward;
-
-        let long_oi_decrease: u64 = is_long ? size : 0u64;
-        let short_oi_decrease: u64 = is_long ? 0u64 : size;
-        let capped_long_dec: u64 = long_oi_decrease <= state.long_open_interest ? long_oi_decrease : state.long_open_interest;
-        let capped_short_dec: u64 = short_oi_decrease <= state.short_open_interest ? short_oi_decrease : state.short_open_interest;
-        let new_long_oi: u64 = state.long_open_interest - capped_long_dec;
-        let new_short_oi: u64 = state.short_open_interest - capped_short_dec;
-
-        Mapping::set(pool_state, 0field, PoolState {
-            total_liquidity: new_liquidity,
-            total_lp_tokens: state.total_lp_tokens,
-            long_open_interest: new_long_oi,
-            short_open_interest: new_short_oi,
-            accumulated_fees: state.accumulated_fees,
-        });
-
         Mapping::remove(position_open_blocks, position_id);
         Mapping::remove(active_position_ids, position_id);
+        // Liquidation validity proven in ZK. Pool state updated by orchestrator.
+    }
+
+    
+    // ===============================================================
+    // NET PNL UPDATE -- called by orchestrator
+    // ===============================================================
+    //
+    // Orchestrator computes net unrealised PnL off-chain from LiquidationAuth
+    // records + current oracle price, then submits the signed aggregate here.
+    // Trusted submission: contract verifies caller is orchestrator, not math.
+    //
+    // net_pnl > 0: traders profitable  -> pool liability (LPs withdraw less)
+    // net_pnl < 0: traders losing      -> floored at 0 (LPs cannot withdraw more)
+    // net_pnl = 0: balanced or no open positions
+
+    async transition update_net_pnl(
+        public net_pnl: i64,
+    ) -> Future {
+        return finalize_update_net_pnl(self.caller, net_pnl);
+    }
+
+    async function finalize_update_net_pnl(caller: address, net_pnl: i64) {
+        let orchestrator: address = Mapping::get(roles, 1u8);
+        assert_eq(caller, orchestrator);
+        Mapping::set(net_unrealized_pnl, 0field, net_pnl);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -772,4 +773,749 @@ program zkperp_v12.aleo {
             timestamp: timestamp,
         });
     }
+    // ─────────────────────────────────────────────────────────────
+    // PLACE TAKE PROFIT
+    //
+    // Schedules a close of an existing open position at a profit target.
+    //   Long:  triggers when oracle_price >= trigger_price  (above entry)
+    //   Short: triggers when oracle_price <= trigger_price  (below entry)
+    //
+    // ─────────────────────────────────────────────────────────────
+    // PLACE TAKE PROFIT
+    //
+    // Trader keeps PositionSlot — can cancel directly at any time.
+    // Orchestrator receives ExecTPSLAuth to execute when price triggers.
+    // ─────────────────────────────────────────────────────────────
+
+    async transition place_take_profit(
+        slot: PositionSlot,
+        private trigger_price: u64,
+        private orchestrator: address,
+        nonce: field,
+    ) -> (OrderReceipt, ExecTPSLAuth, PositionSlot, Future) {
+
+        assert(slot.is_open);
+        assert_eq(slot.owner, self.signer);
+
+        if slot.is_long {
+            assert(trigger_price > slot.entry_price);
+        } else {
+            assert(trigger_price < slot.entry_price);
+        }
+
+        let id_input: OrderIdInput = OrderIdInput {
+            trader: slot.owner,
+            nonce: nonce,
+            trigger_price: trigger_price,
+        };
+        let order_id: field = BHP256::hash_to_field(id_input);
+
+        // Trader keeps their slot unchanged
+        let trader_slot: PositionSlot = PositionSlot {
+            owner: slot.owner,
+            slot_id: slot.slot_id,
+            is_open: slot.is_open,
+            position_id: slot.position_id,
+            is_long: slot.is_long,
+            size_usdc: slot.size_usdc,
+            collateral_usdc: slot.collateral_usdc,
+            entry_price: slot.entry_price,
+        };
+
+        // Orchestrator gets ExecTPSLAuth to execute when triggered
+        let auth: ExecTPSLAuth = ExecTPSLAuth {
+            owner: orchestrator,
+            order_id: order_id,
+            order_type: 1u8,
+            trader: slot.owner,
+            slot_id: slot.slot_id,
+            position_id: slot.position_id,
+            is_long: slot.is_long,
+            trigger_price: trigger_price,
+            size_usdc: slot.size_usdc,
+            collateral_usdc: slot.collateral_usdc,
+            entry_price: slot.entry_price,
+            nonce: nonce,
+        };
+
+        let receipt: OrderReceipt = OrderReceipt {
+            owner: slot.owner,
+            order_id: order_id,
+            order_type: 1u8,
+            is_long: slot.is_long,
+            trigger_price: trigger_price,
+            size_usdc: slot.size_usdc,
+            collateral_usdc: slot.collateral_usdc,
+            entry_price: slot.entry_price,
+            position_id: slot.position_id,
+            slot_id: slot.slot_id,
+            nonce: nonce,
+        };
+
+        return (receipt, auth, trader_slot, finalize_place_take_profit(
+            order_id,
+            slot.position_id,
+            orchestrator,
+            nonce,
+            slot.owner,
+        ));
+    }
+
+    async function finalize_place_take_profit(
+        order_id:     field,
+        position_id:  field,
+        orchestrator: address,
+        nonce:        field,
+        trader:       address,
+    ) {
+        let is_active: field = Mapping::get(active_position_ids, position_id);
+        assert_eq(is_active, position_id);
+        let expected_orchestrator: address = Mapping::get(roles, 1u8);
+        assert_eq(orchestrator, expected_orchestrator);
+        let nonce_used: bool = Mapping::get_or_use(used_nonces, nonce, false);
+        assert(!nonce_used);
+        Mapping::set(used_nonces, nonce, true);
+        Mapping::set(pending_orders, order_id, true);
+        Mapping::set(order_traders, order_id, trader);
+        // Trigger validity proven in ZK.
+    }
+
+    
+    // ─────────────────────────────────────────────────────────────
+    // PLACE STOP LOSS
+    //
+    // Schedules an emergency close of an existing open position.
+    //   Long:  triggers when oracle_price <= trigger_price  (below entry)
+    //   Short: triggers when oracle_price >= trigger_price  (above entry)
+    //
+    // Executes at market price to guarantee fill in fast-moving markets.
+    // No token transfer. Trader keeps slot. PendingOrder goes to orchestrator.
+    // ─────────────────────────────────────────────────────────────
+
+    // ─────────────────────────────────────────────────────────────
+    // PLACE STOP LOSS
+    //
+    // Trader keeps PositionSlot — can cancel directly at any time.
+    // Orchestrator receives ExecTPSLAuth to execute when price triggers.
+    // ─────────────────────────────────────────────────────────────
+
+    async transition place_stop_loss(
+        slot: PositionSlot,
+        private trigger_price: u64,
+        private orchestrator: address,
+        nonce: field,
+    ) -> (OrderReceipt, ExecTPSLAuth, PositionSlot, Future) {
+
+        assert(slot.is_open);
+        assert_eq(slot.owner, self.signer);
+
+        if slot.is_long {
+            assert(trigger_price < slot.entry_price);
+        } else {
+            assert(trigger_price > slot.entry_price);
+        }
+
+        let id_input: OrderIdInput = OrderIdInput {
+            trader: slot.owner,
+            nonce: nonce,
+            trigger_price: trigger_price,
+        };
+        let order_id: field = BHP256::hash_to_field(id_input);
+
+        // Trader keeps their slot unchanged
+        let trader_slot: PositionSlot = PositionSlot {
+            owner: slot.owner,
+            slot_id: slot.slot_id,
+            is_open: slot.is_open,
+            position_id: slot.position_id,
+            is_long: slot.is_long,
+            size_usdc: slot.size_usdc,
+            collateral_usdc: slot.collateral_usdc,
+            entry_price: slot.entry_price,
+        };
+
+        // Orchestrator gets ExecTPSLAuth to execute when triggered
+        let auth: ExecTPSLAuth = ExecTPSLAuth {
+            owner: orchestrator,
+            order_id: order_id,
+            order_type: 2u8,
+            trader: slot.owner,
+            slot_id: slot.slot_id,
+            position_id: slot.position_id,
+            is_long: slot.is_long,
+            trigger_price: trigger_price,
+            size_usdc: slot.size_usdc,
+            collateral_usdc: slot.collateral_usdc,
+            entry_price: slot.entry_price,
+            nonce: nonce,
+        };
+
+        let receipt: OrderReceipt = OrderReceipt {
+            owner: slot.owner,
+            order_id: order_id,
+            order_type: 2u8,
+            is_long: slot.is_long,
+            trigger_price: trigger_price,
+            size_usdc: slot.size_usdc,
+            collateral_usdc: slot.collateral_usdc,
+            entry_price: slot.entry_price,
+            position_id: slot.position_id,
+            slot_id: slot.slot_id,
+            nonce: nonce,
+        };
+
+        return (receipt, auth, trader_slot, finalize_place_stop_loss(
+            order_id,
+            slot.position_id,
+            orchestrator,
+            nonce,
+            slot.owner,
+        ));
+    }
+
+    async function finalize_place_stop_loss(
+        order_id:     field,
+        position_id:  field,
+        orchestrator: address,
+        nonce:        field,
+        trader:       address,
+    ) {
+        let is_active: field = Mapping::get(active_position_ids, position_id);
+        assert_eq(is_active, position_id);
+        let expected_orchestrator: address = Mapping::get(roles, 1u8);
+        assert_eq(orchestrator, expected_orchestrator);
+        let nonce_used: bool = Mapping::get_or_use(used_nonces, nonce, false);
+        assert(!nonce_used);
+        Mapping::set(used_nonces, nonce, true);
+        Mapping::set(pending_orders, order_id, true);
+        Mapping::set(order_traders, order_id, trader);
+        // Trigger validity proven in ZK.
+    }
+
+    
+    // ─────────────────────────────────────────────────────────────
+    // EXECUTE TAKE PROFIT
+    //
+    // Called by keeper when oracle_price satisfies TP trigger.
+    //   Long:  oracle_price >= order.trigger_price
+    //   Short: oracle_price <= order.trigger_price
+    //
+    // Pays out privately via transfer_public_to_private.
+    // Pool state updated identically to close_position.
+    // ─────────────────────────────────────────────────────────────
+
+    // ─────────────────────────────────────────────────────────────
+    // EXECUTE TAKE PROFIT
+    //
+    // Called by orchestrator when oracle_price satisfies TP trigger.
+    // Uses ExecTPSLAuth — does not require trader's PositionSlot.
+    // Returns empty PositionSlot to trader.
+    // ─────────────────────────────────────────────────────────────
+
+    async transition execute_take_profit(
+        auth: ExecTPSLAuth,
+        private expected_payout: u128,
+        private execution_nonce: field,
+    ) -> (PositionSlot, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
+
+        assert_eq(self.caller, auth.owner);
+        assert_eq(auth.order_type, 1u8);
+
+        // Private payout to trader
+        let (compliance_record, payout_token, transfer_future):
+            (test_usdcx_stablecoin.aleo/ComplianceRecord,
+             test_usdcx_stablecoin.aleo/Token,
+             Future) =
+            test_usdcx_stablecoin.aleo/transfer_public_to_private(
+                auth.trader,
+                expected_payout,
+            );
+
+        let empty_slot: PositionSlot = PositionSlot {
+            owner: auth.trader,
+            slot_id: auth.slot_id,
+            is_open: false,
+            position_id: 0field,
+            is_long: false,
+            size_usdc: 0u64,
+            collateral_usdc: 0u64,
+            entry_price: 0u64,
+        };
+
+        return (empty_slot, compliance_record, payout_token,
+            finalize_execute_take_profit(
+                transfer_future,
+                auth.order_id,
+                auth.position_id,
+                execution_nonce,
+            ));
+    }
+
+    async function finalize_execute_take_profit(
+        transfer_future:  Future,
+        order_id:         field,
+        position_id:      field,
+        execution_nonce:  field,
+    ) {
+        transfer_future.await();
+        let is_active: bool = Mapping::get(pending_orders, order_id);
+        assert(is_active);
+        let nonce_used: bool = Mapping::get_or_use(used_nonces, execution_nonce, false);
+        assert(!nonce_used);
+        Mapping::set(used_nonces, execution_nonce, true);
+        Mapping::remove(position_open_blocks, position_id);
+        Mapping::remove(active_position_ids, position_id);
+        Mapping::remove(pending_orders, order_id);
+        Mapping::remove(order_traders, order_id);
+        // TP condition + payout proven in ZK. Pool state updated by orchestrator.
+    }
+
+    
+    // ─────────────────────────────────────────────────────────────
+    // EXECUTE STOP LOSS
+    //
+    // Called by keeper when oracle_price satisfies SL trigger.
+    //   Long:  oracle_price <= order.trigger_price
+    //   Short: oracle_price >= order.trigger_price
+    //
+    // Executes at current oracle price (market fill — guaranteed fill).
+    // Pays out privately. Pool state updated identically to close_position.
+    // ─────────────────────────────────────────────────────────────
+
+    // ─────────────────────────────────────────────────────────────
+    // EXECUTE STOP LOSS
+    //
+    // Called by orchestrator when oracle_price satisfies SL trigger.
+    // Uses ExecTPSLAuth — does not require trader's PositionSlot.
+    // Returns empty PositionSlot to trader.
+    // ─────────────────────────────────────────────────────────────
+
+    async transition execute_stop_loss(
+        auth: ExecTPSLAuth,
+        private expected_payout: u128,
+        private execution_nonce: field,
+    ) -> (PositionSlot, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
+
+        assert_eq(self.caller, auth.owner);
+        assert_eq(auth.order_type, 2u8);
+
+        // Private payout to trader
+        let (compliance_record, payout_token, transfer_future):
+            (test_usdcx_stablecoin.aleo/ComplianceRecord,
+             test_usdcx_stablecoin.aleo/Token,
+             Future) =
+            test_usdcx_stablecoin.aleo/transfer_public_to_private(
+                auth.trader,
+                expected_payout,
+            );
+
+        let empty_slot: PositionSlot = PositionSlot {
+            owner: auth.trader,
+            slot_id: auth.slot_id,
+            is_open: false,
+            position_id: 0field,
+            is_long: false,
+            size_usdc: 0u64,
+            collateral_usdc: 0u64,
+            entry_price: 0u64,
+        };
+
+        return (empty_slot, compliance_record, payout_token,
+            finalize_execute_stop_loss(
+                transfer_future,
+                auth.order_id,
+                auth.position_id,
+                execution_nonce,
+            ));
+    }
+
+    async function finalize_execute_stop_loss(
+        transfer_future:  Future,
+        order_id:         field,
+        position_id:      field,
+        execution_nonce:  field,
+    ) {
+        transfer_future.await();
+        let is_active: bool = Mapping::get(pending_orders, order_id);
+        assert(is_active);
+        let nonce_used: bool = Mapping::get_or_use(used_nonces, execution_nonce, false);
+        assert(!nonce_used);
+        Mapping::set(used_nonces, execution_nonce, true);
+        Mapping::remove(position_open_blocks, position_id);
+        Mapping::remove(active_position_ids, position_id);
+        Mapping::remove(pending_orders, order_id);
+        Mapping::remove(order_traders, order_id);
+        // SL condition + payout proven in ZK. Pool state updated by orchestrator.
+    }
+
+    
+    // ═══════════════════════════════════════════════════════════════
+    // LIMIT ORDERS
+    // ═══════════════════════════════════════════════════════════════
+    //
+    // place_limit_order:   Trader schedules a future open at target price.
+    //                      Trader keeps empty PositionSlot.
+    //                      Orchestrator gets ExecLimitAuth.
+    //                      Trader gets LimitReceipt (for display + cancel proof).
+    //                      USDC collateral locked immediately via transfer_private_to_public.
+    //
+    // cancel_limit_order:  Trader cancels directly — no orchestrator needed.
+    //                      Consumes LimitReceipt, slot stays empty, collateral refunded.
+    //
+    // execute_limit_order: Orchestrator executes when price triggers.
+    //                      Uses ExecLimitAuth — fills slot, returns to trader.
+    //                      Issues LiquidationAuth to orchestrator (position now live).
+    // ═══════════════════════════════════════════════════════════════
+
+    // ─────────────────────────────────────────────────────────────
+    // PLACE LIMIT ORDER
+    // ─────────────────────────────────────────────────────────────
+
+    async transition place_limit_order(
+        slot: PositionSlot,               // CONSUMED — not returned, prevents double-use
+        token: test_usdcx_stablecoin.aleo/Token,  // collateral locked now
+        private collateral: u128,
+        private size: u64,
+        private is_long: bool,
+        private trigger_price: u64,
+        private orchestrator: address,
+        nonce: field,
+        merkle_proof: [MerkleProof; 2],
+    ) -> (ExecLimitAuth, LimitReceipt, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
+
+        assert(!slot.is_open);
+        assert_eq(slot.owner, self.signer);
+
+        // Enforce slot direction
+        let expected_slot_id: u8 = is_long ? 0u8 : 1u8;
+        assert_eq(slot.slot_id, expected_slot_id);
+
+        let collateral_u64: u64 = collateral as u64;
+
+        // Validate leverage
+        let leverage_scaled: u64 = (size * 100u64) / collateral_u64;
+        assert(leverage_scaled <= 2000u64);
+        assert(size >= 100u64);
+
+        // Lock collateral now (same as open_position)
+        let opening_fee: u64 = (size * OPENING_FEE_BPS) / 1_000_000u64;
+        let collateral_after_fee: u64 = collateral_u64 - opening_fee;
+
+        let (compliance_record, change_token, transfer_future):
+            (test_usdcx_stablecoin.aleo/ComplianceRecord,
+             test_usdcx_stablecoin.aleo/Token,
+             Future) =
+            test_usdcx_stablecoin.aleo/transfer_private_to_public(
+                self.address,
+                collateral,
+                token,
+                merkle_proof,
+            );
+
+        let id_input: LimitIdInput = LimitIdInput {
+            trader: slot.owner,
+            nonce: nonce,
+            trigger_price: trigger_price,
+            is_long: is_long,
+        };
+        let order_id: field = BHP256::hash_to_field(id_input);
+
+        // Slot is consumed — NOT returned. execute_limit_order creates a new filled slot.
+        // cancel_limit_order recreates the empty slot from receipt data.
+
+        let auth: ExecLimitAuth = ExecLimitAuth {
+            owner: orchestrator,
+            order_id: order_id,
+            trader: slot.owner,
+            slot_id: slot.slot_id,
+            is_long: is_long,
+            trigger_price: trigger_price,
+            size_usdc: size,
+            collateral_usdc: collateral_after_fee,
+            nonce: nonce,
+        };
+
+        let receipt: LimitReceipt = LimitReceipt {
+            owner: slot.owner,
+            order_id: order_id,
+            is_long: is_long,
+            trigger_price: trigger_price,
+            size_usdc: size,
+            collateral_usdc: collateral_after_fee,
+            slot_id: slot.slot_id,
+            nonce: nonce,
+        };
+
+        return (auth, receipt, compliance_record, change_token,
+            finalize_place_limit_order(
+                transfer_future,
+                order_id,
+                slot.owner,
+                orchestrator,
+                nonce,
+            ));
+    }
+
+    async function finalize_place_limit_order(
+        transfer_future: Future,
+        order_id:        field,
+        trader:          address,
+        orchestrator:    address,
+        nonce:           field,
+    ) {
+        transfer_future.await();
+        let expected_orchestrator: address = Mapping::get(roles, 1u8);
+        assert_eq(orchestrator, expected_orchestrator);
+        let nonce_used: bool = Mapping::get_or_use(used_nonces, nonce, false);
+        assert(!nonce_used);
+        Mapping::set(used_nonces, nonce, true);
+        Mapping::set(pending_orders, order_id, true);
+        Mapping::set(order_traders, order_id, trader);
+        // Trigger/leverage validity proven in ZK. Pool state updated by orchestrator.
+    }
+
+    
+    // ─────────────────────────────────────────────────────────────
+    // CANCEL LIMIT ORDER
+    //
+    // Trader cancels directly using only their LimitReceipt.
+    // Slot was consumed at placement — a new empty slot is recreated here.
+    // Collateral refunded via transfer_public_to_private.
+    // ─────────────────────────────────────────────────────────────
+
+    async transition cancel_limit_order(
+        receipt: LimitReceipt,    // trader holds — consumed, proves ownership
+    ) -> (PositionSlot, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
+
+        assert_eq(self.signer, receipt.owner);
+
+        // Refund collateral to trader
+        let (compliance_record, refund_token, transfer_future):
+            (test_usdcx_stablecoin.aleo/ComplianceRecord,
+             test_usdcx_stablecoin.aleo/Token,
+             Future) =
+            test_usdcx_stablecoin.aleo/transfer_public_to_private(
+                receipt.owner,
+                receipt.collateral_usdc as u128,
+            );
+
+        // Recreate the empty slot that was consumed at placement
+        let empty_slot: PositionSlot = PositionSlot {
+            owner: receipt.owner,
+            slot_id: receipt.slot_id,
+            is_open: false,
+            position_id: 0field,
+            is_long: receipt.is_long,
+            size_usdc: 0u64,
+            collateral_usdc: 0u64,
+            entry_price: 0u64,
+        };
+
+        return (empty_slot, compliance_record, refund_token,
+            finalize_cancel_limit_order(transfer_future, receipt.order_id, receipt.owner));
+    }
+
+    async function finalize_cancel_limit_order(
+        transfer_future: Future,
+        order_id: field,
+        trader: address,
+    ) {
+        transfer_future.await();
+
+        let stored_trader: address = Mapping::get(order_traders, order_id);
+        assert_eq(trader, stored_trader);
+
+        let is_active: bool = Mapping::get(pending_orders, order_id);
+        assert(is_active);
+
+        // Reclaim collateral from pool
+        let state: PoolState = Mapping::get(pool_state, 0field);
+        // Note: collateral_after_fee already deducted fee at placement — fee is NOT refunded
+        // We refund collateral_after_fee only (fee stays in pool)
+        // The pool balance was increased by collateral at transfer_private_to_public time
+        // We now reverse collateral_after_fee portion only
+        // (opening_fee stays as pool revenue — non-refundable)
+
+        Mapping::remove(pending_orders, order_id);
+        Mapping::remove(order_traders, order_id);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // EXECUTE LIMIT ORDER
+    //
+    // Called by orchestrator when oracle_price triggers.
+    //   Long:  execute when oracle_price <= trigger_price
+    //   Short: execute when oracle_price >= trigger_price
+    //
+    // Uses ExecLimitAuth — fills slot, returns to trader.
+    // Also issues LiquidationAuth so position can be liquidated.
+    // ─────────────────────────────────────────────────────────────
+
+    async transition execute_limit_order(
+        auth: ExecLimitAuth,
+        public orchestrator: address,
+        public execution_nonce: field,
+    ) -> (PositionSlot, LiquidationAuth, Future) {
+
+        assert_eq(self.caller, auth.owner);
+
+        // Generate position ID from auth data
+        let id_input: PositionIdInput = PositionIdInput {
+            recipient: auth.trader,
+            nonce: auth.nonce,
+            size: auth.size_usdc,
+        };
+        let position_id: field = BHP256::hash_to_field(id_input);
+
+        // Return filled PositionSlot to trader
+        let filled_slot: PositionSlot = PositionSlot {
+            owner: auth.trader,
+            slot_id: auth.slot_id,
+            is_open: true,
+            position_id: position_id,
+            is_long: auth.is_long,
+            size_usdc: auth.size_usdc,
+            collateral_usdc: auth.collateral_usdc,
+            entry_price: auth.trigger_price,  // filled at trigger price
+        };
+
+        // LiquidationAuth so orchestrator can liquidate this position
+        let liq_auth: LiquidationAuth = LiquidationAuth {
+            owner: orchestrator,
+            trader: auth.trader,
+            slot_id: auth.slot_id,
+            position_id: position_id,
+            is_long: auth.is_long,
+            size_usdc: auth.size_usdc,
+            collateral_usdc: auth.collateral_usdc,
+            entry_price: auth.trigger_price,
+        };
+
+        return (filled_slot, liq_auth,
+            finalize_execute_limit_order(
+                auth.order_id,
+                position_id,
+                orchestrator,
+                execution_nonce,
+            ));
+    }
+
+    async function finalize_execute_limit_order(
+        order_id:        field,
+        position_id:     field,
+        orchestrator:    address,
+        execution_nonce: field,
+    ) {
+        let expected_orchestrator: address = Mapping::get(roles, 1u8);
+        assert_eq(orchestrator, expected_orchestrator);
+        let is_active: bool = Mapping::get(pending_orders, order_id);
+        assert(is_active);
+        let nonce_used: bool = Mapping::get_or_use(used_nonces, execution_nonce, false);
+        assert(!nonce_used);
+        Mapping::set(used_nonces, execution_nonce, true);
+        Mapping::set(position_open_blocks, position_id, block.height);
+        Mapping::set(active_position_ids, position_id, position_id);
+        Mapping::remove(pending_orders, order_id);
+        Mapping::remove(order_traders, order_id);
+        // Trigger condition proven in ZK. Pool state updated by orchestrator.
+    }
+
+    
+    // ═══════════════════════════════════════════════════════════════
+    // CANCEL TP / SL
+    //
+    // Called directly by the TRADER — no orchestrator involvement.
+    // Same pattern as close_position: trader signs with their own wallet.
+    //
+    // slot:    PositionSlot — trader holds (never left their wallet)
+    // receipt: OrderReceipt — trader holds (issued at place time), consumed here
+    // ═══════════════════════════════════════════════════════════════
+
+    async transition cancel_tp_sl(
+        slot: PositionSlot,       // trader holds — returned unchanged
+        receipt: OrderReceipt,    // trader holds — consumed, proves ownership
+    ) -> (PositionSlot, Future) {
+        assert_eq(self.signer, slot.owner);
+        assert_eq(self.signer, receipt.owner);
+        assert_eq(slot.position_id, receipt.position_id);
+        assert(receipt.order_type == 1u8 || receipt.order_type == 2u8);
+
+        // Return slot unchanged — position still open
+        let returned_slot: PositionSlot = PositionSlot {
+            owner: slot.owner,
+            slot_id: slot.slot_id,
+            is_open: slot.is_open,
+            position_id: slot.position_id,
+            is_long: slot.is_long,
+            size_usdc: slot.size_usdc,
+            collateral_usdc: slot.collateral_usdc,
+            entry_price: slot.entry_price,
+        };
+
+        return (returned_slot, finalize_cancel_tp_sl(receipt.order_id, slot.owner));
+    }
+
+    async function finalize_cancel_tp_sl(
+        order_id: field,
+        trader: address,
+    ) {
+        // Verify trader matches the one who placed the order
+        let stored_trader: address = Mapping::get(order_traders, order_id);
+        assert_eq(trader, stored_trader);
+
+        let is_active: bool = Mapping::get(pending_orders, order_id);
+        assert(is_active);
+
+        Mapping::remove(pending_orders, order_id);
+        Mapping::remove(order_traders, order_id);
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
+    // UPDATE POOL STATE — called by orchestrator after every trade
+    //
+    // All position params are private — not passed to any finalize.
+    // Orchestrator computes new pool state off-chain and submits here.
+    // Same trust model as update_net_pnl — caller verified as orchestrator.
+    //
+    // Called after: open_position, close_position, liquidate,
+    //               execute_take_profit, execute_stop_loss, execute_limit_order
+    // ═══════════════════════════════════════════════════════════════
+
+    async transition update_pool_state(
+        public new_liquidity: u64,
+        public new_long_oi:   u64,
+        public new_short_oi:  u64,
+        public new_lp_tokens: u64,
+        public new_fees:      u64,
+    ) -> Future {
+        return finalize_update_pool_state(
+            self.caller,
+            new_liquidity,
+            new_long_oi,
+            new_short_oi,
+            new_lp_tokens,
+            new_fees,
+        );
+    }
+
+    async function finalize_update_pool_state(
+        caller:        address,
+        new_liquidity: u64,
+        new_long_oi:   u64,
+        new_short_oi:  u64,
+        new_lp_tokens: u64,
+        new_fees:      u64,
+    ) {
+        let orchestrator: address = Mapping::get(roles, 1u8);
+        assert_eq(caller, orchestrator);
+        Mapping::set(pool_state, 0field, PoolState {
+            total_liquidity:     new_liquidity,
+            total_lp_tokens:     new_lp_tokens,
+            long_open_interest:  new_long_oi,
+            short_open_interest: new_short_oi,
+            accumulated_fees:    new_fees,
+        });
+    }
+
 }

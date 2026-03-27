@@ -17,7 +17,7 @@ services:
       - key: FRONTEND_ORIGIN
         value: https://zk-perp.vercel.app/  # update this
       - key: PROGRAM_ID
-        value: zkperp_v9.aleo
+        value: zkperp_btc_v21.aleo
       - key: NETWORK
         value: testnet
       - key: NETWORK_ID

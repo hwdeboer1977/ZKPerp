@@ -43,15 +43,15 @@ const CONFIG = {
   apiKey: process.env.PROVABLE_API_KEY || '',
 
   // Program
-  programId: process.env.PROGRAM_ID || 'zkperp_v19.aleo',
+  programId: process.env.PROGRAM_ID || 'zkperp_btc_v21.aleo',
   network: process.env.NETWORK || 'testnet',
   networkId: process.env.NETWORK_ID || '1',
 
   // Multi-asset program IDs (one Aleo program per market)
   programs: {
-    BTC_USD: process.env.PROGRAM_ID_BTC || 'zkperp_v19.aleo',
-    ETH_USD: process.env.PROGRAM_ID_ETH || 'zkperp_v19b.aleo',
-    SOL_USD: process.env.PROGRAM_ID_SOL || 'zkperp_v19c.aleo',
+    BTC_USD: process.env.PROGRAM_ID_BTC || '_btc_v21.aleo',
+    ETH_USD: process.env.PROGRAM_ID_ETH || 'zkperp_eth_v21.aleo',
+    SOL_USD: process.env.PROGRAM_ID_SOL || 'zkperp_sol_v21.aleo',
   },
 
   // Oracle endpoint auth token (must match ZKPERP_ORCHESTRATOR_TOKEN in aleo-oracle .env)

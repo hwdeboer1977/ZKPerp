@@ -35,6 +35,14 @@ export function Navigation() {
           <NavLink to="/status" className={({ isActive }) => linkClass(isActive)}>
             <span className="mr-1.5">📡</span>System Status
           </NavLink>
+
+          <NavLink to="/portfolio" className={({ isActive }) => linkClass(isActive)}>
+            <span className="mr-1.5">📊</span>Portfolio
+          </NavLink>
+
+          <NavLink to="/compliance" className={({ isActive }) => linkClass(isActive)}>
+            <span className="mr-1.5">🛡️</span>Compliance
+          </NavLink>
         </div>
       </div>
     </nav>

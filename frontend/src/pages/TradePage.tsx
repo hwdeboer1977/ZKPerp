@@ -64,8 +64,10 @@ export function TradePage({ pair, currentPrice, oracleSet, onPriceChange }: Prop
         </div>
         <h1 className="text-2xl font-bold text-white mb-2">Trade {pairConfig.label}</h1>
         <p className="text-gray-400">
-          Open leveraged long or short positions on {pairConfig.baseAsset} with up to 20x leverage.
-          Your positions stay completely private.
+          Open leveraged long or short positions on {pairConfig.baseAsset} with up to 20x leverage.{' '}
+          <span className="inline-flex items-center gap-1 text-zkperp-accent font-medium">
+            🔒 Your positions stay completely private
+          </span>{' '}
         </p>
       </div>
 
@@ -161,13 +163,13 @@ export function TradePage({ pair, currentPrice, oracleSet, onPriceChange }: Prop
       </div>
 
       {/* Info Cards */}
-      <div className="grid md:grid-cols-3 gap-4 mt-8">
+      <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mt-8">
         <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-5">
           <div className="flex items-center gap-3 mb-2">
             <div className="w-8 h-8 rounded-lg bg-zkperp-accent/20 flex items-center justify-center">🔒</div>
             <h3 className="font-semibold text-white">Private Positions</h3>
           </div>
-          <p className="text-sm text-gray-400">Position size, entry price, and PnL are encrypted using zero-knowledge proofs.</p>
+          <p className="text-sm text-gray-400">Position size, entry price, and PnL are encrypted on-chain. Only you can decrypt them — not even the protocol can read them.</p>
         </div>
         <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-5">
           <div className="flex items-center gap-3 mb-2">
@@ -183,7 +185,15 @@ export function TradePage({ pair, currentPrice, oracleSet, onPriceChange }: Prop
           </div>
           <p className="text-sm text-gray-400">Your trade intent is hidden until executed. No MEV, no sandwich attacks.</p>
         </div>
+        <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-5">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center">📋</div>
+            <h3 className="font-semibold text-white">Compliance Ready</h3>
+          </div>
+          <p className="text-sm text-gray-400">Every deposit generates a <span className="text-white font-medium">ComplianceRecord</span> — a private ZK receipt linking your transaction to a verified Merkle proof. Privacy without sacrificing auditability.</p>
+        </div>
       </div>
+
     </div>
   );
 }

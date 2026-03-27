@@ -590,6 +590,58 @@ async function submitNetPnl(price) {
   }
 }
 
+
+// Submit pool state to on-chain pool_state mapping.
+// Called after every liquidation scan so Long/Short OI reflects reality.
+// Computes OI from positionStore, reads current liquidity from chain.
+async function submitPoolState(programId) {
+  if (!provableClient) return;
+  const pid = programId || CONFIG.programId;
+
+  try {
+    // Read current pool state from chain
+    const raw = await fetchText(`${CONFIG.apiEndpoint}/program/${pid}/mapping/pool_state/0field`);
+    if (!raw || raw === 'null') { log('POOL', `No pool_state on ${pid} — skipping`); return; }
+
+    const liqMatch   = raw.match(/total_liquidity:\s*(\d+)u64/);
+    const lpMatch    = raw.match(/total_lp_tokens:\s*(\d+)u64/);
+    const feesMatch  = raw.match(/accumulated_fees:\s*(\d+)u64/);
+    if (!liqMatch) { log('POOL', 'Could not parse pool_state'); return; }
+
+    const totalLiquidity = BigInt(liqMatch[1]);
+    const totalLpTokens  = BigInt(lpMatch?.[1] || '0');
+    const accFees        = BigInt(feesMatch?.[1] || '0');
+
+    // Compute OI from in-memory position store (keyed by positionId)
+    let longOI = 0n, shortOI = 0n;
+    for (const pos of positionStore.values()) {
+      if (pos.isLong) longOI  += pos.size || 0n;
+      else            shortOI += pos.size || 0n;
+    }
+
+    log('POOL', `Submitting update_pool_state: liquidity=${totalLiquidity} longOI=${longOI} shortOI=${shortOI}`);
+
+    await provableClient.executeTransaction({
+      privateKey:   CONFIG.privateKey,
+      programId:    pid,
+      functionName: 'update_pool_state',
+      inputs: [
+        `${totalLiquidity}u64`,
+        `${longOI}u64`,
+        `${shortOI}u64`,
+        `${totalLpTokens}u64`,
+        `${accFees}u64`,
+      ],
+      useFeeMaster: CONFIG.execUseFeeMaster,
+      timeoutMs:    120_000,
+    });
+    log('POOL', `✅ update_pool_state submitted (longOI=${longOI} shortOI=${shortOI})`);
+  } catch (err) {
+    const msg = err?.message ?? (typeof err === 'string' ? err : JSON.stringify(err));
+    logError('POOL', `update_pool_state failed: ${msg}`);
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════
 // SCANNER
 // ═══════════════════════════════════════════════════════════════
@@ -1194,6 +1246,9 @@ async function liquidationTick() {
     logMemoryUsage('after-scan');
 
     if (positions.length === 0) { log('SCAN', 'No open positions'); return; }
+
+    // Update on-chain pool state with current OI from scanned positions
+    if (provableClient) await submitPoolState(CONFIG.programId);
 
     for (const pos of positions) {
       const m        = calculateMarginRatio(pos, currentOraclePrice);

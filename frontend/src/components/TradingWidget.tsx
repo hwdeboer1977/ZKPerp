@@ -474,6 +474,29 @@ export function TradingWidget({
               </button>
             </div>
 
+            {/* Slot lock warning */}
+            {decrypted && (
+              <div className={`rounded-lg border p-3 text-xs ${
+                !limitSlot
+                  ? 'bg-zkperp-red/10 border-zkperp-red/30 text-zkperp-red'
+                  : 'bg-yellow-500/5 border-yellow-500/20 text-yellow-400'
+              }`}>
+                {!limitSlot ? (
+                  <p>
+                    <span className="font-semibold">⚠ {limitIsLong ? 'Long' : 'Short'} slot occupied</span>
+                    {' '}— your {limitIsLong ? 'long' : 'short'} slot is already reserved by a pending limit order or open position.
+                    Cancel the existing limit order first to place a new one.
+                  </p>
+                ) : (
+                  <p>
+                    <span className="font-semibold">🔒 Slot reserved on placement</span>
+                    {' '}— placing this limit order immediately locks your {limitIsLong ? 'long' : 'short'} slot.
+                    You cannot open another {limitIsLong ? 'long' : 'short'} position until this order is executed or cancelled.
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="space-y-2">
               <label className="flex justify-between text-sm">
                 <span className="text-gray-400">Trigger Price (USD)</span>

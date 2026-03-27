@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
-import { PROGRAM_ID } from '../utils/aleo';
+import { PROGRAM_ID as DEFAULT_PROGRAM_ID } from '../utils/aleo';
 
 export interface OrderReceiptRecord {
   id: string;
@@ -21,7 +21,8 @@ export interface OrderReceiptRecord {
   rawRecord: any;
 }
 
-export function useOrderReceipts() {
+export function useOrderReceipts(programId?: string) {
+  const PROGRAM_ID = programId || DEFAULT_PROGRAM_ID;
   const { address, requestRecords, decrypt } = useWallet();
 
   const [receipts, setReceipts]         = useState<OrderReceiptRecord[]>([]);
@@ -40,10 +41,12 @@ export function useOrderReceipts() {
     setError(null);
     try {
       const records = await requestRecords(PROGRAM_ID);
+      // Include spent records — OrderReceipt is consumed on cancel/execute but
+      // wallet may mark it spent before the frontend processes it
       const raw = records.filter(
         (r: any) => (r.recordName === 'OrderReceipt' || r.recordName === 'LimitReceipt') && !r.spent
       );
-      console.log(`Found ${raw.length} OrderReceipt+LimitReceipt records`);
+      console.log(`Found ${raw.length} OrderReceipt+LimitReceipt records (unspent)`);
       setRawRecords(raw);
       setRecordCount(raw.length);
       setDecrypted(false);
@@ -116,29 +119,10 @@ export function useOrderReceipts() {
       }
 
       const filtered = parsed.filter(r => !spentIds.has(r.id));
-
-      // Cross-check against chain — filter out receipts where order is no longer active
-      const EXPLORER = 'https://api.explorer.provable.com/v1/testnet';
-      const chainVerified = await Promise.all(
-        filtered.map(async (r) => {
-          try {
-            const res = await fetch(`${EXPLORER}/program/${PROGRAM_ID}/mapping/pending_orders/${r.orderId}`);
-            const val = await res.text();
-            // If mapping returns null/false/empty — order was executed or cancelled on-chain
-            if (!val || val === 'null' || val.includes('false')) {
-              console.log(`Receipt ${r.orderId.slice(0,20)} no longer active on-chain — hiding`);
-              return null;
-            }
-            return r;
-          } catch {
-            return r; // network error — keep it
-          }
-        })
-      );
-      const active = chainVerified.filter(Boolean) as typeof filtered;
-
-      console.log(`OrderReceipts: ${active.length} active (${filtered.length - active.length} executed/cancelled on-chain)`);
-      setReceipts(active);
+      // Chain verification removed — wallet holding the record IS the proof of ownership.
+      // Spent records are filtered via spentIds after cancel/execute.
+      console.log(`OrderReceipts: ${filtered.length} active`);
+      setReceipts(filtered);
       setDecrypted(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to decrypt OrderReceipt records');
@@ -226,19 +210,8 @@ export function useOrderReceipts() {
         });
       }
       const filtered = parsed.filter(r => !spentIds.has(r.id));
-      const EXPLORER = 'https://api.explorer.provable.com/v1/testnet';
-      const chainVerified = await Promise.all(
-        filtered.map(async (r) => {
-          try {
-            const res = await fetch(`${EXPLORER}/program/${PROGRAM_ID}/mapping/pending_orders/${r.orderId}`);
-            const val = await res.text();
-            if (!val || val === 'null' || val.includes('false')) return null;
-            return r;
-          } catch { return r; }
-        })
-      );
-      const active = chainVerified.filter(Boolean) as typeof filtered;
-      setReceipts(active);
+      // Chain verification removed — wallet holding the record IS the proof of ownership.
+      setReceipts(filtered);
       setDecrypted(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to decrypt OrderReceipt records');

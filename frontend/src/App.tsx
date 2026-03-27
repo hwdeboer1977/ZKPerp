@@ -21,8 +21,6 @@ import { LandingPage } from '@/pages/LandingPage';
 import { PAIR_IDS, getPair } from '@/config/pairs';
 import type { PairId } from '@/config/pairs';
 import { PrivateDataProvider } from '@/contexts/PrivateDataContext';
-import { PortfolioPage } from '@/pages/PortfolioPage';
-import { CompliancePage } from '@/pages/CompliancePage';
 
 // ── TradeRoute ────────────────────────────────────────────────────────────────
 // Reads :pair, fetches that pair's oracle price, passes typed prop to TradePage.
@@ -88,7 +86,7 @@ function AppContent() {
   if (location.pathname === '/') return <LandingPage />;
 
   return (
-    <PrivateDataProvider>
+    <PrivateDataProvider programId={getPair('btc').programId}>
     <AppLayout>
       <Header />
       <Navigation />
@@ -124,9 +122,6 @@ function AppContent() {
 
         {/* Admin — unlisted from nav, still accessible at /admin */}
         <Route path="/admin" element={<AdminPage />} />
-
-        <Route path="/portfolio" element={<PortfolioPage />} />
-        <Route path="/compliance" element={<CompliancePage />} />
       </Routes>
 
       <footer className="border-t border-zkperp-border mt-16">

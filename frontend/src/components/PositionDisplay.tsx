@@ -6,7 +6,7 @@ import { TransactionStatus } from '@/components/TransactionStatus';
 import { useSlots, type PositionSlotRecord } from '@/hooks/useSlots';
 import { getPair } from '@/config/pairs';
 import type { PairId } from '@/config/pairs';
-import { useOrderReceipts } from '@/hooks/useOrderReceipts';
+import { usePrivateData } from '@/contexts/PrivateDataContext';
 import {
   formatUsdc,
   formatPrice,
@@ -53,8 +53,10 @@ export function PositionDisplay({
   const slTx = useTransaction();
   const cancelTx = useTransaction();
 
-  // Receipts needed for TP/SL cancel
-  const { receipts: orderReceipts } = useOrderReceipts();
+  // Receipts from shared context — same instance as PendingOrdersDisplay
+  const { orders } = usePrivateData();
+  const orderReceipts = orders.receipts;
+  const markReceiptSpent = orders.markSpent;
 
 
 
@@ -183,8 +185,10 @@ export function PositionDisplay({
       ? orderReceipts.find(r => r.orderId === orderId)
       : orderReceipts.find(r => r.positionId === positionId && r.orderType === (orderType === 'tp' ? 1 : 2));
 
-    if (!receipt?.plaintext) {
-      alert('Cancel failed: OrderReceipt not found — try refreshing the page');
+    // Use receipt if found, otherwise try positionId-only fallback
+    const finalReceipt = receipt ?? orderReceipts.find(r => r.positionId === positionId);
+    if (!finalReceipt?.plaintext) {
+      alert('Cancel failed: OrderReceipt not found — click Orders to decrypt your order records first, then retry');
       return;
     }
 
@@ -199,24 +203,28 @@ export function PositionDisplay({
       await cancelTx.execute({
         program: PROGRAM_ID,
         function: 'cancel_tp_sl',
-        inputs: [compact(slot.plaintext), compact(receipt.plaintext)],
+        inputs: [compact(slot.plaintext), compact(finalReceipt.plaintext)],
         fee: 3_000_000,
         privateFee: false,
       });
 
       setPendingCancelData({ positionId, orderType });
+      // Poll chain for confirmation, then clear localStorage + mark receipt spent
       const pollCancel = async () => {
-        const checkId = receipt.orderId;
+        const checkId = finalReceipt.orderId;
+        const receiptId = finalReceipt.id;
         for (let i = 0; i < 30; i++) {
           await new Promise(r => setTimeout(r, 5000));
           try {
             const check = await fetch(`${ALEO_API}/program/${PROGRAM_ID}/mapping/pending_orders/${checkId}`);
             const val = await check.text();
             if (!val || val.includes('null') || val.includes('false')) {
+              // Confirmed on-chain — now safe to clear
               const updated = { ...activeOrders, [positionId]: { ...order } };
-              if (orderType === 'tp') { delete updated[positionId].tp; delete updated[positionId].tpOrderId; }
-              else { delete updated[positionId].sl; delete updated[positionId].slOrderId; }
+              if (orderType === 'tp') { delete updated[positionId].tp; delete updated[positionId].tpOrderId; delete updated[positionId].tpNonce; }
+              else { delete updated[positionId].sl; delete updated[positionId].slOrderId; delete updated[positionId].slNonce; }
               saveOrders(updated);
+              markReceiptSpent(receiptId);
               setPendingCancelData(null);
               setCancellingOrderKey(null);
               return;
@@ -567,49 +575,61 @@ export function PositionDisplay({
 
                       {/* TP input row */}
                       {!isTpActive && (
-                        <div className="flex gap-2 items-center">
-                          <div className="relative flex-1">
-                            <input
-                              type="number"
-                              placeholder={`TP price (${slot.isLong ? 'above' : 'below'} entry)`}
-                              value={tpInputs[slot.id] || ''}
-                              onChange={e => setTpInputs(prev => ({ ...prev, [slot.id]: e.target.value }))}
-                              disabled={isPlacingTp || isTpBusy}
-                              className="w-full bg-zkperp-dark border border-zkperp-green/30 focus:border-zkperp-green rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none disabled:opacity-40"
-                            />
-                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-zkperp-green">TP</span>
+                        <div className="space-y-1">
+                          <label className="flex items-center gap-1.5 text-xs font-semibold text-zkperp-green">
+                            <span>🎯</span> Take Profit
+                            <span className="font-normal text-gray-500">— close at profit target</span>
+                          </label>
+                          <div className="flex gap-2 items-center">
+                            <div className="relative flex-1">
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">$</span>
+                              <input
+                                type="number"
+                                placeholder={slot.isLong ? 'Above entry price' : 'Below entry price'}
+                                value={tpInputs[slot.id] || ''}
+                                onChange={e => setTpInputs(prev => ({ ...prev, [slot.id]: e.target.value }))}
+                                disabled={isPlacingTp || isTpBusy}
+                                className="w-full bg-zkperp-dark border border-zkperp-green/40 focus:border-zkperp-green rounded-lg pl-7 pr-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none disabled:opacity-40"
+                              />
+                            </div>
+                            <button
+                              onClick={() => handlePlaceTp(slot)}
+                              disabled={!tpInputs[slot.id] || isPlacingTp || isTpBusy || isClosing}
+                              className="px-4 py-2 bg-zkperp-green/30 hover:bg-zkperp-green/50 border border-zkperp-green/60 hover:border-zkperp-green disabled:opacity-40 rounded-lg text-xs font-bold text-zkperp-green transition-all whitespace-nowrap"
+                            >
+                              {isPlacingTp ? '...' : '✓ Set TP'}
+                            </button>
                           </div>
-                          <button
-                            onClick={() => handlePlaceTp(slot)}
-                            disabled={!tpInputs[slot.id] || isPlacingTp || isTpBusy || isClosing}
-                            className="px-3 py-1.5 bg-zkperp-green/20 hover:bg-zkperp-green/30 border border-zkperp-green/40 disabled:opacity-40 rounded-lg text-xs font-medium text-zkperp-green transition-colors whitespace-nowrap"
-                          >
-                            {isPlacingTp ? '...' : 'Set TP'}
-                          </button>
                         </div>
                       )}
 
                       {/* SL input row */}
                       {!isSlActive && (
-                        <div className="flex gap-2 items-center">
-                          <div className="relative flex-1">
-                            <input
-                              type="number"
-                              placeholder={`SL price (${slot.isLong ? 'below' : 'above'} entry)`}
-                              value={slInputs[slot.id] || ''}
-                              onChange={e => setSlInputs(prev => ({ ...prev, [slot.id]: e.target.value }))}
-                              disabled={isPlacingSl || isSlBusy}
-                              className="w-full bg-zkperp-dark border border-zkperp-red/30 focus:border-zkperp-red rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none disabled:opacity-40"
-                            />
-                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-zkperp-red">SL</span>
+                        <div className="space-y-1">
+                          <label className="flex items-center gap-1.5 text-xs font-semibold text-zkperp-red">
+                            <span>🛡️</span> Stop Loss
+                            <span className="font-normal text-gray-500">— limit your downside</span>
+                          </label>
+                          <div className="flex gap-2 items-center">
+                            <div className="relative flex-1">
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">$</span>
+                              <input
+                                type="number"
+                                placeholder={slot.isLong ? 'Below entry price' : 'Above entry price'}
+                                value={slInputs[slot.id] || ''}
+                                onChange={e => setSlInputs(prev => ({ ...prev, [slot.id]: e.target.value }))}
+                                disabled={isPlacingSl || isSlBusy}
+                                className="w-full bg-zkperp-dark border border-zkperp-red/40 focus:border-zkperp-red rounded-lg pl-7 pr-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none disabled:opacity-40"
+                              />
+                            </div>
+                            <button
+                              onClick={() => handlePlaceSl(slot)}
+                              disabled={!slInputs[slot.id] || isPlacingSl || isSlBusy || isClosing}
+                              className="px-4 py-2 bg-zkperp-red/30 hover:bg-zkperp-red/50 border border-zkperp-red/60 hover:border-zkperp-red disabled:opacity-40 rounded-lg text-xs font-bold text-zkperp-red transition-all whitespace-nowrap"
+                            >
+                              {isPlacingSl ? '...' : '✓ Set SL'}
+                            </button>
                           </div>
-                          <button
-                            onClick={() => handlePlaceSl(slot)}
-                            disabled={!slInputs[slot.id] || isPlacingSl || isSlBusy || isClosing}
-                            className="px-3 py-1.5 bg-zkperp-red/20 hover:bg-zkperp-red/30 border border-zkperp-red/40 disabled:opacity-40 rounded-lg text-xs font-medium text-zkperp-red transition-colors whitespace-nowrap"
-                          >
-                            {isPlacingSl ? '...' : 'Set SL'}
-                          </button>
                         </div>
                       )}
 

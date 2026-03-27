@@ -12,9 +12,14 @@ interface PrivateDataContextValue {
 
 const PrivateDataContext = createContext<PrivateDataContextValue | null>(null);
 
-export function PrivateDataProvider({ children }: { children: ReactNode }) {
+interface ProviderProps {
+  children: ReactNode;
+  programId?: string;
+}
+
+export function PrivateDataProvider({ children, programId }: ProviderProps) {
   const usdcx  = useUSDCx();
-  const orders = useOrderReceipts();
+  const orders = useOrderReceipts(programId);
 
   return (
     <PrivateDataContext.Provider value={{ usdcx, orders }}>

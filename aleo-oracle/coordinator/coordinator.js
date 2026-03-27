@@ -49,6 +49,7 @@ if (ALLOWED_SIGNERS.size === 0) {
 const latestBySignerAsset = new Map();
 
 // lastSubmittedKey: assetId → "assetId:roundId:updatedAt"
+const lastSubmittedTime = new Map(); // assetId → timestamp of last submission
 const lastSubmittedKey = new Map();
 
 // submission history (last 50)
@@ -158,13 +159,20 @@ app.post("/submit", async (req, res) => {
       const agreedPayload = bestItems[0].payload;
       const key = submitKey(agreedPayload);
 
-      // Dedup — skip if this exact round was already submitted
-      if (lastSubmittedKey.get(assetId) === key) {
+      // Dedup — skip if this exact round was already submitted recently.
+      // Allow re-submit after RESUBMIT_INTERVAL_MS even on same roundId,
+      // so the bot's quorumPrices map stays fresh when Chainlink feed is slow.
+      const RESUBMIT_INTERVAL_MS = Number(process.env.RESUBMIT_INTERVAL_MS || 5 * 60 * 1000);
+      const lastSubmitTime = lastSubmittedTime.get(assetId) || 0;
+      const staleOverride = Date.now() - lastSubmitTime > RESUBMIT_INTERVAL_MS;
+
+      if (lastSubmittedKey.get(assetId) === key && !staleOverride) {
         deduped.push(assetId);
         continue; // continue — don't block other assets
       }
 
       lastSubmittedKey.set(assetId, key);
+      lastSubmittedTime.set(assetId, Date.now());
 
       const signers = bestItems.map((x) => ({ signer: x.signer, signature: x.signature }));
 

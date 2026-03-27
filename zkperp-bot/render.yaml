@@ -11,21 +11,39 @@ services:
       - key: NODE_ENV
         value: production
       - key: MANAGER_PORT
-        value: 3000
+        value: "3000"
       - key: BOT_PORT
-        value: 3001
+        value: "3001"
+      - key: API_PORT
+        value: "3001"
       - key: FRONTEND_ORIGIN
-        value: https://zk-perp.vercel.app/  # update this
+        value: https://zk-perp.vercel.app
       - key: PROGRAM_ID
         value: zkperp_btc_v21.aleo
+      - key: PROGRAM_ID_BTC
+        value: zkperp_btc_v21.aleo
+      - key: PROGRAM_ID_ETH
+        value: zkperp_eth_v21.aleo
+      - key: PROGRAM_ID_SOL
+        value: zkperp_sol_v21.aleo
       - key: NETWORK
         value: testnet
       - key: NETWORK_ID
         value: "1"
+      - key: API_ENDPOINT
+        value: https://api.explorer.provable.com/v1/testnet
+      - key: QUERY_ENDPOINT
+        value: https://api.explorer.provable.com/v1
+      - key: BROADCAST_ENDPOINT
+        value: https://api.explorer.provable.com/v1/testnet/transaction/broadcast
       - key: PRICE_INTERVAL
         value: "30000"
       - key: SCAN_INTERVAL
         value: "60000"
+      - key: EXEC_USE_FEE_MASTER
+        value: "false"
+      - key: DISABLE_ORACLE
+        value: "false"
       # Secrets — set these manually in Render dashboard (never commit)
       - key: PRIVATE_KEY
         sync: false
@@ -35,3 +53,5 @@ services:
         sync: false
       - key: PROVABLE_API_KEY
         sync: false
+      - key: ORACLE_TOKEN
+        sync: false  # must match ZKPERP_ORCHESTRATOR_TOKEN in aleo-oracle service

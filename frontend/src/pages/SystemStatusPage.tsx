@@ -220,7 +220,7 @@ export function SystemStatusPage({ currentPrice, poolLiquidity, longOI, shortOI 
               <h3 className="font-semibold text-white mb-3">Keeper Bot</h3>
               <div className="space-y-2 text-sm text-gray-400">
                 <p>The orchestrator bot runs continuously and handles three automated tasks:</p>
-                <p><span className="text-zkperp-accent font-medium">Oracle updates</span> — fetches BTC/ETH/SOL prices from Binance and pushes on-chain when deviation exceeds 1%.</p>
+                <p><span className="text-zkperp-accent font-medium">Oracle updates</span> — receives BTC/ETH/SOL prices from the 2-of-3 Chainlink quorum relay and pushes on-chain via <code className="text-xs">update_price</code> when deviation exceeds 1%. Falls back to public APIs if no fresh quorum is available.</p>
                 <p><span className="text-zkperp-accent font-medium">Liquidations</span> — decrypts LiquidationAuth records and submits <code className="text-xs">liquidate()</code> when margin ratio &lt; 1%.</p>
                 <p><span className="text-zkperp-accent font-medium">TP/SL &amp; limit orders</span> — monitors PendingOrder records and executes when trigger conditions are met.</p>
               </div>
@@ -243,7 +243,7 @@ export function SystemStatusPage({ currentPrice, poolLiquidity, longOI, shortOI 
         <div className="space-y-6">
           <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-6">
             <h3 className="font-semibold text-white mb-1">How the Oracle Works</h3>
-            <p className="text-sm text-gray-500 mb-6">ZKPerp uses a trusted orchestrator oracle — a single bot that pushes prices on-chain and aggregates unrealised PnL. Below is the current design and a roadmap toward a decentralized 2/3 quorum model.</p>
+            <p className="text-sm text-gray-500 mb-6">ZKPerp runs a live 2-of-3 Chainlink quorum oracle on testnet. Three independent relayers read Chainlink price feeds on Ethereum/Arbitrum, sign the data, and submit to a coordinator. The coordinator fires a price update only when 2-of-3 relayers agree on the same round. Below is the current design and the roadmap toward full on-chain ZK signature verification.</p>
 
             {/* PnL aggregation */}
             <div className="rounded-lg border border-zkperp-border bg-zkperp-dark p-4 mb-4">
@@ -256,12 +256,29 @@ export function SystemStatusPage({ currentPrice, poolLiquidity, longOI, shortOI 
               {/* Current */}
               <div className="rounded-lg border border-zkperp-border bg-zkperp-dark p-4">
                 <div className="flex items-center gap-2 mb-3">
-                  <span className="px-2 py-0.5 rounded text-xs font-medium bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">Current — Testnet</span>
-                  <span className="text-sm font-medium text-white">Single Trusted Oracle</span>
+                  <span className="px-2 py-0.5 rounded text-xs font-medium bg-green-500/20 text-green-400 border border-green-500/30">Live — Testnet</span>
+                  <span className="text-sm font-medium text-white">2-of-3 Chainlink Quorum Oracle</span>
                 </div>
                 <div className="space-y-2 text-sm text-gray-400">
-                  <p>The orchestrator bot fetches the BTC price from a public API (e.g. CoinGecko or Binance) every ~30 seconds and calls <code className="text-zkperp-accent text-xs bg-zkperp-dark/50 px-1 rounded">set_price</code> on-chain when the deviation exceeds 1%.</p>
-                  <p>This is sufficient for testnet but introduces a single point of trust — if the bot is compromised, it can post a false price.</p>
+                  <p>Three independent relayers (A, B, C) each read Chainlink price feeds on Ethereum mainnet (BTC/ETH) and Arbitrum (SOL) every 15 seconds. Each signs the canonical payload with a secp256k1 key and posts to a coordinator.</p>
+                  <p>The coordinator verifies all signatures against an allowlist, groups submissions by asset and round, and fires <code className="text-zkperp-accent text-xs bg-zkperp-dark/50 px-1 rounded">update_price</code> only when 2-of-3 relayers agree on the same Chainlink round. A single compromised relayer cannot post a false price.</p>
+                  <div className="mt-3 pt-3 border-t border-zkperp-border">
+                    <p className="text-xs text-gray-500 font-medium mb-2">Live flow (2-of-3 quorum):</p>
+                    <div className="flex items-center gap-2 flex-wrap text-xs">
+                      {['Relayer-A', 'Relayer-B', 'Relayer-C'].map((src, i) => (
+                        <span key={src} className="flex items-center gap-1">
+                          <span className="px-2 py-0.5 bg-zkperp-dark border border-zkperp-border rounded text-gray-300">{src}</span>
+                          {i < 2 && <span className="text-gray-600">→</span>}
+                        </span>
+                      ))}
+                      <span className="text-gray-600">→</span>
+                      <span className="px-2 py-0.5 bg-zkperp-accent/10 border border-zkperp-accent/30 rounded text-zkperp-accent">Coordinator</span>
+                      <span className="text-gray-600">→</span>
+                      <span className="px-2 py-0.5 bg-zkperp-accent/10 border border-zkperp-accent/30 rounded text-zkperp-accent">2/3 agree</span>
+                      <span className="text-gray-600">→</span>
+                      <span className="px-2 py-0.5 bg-zkperp-green/10 border border-zkperp-green/30 rounded text-zkperp-green">on-chain ✓</span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -269,10 +286,10 @@ export function SystemStatusPage({ currentPrice, poolLiquidity, longOI, shortOI 
               <div className="rounded-lg border border-zkperp-accent/30 bg-zkperp-accent/5 p-4">
                 <div className="flex items-center gap-2 mb-3">
                   <span className="px-2 py-0.5 rounded text-xs font-medium bg-zkperp-accent/20 text-zkperp-accent border border-zkperp-accent/30">Roadmap — Mainnet</span>
-                  <span className="text-sm font-medium text-white">2/3 Quorum Oracle</span>
+                  <span className="text-sm font-medium text-white">On-chain ZK Signature Verification</span>
                 </div>
                 <div className="space-y-3 text-sm text-gray-400">
-                  <p>Rather than one bot, <strong className="text-white">N independent oracles</strong> each sign a price submission. The on-chain program only accepts a price update when at least <strong className="text-white">⌈2N/3⌉ signatures agree</strong> within a tolerance band (e.g. ±0.5%).</p>
+                  <p>The quorum check moves fully on-chain: the Leo program verifies Ed25519 signatures from all relayers and accepts a price update only when <strong className="text-white">⌈2N/3⌉ signatures agree</strong> within a tolerance band (e.g. ±0.5%). The coordinator becomes stateless — it only aggregates and routes, with no trust assumption.</p>
 
                   <div className="grid md:grid-cols-3 gap-3 mt-4">
                     {[

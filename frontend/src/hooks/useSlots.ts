@@ -21,8 +21,8 @@ export interface PositionSlotRecord {
 }
 
 // programId is now a required parameter — callers pass pairConfig.programId.
-// This ensures BTC PositionSlots (slot_id 0/1 from zkperp_v19.aleo) never
-// appear on the ETH trading page (slot_id 0/1 from zkperp_v19b.aleo).
+// This ensures BTC PositionSlots (slot_id 0/1 from zkperp_btc_v21.aleo) never
+// appear on the ETH trading page (slot_id 0/1 from zkperp_btc_v21.aleo).
 export function useSlots(programId: string) {
   const { address, requestRecords, decrypt } = useWallet();
   const initTx = useTransaction();
@@ -46,7 +46,7 @@ export function useSlots(programId: string) {
 
     try {
       // Scope the request to this pair's program so slot records from other
-      // deployed programs (e.g. zkperp_v19b for ETH) don't bleed through.
+      // deployed programs (e.g. zkperp_eth_v21 for ETH) don't bleed through.
       const records = await requestRecords(programId);
 
       records.filter((r: any) => !r.spent).forEach((r: any) =>

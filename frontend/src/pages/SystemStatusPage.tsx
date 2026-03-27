@@ -4,9 +4,9 @@ import { formatUsdc, formatPrice } from '@/utils/aleo';
 const EXPLORER = 'https://api.explorer.provable.com/v1/testnet';
 
 const PAIRS = [
-  { id: 'BTC/USDC', program: 'zkperp_v19.aleo',  emoji: '₿' },
-  { id: 'ETH/USDC', program: 'zkperp_v19b.aleo', emoji: 'Ξ' },
-  { id: 'SOL/USDC', program: 'zkperp_v19c.aleo', emoji: '◎' },
+  { id: 'BTC/USDC', program: 'zkperp_btc_v21.aleo',  emoji: '₿' },
+  { id: 'ETH/USDC', program: 'zkperp_eth_v21.aleo', emoji: 'Ξ' },
+  { id: 'SOL/USDC', program: 'zkperp_sol_v21.aleo', emoji: '◎' },
 ];
 
 function parseMapping(responseText: string): string {
@@ -67,8 +67,8 @@ function PairStatusGrid({ btcPrice, btcLiquidity, btcLongOI, btcShortOI }: {
         setPairStates(prev => ({ ...prev, [pairId]: { ...prev[pairId], loading: false } }));
       }
     };
-    fetchPair('ETH/USDC', 'zkperp_v19b.aleo');
-    fetchPair('SOL/USDC', 'zkperp_v19c.aleo');
+    fetchPair('ETH/USDC', 'zkperp_eth_v21.aleo');
+    fetchPair('SOL/USDC', 'zkperp_sol_v21.aleo');
   }, []);
 
   return (

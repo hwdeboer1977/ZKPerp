@@ -1,5 +1,5 @@
 // ZKPerp v13 contract constants (fully private — USDCx Token records)
-export const PROGRAM_ID = 'zkperp_v19.aleo';
+export const PROGRAM_ID = 'zkperp_btc_v21.aleo';
 
 // test_usdcx_stablecoin.aleo — used for private Token record transfers
 // Exported under both names:

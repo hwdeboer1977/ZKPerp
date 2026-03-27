@@ -111,6 +111,15 @@ function AppContent() {
             />
           }
         />
+        {/* Whitepaper — full page, no app chrome */}
+        <Route path="/whitepaper" element={
+          <iframe
+            src="/whitepaper.html"
+            style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', border: 'none', zIndex: 9999, background: '#fafaf8' }}
+            title="ZKPerp Technical Whitepaper"
+          />
+        } />
+
         {/* Admin — unlisted from nav, still accessible at /admin */}
         <Route path="/admin" element={<AdminPage />} />
       </Routes>
@@ -137,7 +146,7 @@ function AppContent() {
           </div>
           <div className="mt-4 pt-4 border-t border-zkperp-border">
             <p className="text-center text-xs text-gray-600">
-              Aleo Testnet Beta • Contracts: zkperp_v19.aleo · zkperp_eth_v1.aleo · zkperp_sol_v1.aleo
+              Aleo Testnet Beta • Contracts: zkperp_btc_v21.aleo · zkperp_eth_v21.aleo · zkperp_sol_v21.aleo
             </p>
           </div>
         </div>
@@ -156,7 +165,7 @@ function App() {
         network={Network.TESTNET}
         decryptPermission={DecryptPermission.UponRequest}
         // All three pair programs registered so Shield Wallet can decrypt their records
-        programs={['zkperp_v19.aleo', 'zkperp_v19b.aleo', 'zkperp_v19c.aleo', 'test_usdcx_stablecoin.aleo', 'credits.aleo']}
+        programs={['zkperp_btc_v21.aleo', 'zkperp_eth_v21.aleo', 'zkperp_sol_v21.aleo', 'test_usdcx_stablecoin.aleo', 'credits.aleo']}
         onError={(error) => console.error(error.message)}
       >
         <WalletModalProvider>

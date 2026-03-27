@@ -13,7 +13,7 @@
 ZKPerp is a decentralized perpetual futures exchange built natively on the Aleo blockchain. Position sizes, entry prices, leverage, and PnL are cryptographically private by default — hidden from all other market participants, including the protocol itself. Below is the link to the latest version of the whitepaper.
 
 **Live:** [zk-perp.vercel.app](https://zk-perp.vercel.app)  
-**Whitepaper:** [zkperp-whitepaper-v4.html](./zkperp-whitepaper-v4.html)  
+**Whitepaper:** [zkperp-whitepaper-v4.html](https://hwdeboer1977.github.io/ZKPerp/zkperp-whitepaper-v4.html)  
 **Explorer:** [testnet.explorer.provable.com](https://testnet.explorer.provable.com)
 
 ---
@@ -252,7 +252,7 @@ ZKPERP_ORCHESTRATOR_TOKEN=<same as ORACLE_TOKEN>
 
 | File                                                     | Purpose                                            |
 | -------------------------------------------------------- | -------------------------------------------------- |
-| [zkperp-whitepaper-v4.html](./zkperp-whitepaper-v4.html) | Full technical whitepaper — single source of truth |
+| [zkperp-whitepaper-v4.html](https://hwdeboer1977.github.io/ZKPerp/zkperp-whitepaper-v4.html) | Full technical whitepaper — single source of truth |
 | [frontend/README.md](./frontend/README.md)               | Frontend component overview, wallet integration    |
 | [zkperp-bot/README.md](./zkperp-bot/README.md)           | Bot architecture, endpoints, env vars              |
 | [aleo-oracle/README.md](./aleo-oracle/README.md)         | 2-of-3 Chainlink oracle relay setup and config     |

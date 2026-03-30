@@ -49,7 +49,7 @@ const CONFIG = {
 
   // Multi-asset program IDs (one Aleo program per market)
   programs: {
-    BTC_USD: process.env.PROGRAM_ID_BTC || '_btc_v21.aleo',
+    BTC_USD: process.env.PROGRAM_ID_BTC || 'zkperp_btc_v21.aleo',
     ETH_USD: process.env.PROGRAM_ID_ETH || 'zkperp_eth_v21.aleo',
     SOL_USD: process.env.PROGRAM_ID_SOL || 'zkperp_sol_v21.aleo',
   },
@@ -1256,7 +1256,13 @@ async function liquidationTick() {
     if (positions.length === 0) { log('SCAN', 'No open positions'); return; }
 
     // Update on-chain pool state with current OI from scanned positions
-    if (provableClient) await submitPoolState(CONFIG.programId);
+    // Update pool state for every program that has active positions
+    if (provableClient) {
+      const activeProgramIds = new Set(positions.map(p => p.programId || CONFIG.programId));
+      for (const pid of activeProgramIds) {
+        await submitPoolState(pid);
+      }
+    }
 
     for (const pos of positions) {
       const m        = calculateMarginRatio(pos, currentOraclePrice);

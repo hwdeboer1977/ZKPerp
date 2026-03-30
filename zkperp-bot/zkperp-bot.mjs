@@ -613,9 +613,10 @@ async function submitPoolState(programId) {
     const totalLpTokens  = BigInt(lpMatch?.[1] || '0');
     const accFees        = BigInt(feesMatch?.[1] || '0');
 
-    // Compute OI from in-memory position store (keyed by positionId)
+    // Compute OI from in-memory position store — filtered to this program only
     let longOI = 0n, shortOI = 0n;
     for (const pos of positionStore.values()) {
+      if ((pos.programId || CONFIG.programId) !== pid) continue;
       if (pos.isLong) longOI  += pos.size || 0n;
       else            shortOI += pos.size || 0n;
     }

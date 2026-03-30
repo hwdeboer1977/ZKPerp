@@ -42,17 +42,14 @@ const CONFIG = {
   consumerId: process.env.PROVABLE_CONSUMER_ID || '',
   apiKey: process.env.PROVABLE_API_KEY || '',
 
-  // Program
-  programId: process.env.PROGRAM_ID || 'zkperp_btc_v21.aleo',
-  network: process.env.NETWORK || 'testnet',
+  // Single program + asset — deploy one bot per market
+  // BTC bot: PROGRAM_ID=zkperp_btc_v21.aleo ASSET_ID=BTC_USD
+  // ETH bot: PROGRAM_ID=zkperp_eth_v21.aleo ASSET_ID=ETH_USD
+  // SOL bot: PROGRAM_ID=zkperp_sol_v21.aleo ASSET_ID=SOL_USD
+  programId: process.env.PROGRAM_ID,
+  assetId:   process.env.ASSET_ID,   
+  network:   process.env.NETWORK    || 'testnet',
   networkId: process.env.NETWORK_ID || '1',
-
-  // Multi-asset program IDs (one Aleo program per market)
-  programs: {
-    BTC_USD: process.env.PROGRAM_ID_BTC || 'zkperp_btc_v21.aleo',
-    ETH_USD: process.env.PROGRAM_ID_ETH || 'zkperp_eth_v21.aleo',
-    SOL_USD: process.env.PROGRAM_ID_SOL || 'zkperp_sol_v21.aleo',
-  },
 
   // Oracle endpoint auth token (must match ZKPERP_ORCHESTRATOR_TOKEN in aleo-oracle .env)
   oracleToken: process.env.ORACLE_TOKEN || '',
@@ -83,9 +80,7 @@ const CONFIG = {
   liquidationRewardBps:    5000n,   // 0.5%
 };
 
-// All known program IDs — scanner matches records from any market
-const ALL_PROGRAM_IDS = new Set(Object.values(CONFIG.programs));
-ALL_PROGRAM_IDS.add(CONFIG.programId); // also include legacy PROGRAM_ID
+const ALL_PROGRAM_IDS = new Set([CONFIG.programId]);
 
 // ═══════════════════════════════════════════════════════════════
 // STATE: In-memory position store
@@ -342,9 +337,9 @@ function startApiServer() {
             res.end(JSON.stringify({ error: 'Missing fields: assetId, price, updatedAt, roundId' }));
             return;
           }
-          if (!CONFIG.programs[assetId]) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: `Unknown assetId: ${assetId}` }));
+          if (assetId !== CONFIG.assetId) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, ignored: true, reason: `bot handles ${CONFIG.assetId}` }));
             return;
           }
           quorumPrices.set(assetId, {
@@ -469,8 +464,8 @@ function startApiServer() {
 // ── Multi-asset oracle update (Chainlink quorum) ──────────────────────────────
 
 async function updateOraclePriceForAsset(assetId, priceOnChain, timestamp) {
-  const programId = CONFIG.programs[assetId];
-  if (!programId) { logError('ORACLE', `No programId configured for ${assetId}`); return false; }
+  const programId = CONFIG.programId;
+  if (assetId !== CONFIG.assetId) { logError('ORACLE', `Wrong assetId: ${assetId}`); return false; }
 
   try {
     const raw = await fetchText(`${CONFIG.apiEndpoint}/program/${programId}/mapping/oracle_prices/0field`);
@@ -482,7 +477,7 @@ async function updateOraclePriceForAsset(assetId, priceOnChain, timestamp) {
         const pctChange = Number(diff * 10000n / (onChainPrice + 1n)) / 100;
         if (pctChange < 1.0) {
           log('ORACLE', `${assetId} change ${pctChange.toFixed(2)}% < 1% — skipping`);
-          if (assetId === 'BTC_USD') currentOraclePrice = priceOnChain;
+          currentOraclePrice = priceOnChain;
           return true;
         }
         log('ORACLE', `${assetId} change ${pctChange.toFixed(2)}% — updating`);
@@ -501,7 +496,7 @@ async function updateOraclePriceForAsset(assetId, priceOnChain, timestamp) {
       timeoutMs:     120_000,
     });
     log('ORACLE', `✅ ${assetId} updated on ${programId} ($${(Number(priceOnChain) / 1e8).toLocaleString()})`);
-    if (assetId === 'BTC_USD') currentOraclePrice = priceOnChain;
+    currentOraclePrice = priceOnChain;
     return true;
   } catch (err) {
     logError('ORACLE', `${assetId} update_price failed: ${err.message}`);
@@ -533,7 +528,7 @@ async function getCurrentOraclePriceFromChain() {
 async function updateOraclePrice(priceUsd) {
   const priceOnChain = BigInt(Math.round(priceUsd * 100_000_000));
   const timestamp    = Math.floor(Date.now() / 1000);
-  return updateOraclePriceForAsset('BTC_USD', priceOnChain, timestamp);
+  return updateOraclePriceForAsset(CONFIG.assetId, priceOnChain, timestamp);
 }
 
 // Compute net unrealised PnL across all positions in positionStore.
@@ -575,15 +570,18 @@ async function submitNetPnl(price) {
   log('PNL', `Submitting update_net_pnl input: ${pnlInput}`);
 
   try {
-    await provableClient.executeTransaction({
-      privateKey:   CONFIG.privateKey,
-      programId:    CONFIG.programId,
-      functionName: 'update_net_pnl',
-      inputs:       [pnlInput],
-      useFeeMaster: CONFIG.execUseFeeMaster,
-      timeoutMs:    120_000,
-    });
-    log('PNL', `✅ update_net_pnl submitted (${pnlInput})`);
+    // Submit update_net_pnl to all configured programs
+    {
+      await provableClient.executeTransaction({
+        privateKey:   CONFIG.privateKey,
+        programId:    pid,
+        functionName: 'update_net_pnl',
+        inputs:       [pnlInput],
+        useFeeMaster: CONFIG.execUseFeeMaster,
+        timeoutMs:    120_000,
+      });
+      log('PNL', `✅ update_net_pnl submitted to ${pid} (${pnlInput})`);
+    }
   } catch (err) {
     // Log full error — err may be a string, Error, or object depending on Provable client
     const msg = err?.message ?? (typeof err === 'string' ? err : JSON.stringify(err));
@@ -595,9 +593,9 @@ async function submitNetPnl(price) {
 // Submit pool state to on-chain pool_state mapping.
 // Called after every liquidation scan so Long/Short OI reflects reality.
 // Computes OI from positionStore, reads current liquidity from chain.
-async function submitPoolState(programId) {
+async function submitPoolState() {
   if (!provableClient) return;
-  const pid = programId || CONFIG.programId;
+  const pid = CONFIG.programId;
 
   try {
     // Read current pool state from chain
@@ -613,10 +611,9 @@ async function submitPoolState(programId) {
     const totalLpTokens  = BigInt(lpMatch?.[1] || '0');
     const accFees        = BigInt(feesMatch?.[1] || '0');
 
-    // Compute OI from in-memory position store — filtered to this program only
+    // Compute OI from in-memory position store (keyed by positionId)
     let longOI = 0n, shortOI = 0n;
     for (const pos of positionStore.values()) {
-      if ((pos.programId || CONFIG.programId) !== pid) continue;
       if (pos.isLong) longOI  += pos.size || 0n;
       else            shortOI += pos.size || 0n;
     }
@@ -1199,7 +1196,7 @@ async function oracleTick() {
           continue;
         }
         const updated = await updateOraclePriceForAsset(assetId, q.price, timestamp);
-        if (updated && assetId === 'BTC_USD') btcUpdated = true;
+        if (updated) btcUpdated = true;
         if (updated) await sleep(3000); // wait 3s between Provable tx submissions
       }
             if (btcUpdated && provableClient && positionStore.size > 0) await submitNetPnl(currentOraclePrice);
@@ -1256,14 +1253,8 @@ async function liquidationTick() {
 
     if (positions.length === 0) { log('SCAN', 'No open positions'); return; }
 
-    // Update on-chain pool state with current OI from scanned positions
-    // Update pool state for every program that has active positions
-    if (provableClient) {
-      const activeProgramIds = new Set(positions.map(p => p.programId || CONFIG.programId));
-      for (const pid of activeProgramIds) {
-        await submitPoolState(pid);
-      }
-    }
+    // Update on-chain pool state
+    if (provableClient) await submitPoolState();
 
     for (const pos of positions) {
       const m        = calculateMarginRatio(pos, currentOraclePrice);
@@ -1485,7 +1476,7 @@ async function executeExecLimitAuth(auth, price) {
 
   await provableClient.executeTransaction({
     privateKey:   CONFIG.privateKey,
-    programId:    CONFIG.programId,
+    programId:    auth.programId || CONFIG.programId,
     functionName: 'execute_limit_order',
     inputs: [
       auth.plaintext,
@@ -1552,7 +1543,7 @@ async function executeOrder(order, price) {
 
   await provableClient.executeTransaction({
     privateKey:   CONFIG.privateKey,
-    programId:    CONFIG.programId,
+    programId:    order.programId || CONFIG.programId,
     functionName: 'execute_limit_order',
     inputs:       [order.plaintext, registered.slotPlaintext, CONFIG.orchestratorAddress || await getOrchestratorAddress(), executionNonce],
     useFeeMaster: CONFIG.execUseFeeMaster,

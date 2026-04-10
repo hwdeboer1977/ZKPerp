@@ -1,0 +1,752 @@
+// ============================================================
+// zkperp_amm_v1.aleo — Concentrated Liquidity AMM
+// USDCx / ALEO pair, 0.3% fee — Leo 4.0 syntax
+//
+// KEY RULE: no helper fn calls inside final{} blocks.
+// All math is inlined directly.
+// ============================================================
+
+import test_usdcx_stablecoin.aleo;
+
+program zkperp_amm_v2.aleo {
+
+    const FEE_BPS: u64       = 3_000u64;
+    const FEE_DENOM: u64     = 1_000_000u64;
+    const TICK_SPACING: i32  = 60i32;
+    const Q64: u128          = 18_446_744_073_709_551_616u128;
+    const MAX_TICK: i32      = 887_220i32;
+    const TICK_SENTINEL: i32 = 887_221i32;
+    const POOL_KEY: u8       = 0u8;
+    const ROLE_ADMIN: u8     = 0u8;
+
+    struct PoolState {
+        sqrt_price_x64:      u128,
+        current_tick:        i32,
+        liquidity:           u128,
+        fee_growth_global_0: u128,
+        fee_growth_global_1: u128,
+    }
+
+    struct TickInfo {
+        liquidity_gross:           u128,
+        liquidity_net:             u128,
+        liquidity_net_is_negative: bool,
+        fee_growth_outside_0:      u128,
+        fee_growth_outside_1:      u128,
+        initialized:               bool,
+    }
+
+    struct TickStep {
+        tick_next:                 i32,
+        sqrt_price_next:           u128,
+        liquidity_net:             u128,
+        liquidity_net_is_negative: bool,
+        amount_in_step:            u64,
+        amount_out_step:           u64,
+        fee_step:                  u64,
+    }
+
+    record LPPosition {
+        owner:                    address,
+        pool_id:                  u8,
+        tick_lower:               i32,
+        tick_upper:               i32,
+        liquidity:                u128,
+        fee_growth_inside_0_last: u128,
+        fee_growth_inside_1_last: u128,
+        tokens_owed_0:            u64,
+        tokens_owed_1:            u64,
+    }
+
+    record SwapReceipt {
+        owner:            address,
+        zero_for_one:     bool,
+        amount_in:        u64,
+        amount_out:       u64,
+        fee_paid:         u64,
+        sqrt_price_after: u128,
+        tick_after:       i32,
+        ticks_crossed:    u8,
+    }
+
+    mapping pool_state:   u8    => PoolState;
+    mapping tick_info:    field => TickInfo;
+    mapping aleo_reserve: u8    => u64;
+    mapping roles:        u8    => address;
+    mapping is_init:      u8    => bool;
+
+    @custom
+    constructor() {
+        Mapping::set(roles, ROLE_ADMIN, self.program_owner);
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // initialize_pool
+    // ──────────────────────────────────────────────────────────
+
+    fn initialize_pool(
+        public initial_sqrt_price_x64: u128,
+        public initial_tick: i32,
+    ) -> Final {
+        assert(initial_sqrt_price_x64 > 0u128);
+        assert(initial_tick >= -MAX_TICK);
+        assert(initial_tick <= MAX_TICK);
+        let caller: address = self.caller;
+        return final {
+            let admin: address = Mapping::get(roles, ROLE_ADMIN);
+            assert_eq(caller, admin);
+            let already: bool = Mapping::get_or_use(is_init, 0u8, false);
+            assert(!already);
+            Mapping::set(pool_state, POOL_KEY, PoolState {
+                sqrt_price_x64:      initial_sqrt_price_x64,
+                current_tick:        initial_tick,
+                liquidity:           0u128,
+                fee_growth_global_0: 0u128,
+                fee_growth_global_1: 0u128,
+            });
+            Mapping::set(aleo_reserve, 0u8, 0u64);
+            Mapping::set(is_init, 0u8, true);
+        };
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // mint_position
+    // ──────────────────────────────────────────────────────────
+
+    fn mint_position(
+        lp_token: test_usdcx_stablecoin.aleo::Token,
+        merkle_proof: [test_usdcx_stablecoin.aleo::MerkleProof; 2],
+        tick_lower: i32,
+        tick_upper: i32,
+        liquidity_desired: u128,
+        public amount_0_max: u64,
+        public amount_1_max: u64,
+        public amount_0_actual: u64,
+        public amount_1_actual: u64,
+        public sqrt_price_x64: u128,
+        public current_tick: i32,
+        public fee_growth_inside_0: u128,
+        public fee_growth_inside_1: u128,
+    ) -> (LPPosition, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
+
+        assert(liquidity_desired > 0u128);
+        assert(tick_lower < tick_upper);
+        assert(tick_lower >= -MAX_TICK);
+        assert(tick_upper <= MAX_TICK);
+        assert_eq(tick_lower / TICK_SPACING * TICK_SPACING, tick_lower);
+        assert_eq(tick_upper / TICK_SPACING * TICK_SPACING, tick_upper);
+        assert(amount_0_actual <= amount_0_max);
+        assert(amount_1_actual <= amount_1_max);
+
+        let (compliance_rec, change_token, xfer_final):
+            (test_usdcx_stablecoin.aleo::ComplianceRecord,
+             test_usdcx_stablecoin.aleo::Token, Final) =
+            test_usdcx_stablecoin.aleo::transfer_private_to_public(
+                self.address, amount_0_actual as u128, lp_token, merkle_proof,
+            );
+
+        let position: LPPosition = LPPosition {
+            owner: self.signer, pool_id: 0u8,
+            tick_lower, tick_upper,
+            liquidity:                liquidity_desired,
+            fee_growth_inside_0_last: fee_growth_inside_0,
+            fee_growth_inside_1_last: fee_growth_inside_1,
+            tokens_owed_0: 0u64, tokens_owed_1: 0u64,
+        };
+
+        let tl: i32   = tick_lower;
+        let tu: i32   = tick_upper;
+        let liq: u128 = liquidity_desired;
+        let a1: u64   = amount_1_actual;
+
+        return (position, compliance_rec, change_token, final {
+            xfer_final.run();
+            let pool: PoolState = Mapping::get(pool_state, POOL_KEY);
+            assert_eq(pool.sqrt_price_x64, sqrt_price_x64);
+            assert_eq(pool.current_tick, current_tick);
+
+            let reserve: u64 = Mapping::get_or_use(aleo_reserve, 0u8, 0u64);
+            Mapping::set(aleo_reserve, 0u8, reserve + a1);
+
+            // tick_lower — initialize or update
+            let tl_key: field = (tl as i64 + 2_147_483_647i64) as u64 as field;
+            let tl_info: TickInfo = Mapping::get_or_use(tick_info, tl_key, TickInfo {
+                liquidity_gross: 0u128, liquidity_net: 0u128,
+                liquidity_net_is_negative: false,
+                fee_growth_outside_0: 0u128, fee_growth_outside_1: 0u128,
+                initialized: false });
+            // Avoid nested ternaries — compute fee_outside independently
+            let tl_below: bool = tl <= current_tick;
+            let tl_fee0: u128 = tl_info.initialized ? tl_info.fee_growth_outside_0 : (tl_below ? pool.fee_growth_global_0 : 0u128);
+            let tl_fee1: u128 = tl_info.initialized ? tl_info.fee_growth_outside_1 : (tl_below ? pool.fee_growth_global_1 : 0u128);
+            Mapping::set(tick_info, tl_key, TickInfo {
+                liquidity_gross:           tl_info.liquidity_gross + liq,
+                liquidity_net:             tl_info.liquidity_net + liq,
+                liquidity_net_is_negative: tl_info.liquidity_net_is_negative,
+                fee_growth_outside_0:      tl_fee0,
+                fee_growth_outside_1:      tl_fee1,
+                initialized:               true });
+
+            // tick_upper — liquidity_net decreases (first mint: 0 - liq = -liq)
+            let tu_key: field = (tu as i64 + 2_147_483_647i64) as u64 as field;
+            let tu_info: TickInfo = Mapping::get_or_use(tick_info, tu_key, TickInfo {
+                liquidity_gross: 0u128, liquidity_net: 0u128,
+                liquidity_net_is_negative: false,
+                fee_growth_outside_0: 0u128, fee_growth_outside_1: 0u128,
+                initialized: false });
+            let tu_below: bool = tu <= current_tick;
+            let tu_fee0: u128 = tu_info.initialized ? tu_info.fee_growth_outside_0 : (tu_below ? pool.fee_growth_global_0 : 0u128);
+            let tu_fee1: u128 = tu_info.initialized ? tu_info.fee_growth_outside_1 : (tu_below ? pool.fee_growth_global_1 : 0u128);
+            // sub_signed(tu_info.liquidity_net, tu_info.liquidity_net_is_negative, liq, false)
+            // = (tu_net, tu_neg) - (liq, false)
+            // First mint: tu_net=0, tu_neg=false → result = (liq, true)
+            let tu_net_ge_liq: bool = tu_info.liquidity_net >= liq;
+            let tu_new_net: u128 = tu_info.liquidity_net_is_negative
+                ? tu_info.liquidity_net + liq
+                : (tu_net_ge_liq ? tu_info.liquidity_net - liq : liq - tu_info.liquidity_net);
+            let tu_new_neg: bool = tu_info.liquidity_net_is_negative
+                ? true
+                : (tu_net_ge_liq ? false : true);
+            Mapping::set(tick_info, tu_key, TickInfo {
+                liquidity_gross:           tu_info.liquidity_gross + liq,
+                liquidity_net:             tu_new_net,
+                liquidity_net_is_negative: tu_new_neg,
+                fee_growth_outside_0:      tu_fee0,
+                fee_growth_outside_1:      tu_fee1,
+                initialized:               true });
+
+            // Update active liquidity if position covers current tick
+            let in_range: bool = (tl <= current_tick) && (current_tick < tu);
+            let new_liq: u128 = in_range ? pool.liquidity + liq : pool.liquidity;
+            Mapping::set(pool_state, POOL_KEY, PoolState {
+                sqrt_price_x64:      pool.sqrt_price_x64,
+                current_tick:        pool.current_tick,
+                liquidity:           new_liq,
+                fee_growth_global_0: pool.fee_growth_global_0,
+                fee_growth_global_1: pool.fee_growth_global_1 });
+        });
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // burn_position
+    // ──────────────────────────────────────────────────────────
+
+    fn burn_position(
+        position: LPPosition,
+        merkle_proof: [test_usdcx_stablecoin.aleo::MerkleProof; 2],
+        public fee_growth_inside_0: u128,
+        public fee_growth_inside_1: u128,
+        public amount_0_out: u64,
+        public amount_1_out: u64,
+        public sqrt_price_x64: u128,
+        public current_tick: i32,
+    ) -> (test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
+
+        assert_eq(position.owner, self.signer);
+        assert(position.liquidity > 0u128);
+
+        let (compliance_rec, token_out, xfer_final):
+            (test_usdcx_stablecoin.aleo::ComplianceRecord,
+             test_usdcx_stablecoin.aleo::Token, Final) =
+            test_usdcx_stablecoin.aleo::transfer_public_to_private(
+                self.signer, amount_0_out as u128);
+
+        let tl: i32   = position.tick_lower;
+        let tu: i32   = position.tick_upper;
+        let liq: u128 = position.liquidity;
+        let a1: u64   = amount_1_out;
+
+        return (compliance_rec, token_out, final {
+            xfer_final.run();
+            let pool: PoolState = Mapping::get(pool_state, POOL_KEY);
+            assert_eq(pool.sqrt_price_x64, sqrt_price_x64);
+            assert_eq(pool.current_tick, current_tick);
+            assert(fee_growth_inside_0 <= pool.fee_growth_global_0);
+            assert(fee_growth_inside_1 <= pool.fee_growth_global_1);
+
+            // tick_lower: sub_signed inlined (net -= liq)
+            let tl_key: field = (tl as i64 + 2_147_483_647i64) as u64 as field;
+            let tl_info: TickInfo = Mapping::get(tick_info, tl_key);
+            let tl_same: bool = tl_info.liquidity_net_is_negative == false;
+            let tl_new_net: u128 = tl_same
+                ? (tl_info.liquidity_net >= liq ? tl_info.liquidity_net - liq : liq - tl_info.liquidity_net)
+                : tl_info.liquidity_net + liq;
+            let tl_new_neg: bool = tl_same
+                ? (tl_info.liquidity_net >= liq ? false : true)
+                : true;
+            let tl_gross: u128 = tl_info.liquidity_gross - liq;
+            Mapping::set(tick_info, tl_key, TickInfo {
+                liquidity_gross:           tl_gross,
+                liquidity_net:             tl_new_net,
+                liquidity_net_is_negative: tl_new_neg,
+                fee_growth_outside_0:      tl_info.fee_growth_outside_0,
+                fee_growth_outside_1:      tl_info.fee_growth_outside_1,
+                initialized:               tl_gross > 0u128 });
+
+            // tick_upper: add_signed inlined (net += liq, restoring what mint subtracted)
+            let tu_key: field = (tu as i64 + 2_147_483_647i64) as u64 as field;
+            let tu_info: TickInfo = Mapping::get(tick_info, tu_key);
+            let tu_same: bool = tu_info.liquidity_net_is_negative == false;
+            let tu_new_net: u128 = tu_same
+                ? tu_info.liquidity_net + liq
+                : (tu_info.liquidity_net >= liq ? tu_info.liquidity_net - liq : liq - tu_info.liquidity_net);
+            let tu_new_neg: bool = tu_same
+                ? false
+                : (tu_info.liquidity_net >= liq ? true : false);
+            let tu_gross: u128 = tu_info.liquidity_gross - liq;
+            Mapping::set(tick_info, tu_key, TickInfo {
+                liquidity_gross:           tu_gross,
+                liquidity_net:             tu_new_net,
+                liquidity_net_is_negative: tu_new_neg,
+                fee_growth_outside_0:      tu_info.fee_growth_outside_0,
+                fee_growth_outside_1:      tu_info.fee_growth_outside_1,
+                initialized:               tu_gross > 0u128 });
+
+            let in_range: bool = (tl <= current_tick) && (current_tick < tu);
+            let reserve: u64 = Mapping::get(aleo_reserve, 0u8);
+            assert(reserve >= a1);
+            Mapping::set(aleo_reserve, 0u8, reserve - a1);
+            Mapping::set(pool_state, POOL_KEY, PoolState {
+                sqrt_price_x64:      pool.sqrt_price_x64,
+                current_tick:        pool.current_tick,
+                liquidity:           in_range ? pool.liquidity - liq : pool.liquidity,
+                fee_growth_global_0: pool.fee_growth_global_0,
+                fee_growth_global_1: pool.fee_growth_global_1 });
+        });
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // swap_buy — USDCx → ALEO (zero_for_one = true)
+    // sqrt_price decreases. Token0 (USDCx) in, Token1 (ALEO) out.
+    // ──────────────────────────────────────────────────────────
+
+    fn swap_buy(
+        usdcx_in: test_usdcx_stablecoin.aleo::Token,
+        merkle_proof: [test_usdcx_stablecoin.aleo::MerkleProof; 2],
+        public total_amount_in:  u64,
+        public total_amount_out: u64,
+        public total_fee:        u64,
+        public sqrt_price_final: u128,
+        public tick_final:       i32,
+        public step0: TickStep,
+        public step1: TickStep,
+        public step2: TickStep,
+        public step3: TickStep,
+    ) -> (SwapReceipt, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
+
+        assert(total_amount_in > 0u64);
+        assert(total_amount_out > 0u64);
+        let expected_fee: u64 = (total_amount_in as u128 * FEE_BPS as u128 / FEE_DENOM as u128) as u64;
+        assert_eq(total_fee, expected_fee);
+        assert_eq(
+            step0.amount_in_step + step1.amount_in_step + step2.amount_in_step + step3.amount_in_step,
+            total_amount_in);
+        assert_eq(
+            step0.amount_out_step + step1.amount_out_step + step2.amount_out_step + step3.amount_out_step,
+            total_amount_out);
+        assert_eq(
+            step0.fee_step + step1.fee_step + step2.fee_step + step3.fee_step,
+            total_fee);
+        let ticks_crossed: u8 =
+            (step0.tick_next != TICK_SENTINEL ? 1u8 : 0u8) +
+            (step1.tick_next != TICK_SENTINEL ? 1u8 : 0u8) +
+            (step2.tick_next != TICK_SENTINEL ? 1u8 : 0u8) +
+            (step3.tick_next != TICK_SENTINEL ? 1u8 : 0u8);
+
+        let (compliance_rec, change_token, xfer_final):
+            (test_usdcx_stablecoin.aleo::ComplianceRecord,
+             test_usdcx_stablecoin.aleo::Token, Final) =
+            test_usdcx_stablecoin.aleo::transfer_private_to_public(
+                self.address, total_amount_in as u128, usdcx_in, merkle_proof);
+
+        let receipt: SwapReceipt = SwapReceipt {
+            owner: self.signer, zero_for_one: true,
+            amount_in: total_amount_in, amount_out: total_amount_out,
+            fee_paid: total_fee, sqrt_price_after: sqrt_price_final,
+            tick_after: tick_final, ticks_crossed };
+
+        let sp_f: u128   = sqrt_price_final;
+        let t_f: i32     = tick_final;
+        let amt_in: u64  = total_amount_in;
+        let amt_out: u64 = total_amount_out;
+        let fee: u64     = total_fee;
+
+        return (receipt, compliance_rec, change_token, final {
+            xfer_final.run();
+            let pool: PoolState = Mapping::get(pool_state, POOL_KEY);
+                        // ── STEP 0 ──────────────────────────────────────────
+            let a0: bool  = step0.tick_next != TICK_SENTINEL;
+            let k0: field = a0 ? (step0.tick_next as i64 + 2_147_483_647i64) as u64 as field : 0field;
+            let t0: TickInfo = a0 ? Mapping::get(tick_info, k0)
+                : TickInfo { liquidity_gross: 0u128, liquidity_net: 0u128,
+                             liquidity_net_is_negative: false,
+                             fee_growth_outside_0: 0u128, fee_growth_outside_1: 0u128,
+                             initialized: false };
+            assert(!a0 || t0.initialized);
+            assert(!a0 || t0.liquidity_net == step0.liquidity_net);
+            assert(!a0 || t0.liquidity_net_is_negative == step0.liquidity_net_is_negative);
+            // amount1_from_sqrts inlined: liq*(hi-lo)/Q64
+            let out0_exp: u64 = a0 ? ((pool.liquidity * (pool.sqrt_price_x64 - step0.sqrt_price_next)) / Q64) as u64 : 0u64;
+            let diff0: u64 = step0.amount_out_step > out0_exp
+                ? step0.amount_out_step - out0_exp : out0_exp - step0.amount_out_step;
+            assert(!a0 || diff0 <= 1u64);
+            Mapping::set(tick_info, k0, TickInfo {
+                liquidity_gross:           t0.liquidity_gross,
+                liquidity_net:             t0.liquidity_net,
+                liquidity_net_is_negative: t0.liquidity_net_is_negative,
+                fee_growth_outside_0: a0 ? pool.fee_growth_global_0 - t0.fee_growth_outside_0 : t0.fee_growth_outside_0,
+                fee_growth_outside_1: a0 ? pool.fee_growth_global_1 - t0.fee_growth_outside_1 : t0.fee_growth_outside_1,
+                initialized: t0.initialized });
+            // apply_liq_delta inlined
+            let apply0_neg: bool = !step0.liquidity_net_is_negative;
+            let liq1: u128 = a0 ? (apply0_neg ? pool.liquidity - step0.liquidity_net : pool.liquidity + step0.liquidity_net) : pool.liquidity;
+            // fee_delta inlined: fee*Q64/liq
+            let fd0: u128 = (pool.liquidity == 0u128 || !a0) ? 0u128 : (step0.fee_step as u128 * Q64) / pool.liquidity;
+            let fg0_1: u128 = a0 ? pool.fee_growth_global_0 + fd0 : pool.fee_growth_global_0;
+            let fg1_1: u128 = a0 ? pool.fee_growth_global_1 + fd0 : pool.fee_growth_global_1;
+            let sq1: u128   = a0 ? step0.sqrt_price_next : pool.sqrt_price_x64;
+
+            // ── STEP 1 ──────────────────────────────────────────
+            let a1b: bool = step1.tick_next != TICK_SENTINEL;
+            let k1: field = a1b ? (step1.tick_next as i64 + 2_147_483_647i64) as u64 as field : 0field;
+            let t1: TickInfo = a1b ? Mapping::get(tick_info, k1)
+                : TickInfo { liquidity_gross: 0u128, liquidity_net: 0u128,
+                             liquidity_net_is_negative: false,
+                             fee_growth_outside_0: 0u128, fee_growth_outside_1: 0u128,
+                             initialized: false };
+            assert(!a1b || t1.initialized);
+            assert(!a1b || t1.liquidity_net == step1.liquidity_net);
+            assert(!a1b || t1.liquidity_net_is_negative == step1.liquidity_net_is_negative);
+            let out1_exp: u64 = a1b ? ((liq1 * (sq1 - step1.sqrt_price_next)) / Q64) as u64 : 0u64;
+            let diff1: u64 = step1.amount_out_step > out1_exp
+                ? step1.amount_out_step - out1_exp : out1_exp - step1.amount_out_step;
+            assert(!a1b || diff1 <= 1u64);
+            Mapping::set(tick_info, k1, TickInfo {
+                liquidity_gross:           t1.liquidity_gross,
+                liquidity_net:             t1.liquidity_net,
+                liquidity_net_is_negative: t1.liquidity_net_is_negative,
+                fee_growth_outside_0: a1b ? fg0_1 - t1.fee_growth_outside_0 : t1.fee_growth_outside_0,
+                fee_growth_outside_1: a1b ? fg1_1 - t1.fee_growth_outside_1 : t1.fee_growth_outside_1,
+                initialized: t1.initialized });
+            let apply1_neg: bool = !step1.liquidity_net_is_negative;
+            let liq2: u128 = a1b ? (apply1_neg ? liq1 - step1.liquidity_net : liq1 + step1.liquidity_net) : liq1;
+            let fd1: u128 = (liq1 == 0u128 || !a1b) ? 0u128 : (step1.fee_step as u128 * Q64) / liq1;
+            let fg0_2: u128 = a1b ? fg0_1 + fd1 : fg0_1;
+            let fg1_2: u128 = a1b ? fg1_1 + fd1 : fg1_1;
+            let sq2: u128   = a1b ? step1.sqrt_price_next : sq1;
+
+            // ── STEP 2 ──────────────────────────────────────────
+            let a2: bool  = step2.tick_next != TICK_SENTINEL;
+            let k2: field = a2 ? (step2.tick_next as i64 + 2_147_483_647i64) as u64 as field : 0field;
+            let t2: TickInfo = a2 ? Mapping::get(tick_info, k2)
+                : TickInfo { liquidity_gross: 0u128, liquidity_net: 0u128,
+                             liquidity_net_is_negative: false,
+                             fee_growth_outside_0: 0u128, fee_growth_outside_1: 0u128,
+                             initialized: false };
+            assert(!a2 || t2.initialized);
+            assert(!a2 || t2.liquidity_net == step2.liquidity_net);
+            assert(!a2 || t2.liquidity_net_is_negative == step2.liquidity_net_is_negative);
+            let out2_exp: u64 = a2 ? ((liq2 * (sq2 - step2.sqrt_price_next)) / Q64) as u64 : 0u64;
+            let diff2: u64 = step2.amount_out_step > out2_exp
+                ? step2.amount_out_step - out2_exp : out2_exp - step2.amount_out_step;
+            assert(!a2 || diff2 <= 1u64);
+            Mapping::set(tick_info, k2, TickInfo {
+                liquidity_gross:           t2.liquidity_gross,
+                liquidity_net:             t2.liquidity_net,
+                liquidity_net_is_negative: t2.liquidity_net_is_negative,
+                fee_growth_outside_0: a2 ? fg0_2 - t2.fee_growth_outside_0 : t2.fee_growth_outside_0,
+                fee_growth_outside_1: a2 ? fg1_2 - t2.fee_growth_outside_1 : t2.fee_growth_outside_1,
+                initialized: t2.initialized });
+            let apply2_neg: bool = !step2.liquidity_net_is_negative;
+            let liq3: u128 = a2 ? (apply2_neg ? liq2 - step2.liquidity_net : liq2 + step2.liquidity_net) : liq2;
+            let fd2: u128 = (liq2 == 0u128 || !a2) ? 0u128 : (step2.fee_step as u128 * Q64) / liq2;
+            let fg0_3: u128 = a2 ? fg0_2 + fd2 : fg0_2;
+            let fg1_3: u128 = a2 ? fg1_2 + fd2 : fg1_2;
+            let sq3: u128   = a2 ? step2.sqrt_price_next : sq2;
+
+            // ── STEP 3 ──────────────────────────────────────────
+            let a3: bool  = step3.tick_next != TICK_SENTINEL;
+            let k3: field = a3 ? (step3.tick_next as i64 + 2_147_483_647i64) as u64 as field : 0field;
+            let t3: TickInfo = a3 ? Mapping::get(tick_info, k3)
+                : TickInfo { liquidity_gross: 0u128, liquidity_net: 0u128,
+                             liquidity_net_is_negative: false,
+                             fee_growth_outside_0: 0u128, fee_growth_outside_1: 0u128,
+                             initialized: false };
+            assert(!a3 || t3.initialized);
+            assert(!a3 || t3.liquidity_net == step3.liquidity_net);
+            assert(!a3 || t3.liquidity_net_is_negative == step3.liquidity_net_is_negative);
+            let out3_exp: u64 = a3 ? ((liq3 * (sq3 - step3.sqrt_price_next)) / Q64) as u64 : 0u64;
+            let diff3: u64 = step3.amount_out_step > out3_exp
+                ? step3.amount_out_step - out3_exp : out3_exp - step3.amount_out_step;
+            assert(!a3 || diff3 <= 1u64);
+            Mapping::set(tick_info, k3, TickInfo {
+                liquidity_gross:           t3.liquidity_gross,
+                liquidity_net:             t3.liquidity_net,
+                liquidity_net_is_negative: t3.liquidity_net_is_negative,
+                fee_growth_outside_0: a3 ? fg0_3 - t3.fee_growth_outside_0 : t3.fee_growth_outside_0,
+                fee_growth_outside_1: a3 ? fg1_3 - t3.fee_growth_outside_1 : t3.fee_growth_outside_1,
+                initialized: t3.initialized });
+            let apply3_neg: bool = !step3.liquidity_net_is_negative;
+            let liq_f: u128 = a3 ? (apply3_neg ? liq3 - step3.liquidity_net : liq3 + step3.liquidity_net) : liq3;
+            let fd3: u128 = (liq3 == 0u128 || !a3) ? 0u128 : (step3.fee_step as u128 * Q64) / liq3;
+            let fg0_4: u128 = a3 ? fg0_3 + fd3 : fg0_3;
+            let fg1_4: u128 = a3 ? fg1_3 + fd3 : fg1_3;
+            let sq4: u128   = a3 ? step3.sqrt_price_next : sq3;
+
+            // ── Terminal partial step ────────────────────────────
+            // Remainder after all tick crossings — verified against sqrt_price_final
+            let term_out: u64 = amt_out
+                - step0.amount_out_step - step1.amount_out_step
+                - step2.amount_out_step - step3.amount_out_step;
+            let term_fee: u64 = fee
+                - step0.fee_step - step1.fee_step - step2.fee_step - step3.fee_step;
+
+            // amount1/amount0 from sqrts inlined
+            let term_computed: u64 = ((liq_f * (sq4 - sp_f)) / Q64) as u64;
+            let term_diff: u64 = term_out > term_computed
+                ? term_out - term_computed : term_computed - term_out;
+            assert(term_diff <= 1u64);
+
+            // fee_delta inlined for terminal step
+            let fd_term: u128 = (liq_f == 0u128) ? 0u128 : (term_fee as u128 * Q64) / liq_f;
+            let fg0_final: u128 = fg0_4;
+            let fg1_final: u128 = fg1_4 + fd_term;
+
+            let reserve: u64 = Mapping::get(aleo_reserve, 0u8);
+            Mapping::set(aleo_reserve, 0u8, reserve - amt_out);
+            Mapping::set(pool_state, POOL_KEY, PoolState {
+                sqrt_price_x64:      sp_f,
+                current_tick:        t_f,
+                liquidity:           liq_f,
+                fee_growth_global_0: fg0_final,
+                fee_growth_global_1: fg1_final });
+        });
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // swap_sell — ALEO → USDCx (zero_for_one = false)
+    // sqrt_price increases. Token1 (ALEO) in, Token0 (USDCx) out.
+    // ALEO amount_in is sent as credits with the transaction.
+    // ──────────────────────────────────────────────────────────
+
+    fn swap_sell(
+        merkle_proof: [test_usdcx_stablecoin.aleo::MerkleProof; 2],
+        public total_amount_in:  u64,
+        public total_amount_out: u64,
+        public total_fee:        u64,
+        public sqrt_price_final: u128,
+        public tick_final:       i32,
+        public step0: TickStep,
+        public step1: TickStep,
+        public step2: TickStep,
+        public step3: TickStep,
+    ) -> (SwapReceipt, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
+
+        assert(total_amount_in > 0u64);
+        assert(total_amount_out > 0u64);
+        let expected_fee: u64 = (total_amount_in as u128 * FEE_BPS as u128 / FEE_DENOM as u128) as u64;
+        assert_eq(total_fee, expected_fee);
+        assert_eq(
+            step0.amount_in_step + step1.amount_in_step + step2.amount_in_step + step3.amount_in_step,
+            total_amount_in);
+        assert_eq(
+            step0.amount_out_step + step1.amount_out_step + step2.amount_out_step + step3.amount_out_step,
+            total_amount_out);
+        assert_eq(
+            step0.fee_step + step1.fee_step + step2.fee_step + step3.fee_step,
+            total_fee);
+        let ticks_crossed: u8 =
+            (step0.tick_next != TICK_SENTINEL ? 1u8 : 0u8) +
+            (step1.tick_next != TICK_SENTINEL ? 1u8 : 0u8) +
+            (step2.tick_next != TICK_SENTINEL ? 1u8 : 0u8) +
+            (step3.tick_next != TICK_SENTINEL ? 1u8 : 0u8);
+
+        let (compliance_rec, usdcx_out, xfer_final):
+            (test_usdcx_stablecoin.aleo::ComplianceRecord,
+             test_usdcx_stablecoin.aleo::Token, Final) =
+            test_usdcx_stablecoin.aleo::transfer_public_to_private(
+                self.signer, total_amount_out as u128);
+
+        let receipt: SwapReceipt = SwapReceipt {
+            owner: self.signer, zero_for_one: false,
+            amount_in: total_amount_in, amount_out: total_amount_out,
+            fee_paid: total_fee, sqrt_price_after: sqrt_price_final,
+            tick_after: tick_final, ticks_crossed };
+
+        let sp_f: u128   = sqrt_price_final;
+        let t_f: i32     = tick_final;
+        let amt_in: u64  = total_amount_in;
+        let amt_out: u64 = total_amount_out;
+        let fee: u64     = total_fee;
+
+        return (receipt, compliance_rec, usdcx_out, final {
+            xfer_final.run();
+            let pool: PoolState = Mapping::get(pool_state, POOL_KEY);
+                        // ── STEP 0 ──────────────────────────────────────────
+            let a0: bool  = step0.tick_next != TICK_SENTINEL;
+            let k0: field = a0 ? (step0.tick_next as i64 + 2_147_483_647i64) as u64 as field : 0field;
+            let t0: TickInfo = a0 ? Mapping::get(tick_info, k0)
+                : TickInfo { liquidity_gross: 0u128, liquidity_net: 0u128,
+                             liquidity_net_is_negative: false,
+                             fee_growth_outside_0: 0u128, fee_growth_outside_1: 0u128,
+                             initialized: false };
+            assert(!a0 || t0.initialized);
+            assert(!a0 || t0.liquidity_net == step0.liquidity_net);
+            assert(!a0 || t0.liquidity_net_is_negative == step0.liquidity_net_is_negative);
+            // amount1_from_sqrts inlined: liq*(hi-lo)/Q64
+            let out0_exp: u64 = a0 ? ((pool.liquidity * (step0.sqrt_price_next - pool.sqrt_price_x64)) / ((step0.sqrt_price_next / Q64) * pool.sqrt_price_x64 + 1u128)) as u64 : 0u64;
+            let diff0: u64 = step0.amount_out_step > out0_exp
+                ? step0.amount_out_step - out0_exp : out0_exp - step0.amount_out_step;
+            assert(!a0 || diff0 <= 1u64);
+            Mapping::set(tick_info, k0, TickInfo {
+                liquidity_gross:           t0.liquidity_gross,
+                liquidity_net:             t0.liquidity_net,
+                liquidity_net_is_negative: t0.liquidity_net_is_negative,
+                fee_growth_outside_0: a0 ? pool.fee_growth_global_0 - t0.fee_growth_outside_0 : t0.fee_growth_outside_0,
+                fee_growth_outside_1: a0 ? pool.fee_growth_global_1 - t0.fee_growth_outside_1 : t0.fee_growth_outside_1,
+                initialized: t0.initialized });
+            // apply_liq_delta inlined
+            let apply0_neg: bool = step0.liquidity_net_is_negative;
+            let liq1: u128 = a0 ? (apply0_neg ? pool.liquidity - step0.liquidity_net : pool.liquidity + step0.liquidity_net) : pool.liquidity;
+            // fee_delta inlined: fee*Q64/liq
+            let fd0: u128 = (pool.liquidity == 0u128 || !a0) ? 0u128 : (step0.fee_step as u128 * Q64) / pool.liquidity;
+            let fg0_1: u128 = a0 ? pool.fee_growth_global_0 + fd0 : pool.fee_growth_global_0;
+            let fg1_1: u128 = a0 ? pool.fee_growth_global_1 + fd0 : pool.fee_growth_global_1;
+            let sq1: u128   = a0 ? step0.sqrt_price_next : pool.sqrt_price_x64;
+
+            // ── STEP 1 ──────────────────────────────────────────
+            let a1b: bool = step1.tick_next != TICK_SENTINEL;
+            let k1: field = a1b ? (step1.tick_next as i64 + 2_147_483_647i64) as u64 as field : 0field;
+            let t1: TickInfo = a1b ? Mapping::get(tick_info, k1)
+                : TickInfo { liquidity_gross: 0u128, liquidity_net: 0u128,
+                             liquidity_net_is_negative: false,
+                             fee_growth_outside_0: 0u128, fee_growth_outside_1: 0u128,
+                             initialized: false };
+            assert(!a1b || t1.initialized);
+            assert(!a1b || t1.liquidity_net == step1.liquidity_net);
+            assert(!a1b || t1.liquidity_net_is_negative == step1.liquidity_net_is_negative);
+            let out1_exp: u64 = a1b ? ((liq1 * (step1.sqrt_price_next - sq1)) / ((step1.sqrt_price_next / Q64) * sq1 + 1u128)) as u64 : 0u64;
+            let diff1: u64 = step1.amount_out_step > out1_exp
+                ? step1.amount_out_step - out1_exp : out1_exp - step1.amount_out_step;
+            assert(!a1b || diff1 <= 1u64);
+            Mapping::set(tick_info, k1, TickInfo {
+                liquidity_gross:           t1.liquidity_gross,
+                liquidity_net:             t1.liquidity_net,
+                liquidity_net_is_negative: t1.liquidity_net_is_negative,
+                fee_growth_outside_0: a1b ? fg0_1 - t1.fee_growth_outside_0 : t1.fee_growth_outside_0,
+                fee_growth_outside_1: a1b ? fg1_1 - t1.fee_growth_outside_1 : t1.fee_growth_outside_1,
+                initialized: t1.initialized });
+            let apply1_neg: bool = step1.liquidity_net_is_negative;
+            let liq2: u128 = a1b ? (apply1_neg ? liq1 - step1.liquidity_net : liq1 + step1.liquidity_net) : liq1;
+            let fd1: u128 = (liq1 == 0u128 || !a1b) ? 0u128 : (step1.fee_step as u128 * Q64) / liq1;
+            let fg0_2: u128 = a1b ? fg0_1 + fd1 : fg0_1;
+            let fg1_2: u128 = a1b ? fg1_1 + fd1 : fg1_1;
+            let sq2: u128   = a1b ? step1.sqrt_price_next : sq1;
+
+            // ── STEP 2 ──────────────────────────────────────────
+            let a2: bool  = step2.tick_next != TICK_SENTINEL;
+            let k2: field = a2 ? (step2.tick_next as i64 + 2_147_483_647i64) as u64 as field : 0field;
+            let t2: TickInfo = a2 ? Mapping::get(tick_info, k2)
+                : TickInfo { liquidity_gross: 0u128, liquidity_net: 0u128,
+                             liquidity_net_is_negative: false,
+                             fee_growth_outside_0: 0u128, fee_growth_outside_1: 0u128,
+                             initialized: false };
+            assert(!a2 || t2.initialized);
+            assert(!a2 || t2.liquidity_net == step2.liquidity_net);
+            assert(!a2 || t2.liquidity_net_is_negative == step2.liquidity_net_is_negative);
+            let out2_exp: u64 = a2 ? ((liq2 * (step2.sqrt_price_next - sq2)) / ((step2.sqrt_price_next / Q64) * sq2 + 1u128)) as u64 : 0u64;
+            let diff2: u64 = step2.amount_out_step > out2_exp
+                ? step2.amount_out_step - out2_exp : out2_exp - step2.amount_out_step;
+            assert(!a2 || diff2 <= 1u64);
+            Mapping::set(tick_info, k2, TickInfo {
+                liquidity_gross:           t2.liquidity_gross,
+                liquidity_net:             t2.liquidity_net,
+                liquidity_net_is_negative: t2.liquidity_net_is_negative,
+                fee_growth_outside_0: a2 ? fg0_2 - t2.fee_growth_outside_0 : t2.fee_growth_outside_0,
+                fee_growth_outside_1: a2 ? fg1_2 - t2.fee_growth_outside_1 : t2.fee_growth_outside_1,
+                initialized: t2.initialized });
+            let apply2_neg: bool = step2.liquidity_net_is_negative;
+            let liq3: u128 = a2 ? (apply2_neg ? liq2 - step2.liquidity_net : liq2 + step2.liquidity_net) : liq2;
+            let fd2: u128 = (liq2 == 0u128 || !a2) ? 0u128 : (step2.fee_step as u128 * Q64) / liq2;
+            let fg0_3: u128 = a2 ? fg0_2 + fd2 : fg0_2;
+            let fg1_3: u128 = a2 ? fg1_2 + fd2 : fg1_2;
+            let sq3: u128   = a2 ? step2.sqrt_price_next : sq2;
+
+            // ── STEP 3 ──────────────────────────────────────────
+            let a3: bool  = step3.tick_next != TICK_SENTINEL;
+            let k3: field = a3 ? (step3.tick_next as i64 + 2_147_483_647i64) as u64 as field : 0field;
+            let t3: TickInfo = a3 ? Mapping::get(tick_info, k3)
+                : TickInfo { liquidity_gross: 0u128, liquidity_net: 0u128,
+                             liquidity_net_is_negative: false,
+                             fee_growth_outside_0: 0u128, fee_growth_outside_1: 0u128,
+                             initialized: false };
+            assert(!a3 || t3.initialized);
+            assert(!a3 || t3.liquidity_net == step3.liquidity_net);
+            assert(!a3 || t3.liquidity_net_is_negative == step3.liquidity_net_is_negative);
+            let out3_exp: u64 = a3 ? ((liq3 * (step3.sqrt_price_next - sq3)) / ((step3.sqrt_price_next / Q64) * sq3 + 1u128)) as u64 : 0u64;
+            let diff3: u64 = step3.amount_out_step > out3_exp
+                ? step3.amount_out_step - out3_exp : out3_exp - step3.amount_out_step;
+            assert(!a3 || diff3 <= 1u64);
+            Mapping::set(tick_info, k3, TickInfo {
+                liquidity_gross:           t3.liquidity_gross,
+                liquidity_net:             t3.liquidity_net,
+                liquidity_net_is_negative: t3.liquidity_net_is_negative,
+                fee_growth_outside_0: a3 ? fg0_3 - t3.fee_growth_outside_0 : t3.fee_growth_outside_0,
+                fee_growth_outside_1: a3 ? fg1_3 - t3.fee_growth_outside_1 : t3.fee_growth_outside_1,
+                initialized: t3.initialized });
+            let apply3_neg: bool = step3.liquidity_net_is_negative;
+            let liq_f: u128 = a3 ? (apply3_neg ? liq3 - step3.liquidity_net : liq3 + step3.liquidity_net) : liq3;
+            let fd3: u128 = (liq3 == 0u128 || !a3) ? 0u128 : (step3.fee_step as u128 * Q64) / liq3;
+            let fg0_4: u128 = a3 ? fg0_3 + fd3 : fg0_3;
+            let fg1_4: u128 = a3 ? fg1_3 + fd3 : fg1_3;
+            let sq4: u128   = a3 ? step3.sqrt_price_next : sq3;
+
+            // ── Terminal partial step ────────────────────────────
+            // Remainder after all tick crossings — verified against sqrt_price_final
+            let term_out: u64 = amt_out
+                - step0.amount_out_step - step1.amount_out_step
+                - step2.amount_out_step - step3.amount_out_step;
+            let term_fee: u64 = fee
+                - step0.fee_step - step1.fee_step - step2.fee_step - step3.fee_step;
+
+            // amount1/amount0 from sqrts inlined
+            let term_computed: u64 = ((liq_f * (sp_f - sq4)) / ((sp_f / Q64) * sq4 + 1u128)) as u64;
+            let term_diff: u64 = term_out > term_computed
+                ? term_out - term_computed : term_computed - term_out;
+            assert(term_diff <= 1u64);
+
+            // fee_delta inlined for terminal step
+            let fd_term: u128 = (liq_f == 0u128) ? 0u128 : (term_fee as u128 * Q64) / liq_f;
+            let fg0_final: u128 = fg0_4 + fd_term;
+            let fg1_final: u128 = fg1_4;
+
+            let reserve: u64 = Mapping::get(aleo_reserve, 0u8);
+            Mapping::set(aleo_reserve, 0u8, reserve + amt_in);
+            Mapping::set(pool_state, POOL_KEY, PoolState {
+                sqrt_price_x64:      sp_f,
+                current_tick:        t_f,
+                liquidity:           liq_f,
+                fee_growth_global_0: fg0_final,
+                fee_growth_global_1: fg1_final });
+        });
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // HELPERS — only callable from transition body, NOT final{}
+    // ──────────────────────────────────────────────────────────
+
+    fn tick_to_field(tick: i32) -> field {
+        return (tick as i64 + 2_147_483_647i64) as u64 as field;
+    }
+
+    fn amount1_from_sqrts(liq: u128, sqrt_lo: u128, sqrt_hi: u128) -> u64 {
+        assert(sqrt_hi >= sqrt_lo);
+        return ((liq * (sqrt_hi - sqrt_lo)) / Q64) as u64;
+    }
+
+    fn amount0_from_sqrts(liq: u128, sqrt_lo: u128, sqrt_hi: u128) -> u64 {
+        assert(sqrt_hi > sqrt_lo);
+        let denom: u128 = (sqrt_hi / Q64) * sqrt_lo + 1u128;
+        return ((liq * (sqrt_hi - sqrt_lo)) / denom) as u64;
+    }
+}

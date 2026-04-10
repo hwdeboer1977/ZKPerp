@@ -109,18 +109,20 @@ Sets up pool state. Can only be called once.
 ### `mint_position`
 ```leo
 fn mint_position(
+    lp_token: Token,              // private: USDCx token record to deposit
+    merkle_proof: [MerkleProof; 2], // private: USDCx freeze-list proof
     tick_lower: i32,              // private: position range lower tick
     tick_upper: i32,              // private: position range upper tick
     liquidity_desired: u128,      // private: liquidity units to add
-    public amount_0_max: u64,     // max USDCx to deposit (slippage)
-    public amount_1_max: u64,     // max ALEO to deposit (slippage)
+    public amount_0_max: u64,     // max USDCx to deposit (slippage guard)
+    public amount_1_max: u64,     // max ALEO to deposit (slippage guard)
     public amount_0_actual: u64,  // actual USDCx deposit
     public amount_1_actual: u64,  // actual ALEO deposit
     public sqrt_price_x64: u128,  // current pool price (verified on-chain)
     public current_tick: i32,     // current pool tick (verified on-chain)
     public fee_growth_inside_0: u128,
     public fee_growth_inside_1: u128,
-) -> (LPPosition, Final)
+) -> (LPPosition, ComplianceRecord, Token, Final)
 ```
 
 ### `burn_position`
@@ -133,12 +135,14 @@ fn burn_position(
     public amount_1_out: u64,     // ALEO to withdraw
     public sqrt_price_x64: u128,
     public current_tick: i32,
-) -> Final
+) -> (ComplianceRecord, Token, Final)
 ```
 
 ### `swap_buy` (USDCx → ALEO)
 ```leo
 fn swap_buy(
+    usdcx_in: Token,              // private: USDCx token record
+    merkle_proof: [MerkleProof; 2], // private: USDCx freeze-list proof
     public total_amount_in:  u64,   // USDCx in (gross, includes fee)
     public total_amount_out: u64,   // ALEO out
     public total_fee:        u64,   // fee paid (0.3%)
@@ -148,11 +152,24 @@ fn swap_buy(
     public step1: TickStep,
     public step2: TickStep,
     public step3: TickStep,
-) -> (SwapReceipt, Final)
+) -> (SwapReceipt, ComplianceRecord, Token, Final)
 ```
 
 ### `swap_sell` (ALEO → USDCx)
-Same signature as `swap_buy`. Direction determined by `zero_for_one` flag in `SwapReceipt`.
+```leo
+fn swap_sell(
+    merkle_proof: [MerkleProof; 2], // private: USDCx freeze-list proof
+    public total_amount_in:  u64,   // ALEO in (gross, includes fee)
+    public total_amount_out: u64,   // USDCx out
+    public total_fee:        u64,   // fee paid (0.3%)
+    public sqrt_price_final: u128,
+    public tick_final:       i32,
+    public step0: TickStep,
+    public step1: TickStep,
+    public step2: TickStep,
+    public step3: TickStep,
+) -> (SwapReceipt, ComplianceRecord, Token, Final)
+```
 
 ---
 
@@ -227,8 +244,8 @@ leo devnet \
 # Terminal 2
 cp src/main_devnet.leo src/main.leo
 # Edit program.json: "program": "zkperp_amm_devnet.aleo"
-chmod +x test_amm_devnet.sh
-./test_amm_devnet.sh
+chmod +x tests/test_amm_devnet.sh
+./tests/test_amm_devnet.sh
 ```
 
 ### Test Breakdown
@@ -278,15 +295,18 @@ The 4-step unrolling limits crossings to 4 per transaction. Large swaps through 
 ```
 zkperp_amm/
 ├── src/
-│   ├── main.leo              # Testnet contract (with USDCx integration)
+│   ├── main.leo              # Testnet contract (with real USDCx)
 │   └── main_devnet.leo       # Devnet contract (mock USDCx, debug mappings)
-├── orchestrator/
-│   └── zkcl-amm-bot.mjs     # REST API orchestrator
-├── amm-app/                  # React frontend
+├── frontend/                 # React frontend
 │   └── src/
 │       ├── App.tsx           # 3-tab UI (Swap / Liquidity / Burn)
-│       └── amm.ts            # Math: swap quotes, liquidity amounts
-├── test_amm_devnet.sh        # Devnet integration test suite
+│       ├── amm.ts            # Math: swap quotes, liquidity amounts
+│       └── merkleProofs.ts   # USDCx merkle proof helpers
+├── tests/
+│   └── test_amm_devnet.sh    # Devnet integration test suite
+├── build/                    # Leo compiled output
+├── program.json              # Program name and version
+├── .env                      # Endpoint, keys, network config
 └── README.md                 # This file
 ```
 

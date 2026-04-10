@@ -6,9 +6,10 @@
  *
  * Flow:
  *   1. Read Chainlink feed
- *   2. Validate freshness
- *   3. Call zkperp_oracle.aleo/submit_price directly on-chain
- *   4. Contract accumulates votes — at 2-of-3, oracle_prices is updated
+ *   2. Validate freshness (uses Chainlink updatedAt unix timestamp)
+ *   3. Fetch current Aleo block height (used as on-chain timestamp)
+ *   4. Call zkperp_oracle.aleo/submit_price directly on-chain
+ *   5. Contract accumulates votes — at 2-of-3, oracle_prices is updated
  *
  * Environment variables:
  *   RELAYER_NAME          - A, B, or C
@@ -19,6 +20,7 @@
  *   EVM_RPC_URL_ARB       - Arbitrum RPC (for SOL feed)
  *   POLL_INTERVAL_MS      - polling interval (default 15000)
  *   ORACLE_PROGRAM        - zkperp_oracle.aleo (default)
+ *   ALEO_EXPLORER_API     - explorer API base (default https://api.explorer.provable.com/v1)
  */
 
 import dotenv from 'dotenv';
@@ -30,10 +32,12 @@ dotenv.config();
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const RELAYER_NAME    = process.env.RELAYER_NAME;
+const RELAYER_NAME     = process.env.RELAYER_NAME;
 const ALEO_PRIVATE_KEY = process.env.ALEO_PRIVATE_KEY;
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 15_000);
 const ORACLE_PROGRAM   = process.env.ORACLE_PROGRAM || 'zkperp_oracle.aleo';
+const ALEO_NETWORK     = process.env.ALEO_NETWORK || 'testnet';
+const EXPLORER_API     = process.env.ALEO_EXPLORER_API || 'https://api.explorer.provable.com/v1';
 
 if (!['A', 'B', 'C'].includes(RELAYER_NAME)) {
   console.error('RELAYER_NAME must be A, B, or C');
@@ -46,6 +50,18 @@ if (!ALEO_PRIVATE_KEY) {
 
 const log  = (...args) => console.log(`[Relayer-${RELAYER_NAME}]`, ...args);
 const warn = (...args) => console.warn(`[Relayer-${RELAYER_NAME}]`, ...args);
+
+// ── Aleo block height ─────────────────────────────────────────────────────────
+
+async function fetchAleoBlockHeight() {
+  const url = `${EXPLORER_API}/${ALEO_NETWORK}/latest/height`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch Aleo block height: ${res.status}`);
+  const height = await res.json();
+  const h = Number(height);
+  if (!Number.isInteger(h) || h <= 0) throw new Error(`Invalid block height: ${height}`);
+  return h;
+}
 
 // ── Dedup — avoid re-submitting same round ────────────────────────────────────
 
@@ -65,11 +81,11 @@ async function processMarket(marketId, market) {
   // 1. Read Chainlink feed
   const feed = await readChainlinkFeed(rpcUrl, market.feedAddress);
 
-  // 2. Freshness check
+  // 2. Freshness check — uses Chainlink unix timestamp, never touches on-chain storage
   const nowSec = Math.floor(Date.now() / 1000);
-  const age = nowSec - Number(feed.updatedAt);
-  if (age > market.heartbeatSec) {
-    throw new Error(`Feed stale: age=${age}s heartbeat=${market.heartbeatSec}s`);
+  const chainlinkAge = nowSec - Number(feed.updatedAt);
+  if (chainlinkAge > market.heartbeatSec) {
+    throw new Error(`Feed stale: age=${chainlinkAge}s heartbeat=${market.heartbeatSec}s`);
   }
 
   // 3. Dedup — skip if same round already submitted
@@ -80,20 +96,26 @@ async function processMarket(marketId, market) {
 
   // 4. Normalize price to 8 decimals → u64 for Aleo
   const price = BigInt(normalizeTo8(feed.answer, feed.decimals));
-  const timestamp = Number(feed.updatedAt);
 
-  log(`📡 ${marketId} price=${price} roundId=${feed.roundId} age=${age}s — submitting on-chain`);
+  // 5. Fetch Aleo block height — this is what goes on-chain as timestamp.
+  //    The Leo contract stores PriceData { price: u64, timestamp: u32 } and checks:
+  //      let price_age: u32 = block.height - price_data.timestamp;
+  //      assert(price_age <= MAX_PRICE_AGE_BLOCKS);
+  //    so timestamp must be an Aleo block height, NOT a unix epoch.
+  const aleoBlockHeight = await fetchAleoBlockHeight();
 
-  // 5. Submit directly to zkperp_oracle.aleo
+  log(`📡 ${marketId} price=${price} roundId=${feed.roundId} chainlinkAge=${chainlinkAge}s aleoBlock=${aleoBlockHeight} — submitting on-chain`);
+
+  // 6. Submit directly to zkperp_oracle.aleo
   await submitPriceOnChain({
     privateKey: ALEO_PRIVATE_KEY,
     program:    ORACLE_PROGRAM,
     assetKey:   market.assetKey,   // e.g. "1field"
     price,
-    timestamp,
+    timestamp:  aleoBlockHeight,   // ← Aleo block height, not unix epoch
   });
 
-  // 6. Mark this round as submitted
+  // 7. Mark this round as submitted
   lastSubmittedRound.set(market.assetKey, feed.roundId);
   log(`✅ ${marketId} submitted — waiting for on-chain quorum`);
 }
@@ -112,7 +134,7 @@ async function tick() {
 
 log(`Starting — polling every ${POLL_INTERVAL_MS / 1000}s`);
 log(`Oracle program: ${ORACLE_PROGRAM}`);
-log(`Aleo network: ${process.env.ALEO_NETWORK || 'testnet'}`);
+log(`Aleo network: ${ALEO_NETWORK}`);
 
 await tick();
 setInterval(tick, POLL_INTERVAL_MS);

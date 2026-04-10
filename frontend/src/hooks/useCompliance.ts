@@ -51,6 +51,15 @@ export function useCompliance() {
           currentBlock = typeof d === 'number' ? d : (d.height || 0);
         } catch {}
 
+        // Fetch current on-chain compliance root to discard stale records
+        let activeRoot = '';
+        try {
+          const rootRes = await fetch(
+            `${ALEO_API}/program/${COMPLIANCE_PROGRAM_ID}/mapping/compliance_root/0u8`
+          );
+          activeRoot = (await rootRes.text()).replace(/"/g, '').trim();
+        } catch {}
+
         const parsed: ComplianceRecordData[] = [];
         for (const record of crRaw) {
           if (!record.recordCiphertext) continue;
@@ -61,12 +70,13 @@ export function useCompliance() {
             const expiresAt    = expiresMatch ? parseInt(expiresMatch[1]) : 0;
             const issuedUnder  = issuedMatch ? issuedMatch[1] : '';
             const isExpired    = expiresAt > 0 && currentBlock > 0 && currentBlock > expiresAt;
+            const isStaleRoot  = activeRoot !== '' && issuedUnder !== activeRoot;
             parsed.push({
               id: record.commitment || record.tag || String(Math.random()),
               plaintext,
               issuedUnder,
               expiresAt,
-              isExpired,
+              isExpired: isExpired || isStaleRoot,
             });
           } catch {}
         }
@@ -98,6 +108,8 @@ export function useCompliance() {
         if (crRaw.length === 0) { setComplianceRecord(null); return; }
         let currentBlock = 0;
         try { const res = await fetch(`${ALEO_API}/block/height/latest`); const d = await res.json(); currentBlock = typeof d === 'number' ? d : (d.height || 0); } catch {}
+        let activeRoot = '';
+        try { const rr = await fetch(`${ALEO_API}/program/${COMPLIANCE_PROGRAM_ID}/mapping/compliance_root/0u8`); activeRoot = (await rr.text()).replace(/"/g, '').trim(); } catch {}
         const parsed: ComplianceRecordData[] = [];
         for (const record of crRaw) {
           if (!record.recordCiphertext) continue;
@@ -106,8 +118,10 @@ export function useCompliance() {
             const expiresMatch = plaintext.match(/expires_at[:\s]+(\d+)u32/);
             const issuedMatch = plaintext.match(/issued_under[:\s]+(\S+?field)/);
             const expiresAt = expiresMatch ? parseInt(expiresMatch[1]) : 0;
+            const issuedUnder = issuedMatch?.[1] || '';
             const isExpired = expiresAt > 0 && currentBlock > 0 && currentBlock > expiresAt;
-            parsed.push({ id: record.commitment || String(Math.random()), plaintext, issuedUnder: issuedMatch?.[1] || '', expiresAt, isExpired });
+            const isStaleRoot = activeRoot !== '' && issuedUnder !== activeRoot;
+            parsed.push({ id: record.commitment || String(Math.random()), plaintext, issuedUnder, expiresAt, isExpired: isExpired || isStaleRoot });
           } catch {}
         }
         const valid = parsed.filter(r => !r.isExpired);

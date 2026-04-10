@@ -292,7 +292,7 @@ export function TradingWidget({
 
       const merkleProof = await getMerkleProof(USDCX_PROGRAM_ID, address);
 
-      // v22a open_position — 11 inputs (with max_slippage)
+      // v26 open_position — 13 inputs
       const slippage = parseFloat(slippagePercent) / 100;
       const maxSlippage = BigInt(Math.floor(Number(currentPrice) * slippage));
 
@@ -310,6 +310,7 @@ export function TradingWidget({
         address,
         orchestrator,
         merkleProof,
+        pairConfig.oracleMappingKey,
       ];
 
       console.log('Open position inputs:', inputs);

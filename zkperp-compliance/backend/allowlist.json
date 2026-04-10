@@ -1,0 +1,21 @@
+{
+  "addresses": [
+    "aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0",
+    "aleo122uq924daywh5h5r3feuk2hjsa6j6w47kp79zeudhnmq5dqf8grsqgx28a",
+    "aleo1eqet6nt8g746332dsydm0xazsfnafe3ff5asmkzezdz2tyuxtszqx9rljz"
+  ],
+  "registrations": {
+    "aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0": {
+      "registered_at": "2026-04-06T09:23:22.955Z",
+      "tx_id": null
+    },
+    "aleo122uq924daywh5h5r3feuk2hjsa6j6w47kp79zeudhnmq5dqf8grsqgx28a": {
+      "registered_at": "2026-04-06T09:32:59.584Z",
+      "tx_id": "at18005vg3f9h57jh3uajhffn3fc6ng53m9t37zrg8wwm7rvfcvnupqpsrac9"
+    },
+    "aleo1eqet6nt8g746332dsydm0xazsfnafe3ff5asmkzezdz2tyuxtszqx9rljz": {
+      "registered_at": "2026-04-10T14:03:11.372Z",
+      "tx_id": "at10gnwwt2m90j00wed3wevju6n3z90datys4qsgrz4cja73pm55upsxvylze"
+    }
+  }
+}

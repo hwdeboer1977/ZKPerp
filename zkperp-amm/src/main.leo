@@ -86,6 +86,7 @@ program zkperp_amm_v3.aleo {
     // initialize_pool
     // ──────────────────────────────────────────────────────────
 
+    // Only callable by admin (roles[0]). Can only be called once (is_init guard).
     fn initialize_pool(
         public initial_sqrt_price_x64: u128,
         public initial_tick: i32,
@@ -115,6 +116,9 @@ program zkperp_amm_v3.aleo {
     // mint_position
     // ──────────────────────────────────────────────────────────
 
+    // Deposits USDCx (token0) and ALEO (token1) into the pool in exchange for an LPPosition record.
+    // tick_lower/tick_upper must be multiples of TICK_SPACING (60).
+    // amount_0_actual/amount_1_actual are verified on-chain against pool.sqrt_price_x64.
     fn mint_position(
         lp_token: test_usdcx_stablecoin.aleo::Token,
         merkle_proof: [test_usdcx_stablecoin.aleo::MerkleProof; 2],
@@ -155,6 +159,8 @@ program zkperp_amm_v3.aleo {
         let a1: u64   = amount_1_actual;
         let caller: address = self.caller;
 
+        // Transfer USDCx from caller to the AMM program account via USDCx stablecoin contract.
+        // Returns ComplianceRecord (required by USDCx), change token, and a deferred Final.
         let (compliance_rec, change_token, xfer_final):
             (test_usdcx_stablecoin.aleo::ComplianceRecord,
              test_usdcx_stablecoin.aleo::Token, Final) =
@@ -162,6 +168,7 @@ program zkperp_amm_v3.aleo {
                 self.address, amount_0_actual as u128, lp_token, merkle_proof,
             );
 
+        // xfer_final.run() executes the USDCx transfer on-chain inside the finalize block.
         return (position, compliance_rec, change_token, final {
             xfer_final.run();
             let pool: PoolState = Mapping::get(pool_state, POOL_KEY);
@@ -171,6 +178,8 @@ program zkperp_amm_v3.aleo {
             let reserve: u64 = Mapping::get_or_use(aleo_reserve, 0u8, 0u64);
             Mapping::set(aleo_reserve, 0u8, reserve + a1);
 
+        // tick_lower — initialize if first LP, or add liquidity_gross/net.
+        // fee_growth_outside is set to global fee accumulator if tick is below current price.
             // tick_lower — initialize or update
             let tl_key: field = (tl as i64 + 2_147_483_647i64) as u64 as field;
             let tl_info: TickInfo = Mapping::get_or_use(tick_info, tl_key, TickInfo {
@@ -192,6 +201,8 @@ program zkperp_amm_v3.aleo {
                 fee_growth_outside_1:      tl_fee1,
                 initialized:               true });
 
+        // tick_upper — liquidity_net is negative (price crossing upward removes liquidity).
+        // sub_signed inlined: (tu_net, tu_neg) - (liq, false).
             // tick_upper — liquidity_net decreases (first mint: 0 - liq = -liq)
             let tu_key: field = (tu as i64 + 2_147_483_647i64) as u64 as field;
             let tu_info: TickInfo = Mapping::get_or_use(tick_info, tu_key, TickInfo {
@@ -228,6 +239,7 @@ program zkperp_amm_v3.aleo {
                 fee_growth_outside_1:      tu_fee1,
                 initialized:               true });
 
+        // Only add to active liquidity if the position covers the current tick.
             // Update active liquidity if position covers current tick
             let in_range: bool = (tl <= current_tick) && (current_tick < tu);
             let new_liq: u128 = in_range ? pool.liquidity + liq : pool.liquidity;
@@ -244,6 +256,8 @@ program zkperp_amm_v3.aleo {
     // burn_position
     // ──────────────────────────────────────────────────────────
 
+    // Burns an LPPosition record and returns USDCx (token0) and ALEO (token1) to the owner.
+    // fee_growth_inside_0/1 must be current pool values to verify accrued fees.
     fn burn_position(
         position: LPPosition,
         public fee_growth_inside_0: u128,
@@ -263,12 +277,14 @@ program zkperp_amm_v3.aleo {
         let a1: u64   = amount_1_out;
         let owner: address = position.owner;
 
+        // Transfer USDCx from the AMM program account back to position owner.
         let (compliance_rec, payout_token, xfer_final):
             (test_usdcx_stablecoin.aleo::ComplianceRecord,
              test_usdcx_stablecoin.aleo::Token, Final) =
             test_usdcx_stablecoin.aleo::transfer_public_to_private(
                 owner, amount_0_out as u128);
 
+        // xfer_final.run() executes the USDCx payout on-chain.
         return (compliance_rec, payout_token, final {
             xfer_final.run();
             let pool: PoolState = Mapping::get(pool_state, POOL_KEY);
@@ -277,6 +293,8 @@ program zkperp_amm_v3.aleo {
             assert(fee_growth_inside_0 <= pool.fee_growth_global_0);
             assert(fee_growth_inside_1 <= pool.fee_growth_global_1);
 
+        // tick_lower: sub_signed inlined — remove liq from net.
+        // If liquidity_gross drops to 0 the tick is de-initialized.
             // tick_lower: sub_signed inlined (net -= liq)
             let tl_key: field = (tl as i64 + 2_147_483_647i64) as u64 as field;
             let tl_info: TickInfo = Mapping::get(tick_info, tl_key);
@@ -298,6 +316,7 @@ program zkperp_amm_v3.aleo {
                 fee_growth_outside_1:      tl_info.fee_growth_outside_1,
                 initialized:               tl_gross > 0u128 });
 
+        // tick_upper: add_signed inlined — restore what mint subtracted from net.
             // tick_upper: add_signed inlined (net += liq, restoring what mint subtracted)
             let tu_key: field = (tu as i64 + 2_147_483_647i64) as u64 as field;
             let tu_info: TickInfo = Mapping::get(tick_info, tu_key);
@@ -317,6 +336,7 @@ program zkperp_amm_v3.aleo {
                 fee_growth_outside_1:      tu_info.fee_growth_outside_1,
                 initialized:               tu_gross > 0u128 });
 
+        // Reduce active liquidity if position was in range. Release ALEO from reserve.
             let in_range: bool = (tl <= current_tick) && (current_tick < tu);
             let reserve: u64 = Mapping::get(aleo_reserve, 0u8);
             assert(reserve >= a1);
@@ -331,6 +351,10 @@ program zkperp_amm_v3.aleo {
         });
     }
 
+    // swap_buy — USDCx → ALEO
+    // Price decreases (zero_for_one = true). USDCx transferred in, ALEO paid out from reserve.
+    // Orchestrator pre-computes step0..step3 for tick crossings. Single-range: amounts in step0,
+    // tick_next = TICK_SENTINEL for all steps. Up to 4 tick crossings supported.
     // ──────────────────────────────────────────────────────────
     // swap_buy — USDCx → ALEO (zero_for_one = true)
     // sqrt_price decreases. Token0 (USDCx) in, Token1 (ALEO) out.
@@ -350,6 +374,7 @@ program zkperp_amm_v3.aleo {
         public step3: TickStep,
     ) -> (SwapReceipt, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
 
+        // Verify fee matches 0.3% of gross input. Step amounts must sum to total.
         assert(total_amount_in > 0u64);
         assert(total_amount_out > 0u64);
         let expected_fee: u64 = (total_amount_in as u128 * FEE_BPS as u128 / FEE_DENOM as u128) as u64;
@@ -381,12 +406,15 @@ program zkperp_amm_v3.aleo {
         let amt_out: u64 = total_amount_out;
         let fee: u64     = total_fee;
 
+        // Transfer USDCx from caller to AMM. Returns compliance record, change token, deferred Final.
         let (compliance_rec, change_token, xfer_final):
             (test_usdcx_stablecoin.aleo::ComplianceRecord,
              test_usdcx_stablecoin.aleo::Token, Final) =
             test_usdcx_stablecoin.aleo::transfer_private_to_public(
                 self.address, total_amount_in as u128, usdcx_in, merkle_proof);
 
+        // ── Finalize block: all on-chain state updates ──────────────────────────────
+        // xfer_final.run() settles the USDCx transfer first.
         return (receipt, compliance_rec, change_token, final {
             xfer_final.run();
             let pool: PoolState = Mapping::get(pool_state, POOL_KEY);
@@ -401,6 +429,8 @@ program zkperp_amm_v3.aleo {
             assert(!a0 || t0.liquidity_net == step0.liquidity_net);
             assert(!a0 || t0.liquidity_net_is_negative == step0.liquidity_net_is_negative);
 
+            // out0_exp: expected ALEO out for this step using amount1 formula: L*(hi-lo)/Q64.
+            // a0=false (no tick crossing) → out0_exp=0, diff0=0, assert passes trivially.
             // amount1_from_sqrts inlined: liq*(hi-lo)/Q64
             let out0_exp: u64 = a0 ? ((pool.liquidity * (pool.sqrt_price_x64 - step0.sqrt_price_next)) / Q64) as u64 : 0u64;
             let diff0_max: u64 = step0.amount_out_step > out0_exp ? step0.amount_out_step : out0_exp;
@@ -417,6 +447,8 @@ program zkperp_amm_v3.aleo {
                 fee_growth_outside_0:      t0_fg0,
                 fee_growth_outside_1:      t0_fg1,
                 initialized:               t0.initialized });
+            // apply_liq_delta: add or subtract liquidity_net when crossing a tick.
+            // apply0_neg=true means liquidity decreases (price crossed downward through tick).
             // apply_liq_delta inlined
             let apply0_neg: bool = !step0.liquidity_net_is_negative;
             // max-min avoids underflow when step.liquidity_net > pool.liquidity
@@ -427,12 +459,14 @@ program zkperp_amm_v3.aleo {
             let liq1_add: u128 = pool.liquidity + step0.liquidity_net;
             let liq1_cross: u128 = apply0_neg ? liq1_sub : liq1_add;
             let liq1: u128 = a0 ? liq1_cross : pool.liquidity;
+            // fee_delta: accumulate fee into fee_growth_global per unit of liquidity.
             // fee_delta inlined: fee*Q64/liq
             let fd0: u128 = (pool.liquidity == 0u128 || !a0) ? 0u128 : (step0.fee_step as u128 * Q64) / pool.liquidity;
             let fg0_1: u128 = a0 ? pool.fee_growth_global_0 + fd0 : pool.fee_growth_global_0;
             let fg1_1: u128 = a0 ? pool.fee_growth_global_1 + fd0 : pool.fee_growth_global_1;
             let sq1: u128   = a0 ? step0.sqrt_price_next : pool.sqrt_price_x64;
 
+            // Steps 1-3: identical pattern to step0. All no-ops when tick_next=SENTINEL.
             // ── STEP 1 ──────────────────────────────────────────
             let a1b: bool = step1.tick_next != TICK_SENTINEL;
             let k1: field = a1b ? (step1.tick_next as i64 + 2_147_483_647i64) as u64 as field : 0field;
@@ -472,6 +506,7 @@ program zkperp_amm_v3.aleo {
             let fg1_2: u128 = a1b ? fg1_1 + fd1 : fg1_1;
             let sq2: u128   = a1b ? step1.sqrt_price_next : sq1;
 
+            // ── STEP 2 ─────────────────────────────────────────────────────────────
             // ── STEP 2 ──────────────────────────────────────────
             let a2: bool  = step2.tick_next != TICK_SENTINEL;
             let k2: field = a2 ? (step2.tick_next as i64 + 2_147_483_647i64) as u64 as field : 0field;
@@ -511,6 +546,7 @@ program zkperp_amm_v3.aleo {
             let fg1_3: u128 = a2 ? fg1_2 + fd2 : fg1_2;
             let sq3: u128   = a2 ? step2.sqrt_price_next : sq2;
 
+            // ── STEP 3 ─────────────────────────────────────────────────────────────
             // ── STEP 3 ──────────────────────────────────────────
             let a3: bool  = step3.tick_next != TICK_SENTINEL;
             let k3: field = a3 ? (step3.tick_next as i64 + 2_147_483_647i64) as u64 as field : 0field;
@@ -549,6 +585,10 @@ program zkperp_amm_v3.aleo {
             let fg1_4: u128 = a3 ? fg1_3 + fd3 : fg1_3;
             let sq4: u128   = a3 ? step3.sqrt_price_next : sq3;
 
+            // Terminal step: the remaining portion of the swap after all tick crossings.
+            // term_out = total_out - sum(step.amount_out). For single-range: term_out=0.
+            // sq4_sp_delta: |sq4 - sp_f| computed without underflow via max-min pattern.
+            // term_diff assert disabled: step sum asserts in transition body are sufficient.
             // ── Terminal partial step ────────────────────────────
             let term_out: u64 = amt_out
                 - step0.amount_out_step - step1.amount_out_step
@@ -567,6 +607,8 @@ program zkperp_amm_v3.aleo {
             // term_diff assert removed: step sum asserts in transition body
             // already verify total_in/out/fee. term_diff conflicts with single-range swaps.
 
+            // Accumulate terminal fee into fee_growth_global_0 (USDCx fees accrue in token0).
+            // fd_term_raw pre-computed before ternary to avoid Leo evaluating 0/0.
             // fee_delta inlined for terminal step
             let fd_term_raw: u128 = (term_fee as u128 * Q64) / liq_f;
             let fd_term: u128 = liq_f == 0u128 ? 0u128 : fd_term_raw;
@@ -574,6 +616,7 @@ program zkperp_amm_v3.aleo {
             let fg0_final: u128 = fg0_4 + fd_term;
             let fg1_final: u128 = fg1_4;
 
+            // Deduct ALEO paid out from the pool reserve and write final pool state.
             let reserve: u64 = Mapping::get(aleo_reserve, 0u8);
             Mapping::set(aleo_reserve, 0u8, reserve - amt_out);
             Mapping::set(pool_state, POOL_KEY, PoolState {
@@ -585,6 +628,10 @@ program zkperp_amm_v3.aleo {
         });
     }
 
+    // swap_sell — ALEO → USDCx
+    // Price increases (zero_for_one = false). ALEO transferred in, USDCx paid out from AMM balance.
+    // Orchestrator pre-computes step0..step3. Same 4-step unrolled architecture as swap_buy.
+    // out_exp for each step uses /2^32 scaling (S32) to avoid overflow since sp/Q64=0.
     // ──────────────────────────────────────────────────────────
     // swap_sell — ALEO → USDCx (zero_for_one = false)
     // sqrt_price increases. Token1 (ALEO) in, Token0 (USDCx) out.
@@ -604,6 +651,7 @@ program zkperp_amm_v3.aleo {
         public step3: TickStep,
     ) -> (SwapReceipt, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
 
+        // Verify fee and step sums. Fee = 0.3% of ALEO amount_in.
         assert(total_amount_in > 0u64);
         assert(total_amount_out > 0u64);
         let expected_fee: u64 = (total_amount_in as u128 * FEE_BPS as u128 / FEE_DENOM as u128) as u64;
@@ -636,12 +684,14 @@ program zkperp_amm_v3.aleo {
         let fee: u64     = total_fee;
         let seller: address = self.caller;
 
+        // Transfer USDCx from AMM public balance to seller. Returns compliance record and token.
         let (compliance_rec, usdc_out, xfer_final):
             (test_usdcx_stablecoin.aleo::ComplianceRecord,
              test_usdcx_stablecoin.aleo::Token, Final) =
             test_usdcx_stablecoin.aleo::transfer_public_to_private(
                 self.signer, total_amount_out as u128);
 
+        // ── Finalize block ──────────────────────────────────────────────────────────
         return (receipt, compliance_rec, usdc_out, final {
             xfer_final.run();
             let pool: PoolState = Mapping::get(pool_state, POOL_KEY);
@@ -656,6 +706,9 @@ program zkperp_amm_v3.aleo {
             assert(!a0 || t0.initialized);
             assert(!a0 || t0.liquidity_net == step0.liquidity_net);
             assert(!a0 || t0.liquidity_net_is_negative == step0.liquidity_net_is_negative);
+            // out0_exp for swap_sell uses /S32 scaling:
+            // amount0 = L*(hiS-loS)*S32/(hiS*loS) where xS=x/2^32.
+            // When a0=false: s0_next=pool.sqrt_price_x64, delta=0, out0_exp=0.
             // amount1_from_sqrts inlined: liq*(hi-lo)/Q64
             // out0_exp: only meaningful when a0=true (tick crossing)
             // When a0=false, step0.sqrt_price_next=0 → use pool.sqrt_price_x64 for both
@@ -679,6 +732,8 @@ program zkperp_amm_v3.aleo {
                 fee_growth_outside_0:      t0_fg0,
                 fee_growth_outside_1:      t0_fg1,
                 initialized:               t0.initialized });
+            // apply_liq_delta: for swap_sell apply0_neg=step0.liquidity_net_is_negative
+            // (opposite sign convention to swap_buy because price moves upward).
             // apply_liq_delta inlined
             let apply0_neg: bool = step0.liquidity_net_is_negative;
             // max-min avoids underflow when step.liquidity_net > pool.liquidity
@@ -826,6 +881,8 @@ program zkperp_amm_v3.aleo {
             let fg1_4: u128 = a3 ? fg1_3 + fd3 : fg1_3;
             let sq4: u128   = a3 ? step3.sqrt_price_next : sq3;
 
+            // Terminal step for swap_sell. Same max-min formula as swap_buy.
+            // Reserve increases by amt_in (ALEO deposited). Pool state written last.
             // ── Terminal partial step ────────────────────────────
             // Remainder after all tick crossings — verified against sqrt_price_final
             let term_out: u64 = amt_out
@@ -845,12 +902,14 @@ program zkperp_amm_v3.aleo {
             let term_diff: u64 = term_diff_max - term_diff_min;
             // assert(term_diff <= 1u64); // TODO: re-enable
 
+            // Terminal fee accrues in token1 (ALEO) for swap_sell direction.
             // fee_delta inlined for terminal step
             let fd_term_raw: u128 = (term_fee as u128 * Q64) / liq_f;
             let fd_term: u128 = liq_f == 0u128 ? 0u128 : fd_term_raw;
             let fg0_final: u128 = fg0_4 + fd_term;
             let fg1_final: u128 = fg1_4;
 
+            // Add ALEO received to pool reserve and write final pool state.
             let reserve: u64 = Mapping::get(aleo_reserve, 0u8);
             Mapping::set(aleo_reserve, 0u8, reserve + amt_in);
             Mapping::set(pool_state, POOL_KEY, PoolState {
@@ -862,6 +921,9 @@ program zkperp_amm_v3.aleo {
         });
     }
 
+    // ── Helper functions ──────────────────────────────────────────────────────────
+    // These can only be called from transition bodies, NOT from inside final{} blocks.
+    // All math that runs inside final{} must be inlined directly.
     // ──────────────────────────────────────────────────────────
     // HELPERS — only callable from transition body, NOT final{}
     // ──────────────────────────────────────────────────────────

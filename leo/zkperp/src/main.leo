@@ -48,7 +48,7 @@
 
 import test_usdcx_stablecoin.aleo;
 
-program zkperp_sol_v21.aleo {
+program zkperp_t_v21.aleo {
 
     // ═══════════════════════════════════════════════════════════════
     // ARCHITECTURE OVERVIEW

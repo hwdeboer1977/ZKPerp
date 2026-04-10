@@ -1,0 +1,31 @@
+{
+  "program": "zkperp_core_v26.aleo",
+  "version": "0.1.0",
+  "description": "",
+  "license": "MIT",
+  "leo": "4.0.0",
+     "dependencies": [
+        {
+            "name": "test_usdcx_stablecoin.aleo",
+            "location": "network",
+            "network": "testnet",
+            "path": null,
+            "edition": null
+        },
+        {
+            "name": "zkperp_compliance_v7.aleo",
+            "location": "network",
+            "network": "testnet",
+            "path": null,
+            "edition": null
+        },
+        {
+            "name": "zkperp_oracle_v2.aleo",
+            "location": "network",
+            "network": "testnet",
+            "path": null,
+            "edition": null
+        }
+    ],
+  "dev_dependencies": null
+}

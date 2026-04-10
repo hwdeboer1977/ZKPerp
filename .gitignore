@@ -23,6 +23,14 @@ voice/
 # Old
 *OLD*
 *V9*
+leo/test_pos*
+V22/
+V24/
+V25/
+V26/
+test_fe/
+leo/mock_usdc/src/mainleoV344
+leo/test_commit_hash_positions/
 
 # Python
 venv/

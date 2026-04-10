@@ -1,9 +1,0 @@
-{
-  "program": "mock_usdc_0128.aleo",
-  "version": "0.1.0",
-  "description": "",
-  "license": "MIT",
-  "leo": "3.3.1",
-  "dependencies": null,
-  "dev_dependencies": null
-}

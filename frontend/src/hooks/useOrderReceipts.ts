@@ -32,7 +32,20 @@ export function useOrderReceipts(programId?: string) {
   const [decrypted, setDecrypted]       = useState(false);
   const [error, setError]               = useState<string | null>(null);
   const [rawRecords, setRawRecords]     = useState<any[]>([]);
-  const [spentIds, setSpentIds]         = useState<Set<string>>(new Set());
+
+  // Persist spent receipt IDs to localStorage so decrypt prompts don't reappear
+  // after page reload for receipts we already know are stale (executed on-chain)
+  const SPENT_KEY = `zkperp_spent_receipts_${PROGRAM_ID}`;
+  const [spentIds, setSpentIds] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem(SPENT_KEY);
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch { return new Set(); }
+  });
+
+  const persistSpent = (ids: Set<string>) => {
+    try { localStorage.setItem(SPENT_KEY, JSON.stringify([...ids])); } catch {}
+  };
 
   // Phase 1: fetch OrderReceipt records from wallet
   const fetchRecords = useCallback(async () => {
@@ -44,9 +57,11 @@ export function useOrderReceipts(programId?: string) {
       // Include spent records — OrderReceipt is consumed on cancel/execute but
       // wallet may mark it spent before the frontend processes it
       const raw = records.filter(
-        (r: any) => (r.recordName === 'OrderReceipt' || r.recordName === 'LimitReceipt') && !r.spent
+        (r: any) => (r.recordName === 'OrderReceipt' || r.recordName === 'LimitReceipt')
+          && !r.spent
+          && !spentIds.has(r.commitment || r.id || '')
       );
-      console.log(`Found ${raw.length} OrderReceipt+LimitReceipt records (unspent)`);
+      console.log(`Found ${raw.length} OrderReceipt+LimitReceipt records (unspent, excl ${spentIds.size} locally-spent)`);
       setRawRecords(raw);
       setRecordCount(raw.length);
       setDecrypted(false);
@@ -120,30 +135,8 @@ export function useOrderReceipts(programId?: string) {
 
       const filtered = parsed.filter(r => !spentIds.has(r.id));
 
-      // Chain-verify limit receipts only (orderType 0) — bot executes them on-chain
-      // which doesn't mark the wallet record as spent. TP/SL receipts are NOT verified
-      // here because we need their plaintext available for the cancel flow.
-      const EXPLORER = 'https://api.explorer.provable.com/v1/testnet';
-      const verified = await Promise.all(
-        filtered.map(async (r) => {
-          if (r.orderType !== 0) return r; // only check limit receipts
-          try {
-            const res = await fetch(`${EXPLORER}/program/${PROGRAM_ID}/mapping/pending_orders/${r.orderId}`);
-            const val = await res.text();
-            if (!val || val === 'null' || val.includes('false') || res.status === 404) {
-              console.log(`LimitReceipt ${r.orderId.slice(0,20)} executed/cancelled on-chain — hiding`);
-              return null;
-            }
-            return r;
-          } catch {
-            return r; // network error — keep it
-          }
-        })
-      );
-      const active = verified.filter(Boolean) as typeof filtered;
-
-      console.log(`OrderReceipts: ${active.length} active (${filtered.length - active.length} limit orders executed/hidden)`);
-      setReceipts(active);
+      console.log(`OrderReceipts: ${filtered.length} active`);
+      setReceipts(filtered);
       setDecrypted(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to decrypt OrderReceipt records');
@@ -153,7 +146,11 @@ export function useOrderReceipts(programId?: string) {
   }, [decrypt, rawRecords, address, spentIds]);
 
   const markSpent = useCallback((id: string) => {
-    setSpentIds(prev => new Set([...prev, id]));
+    setSpentIds(prev => {
+      const next = new Set([...prev, id]);
+      persistSpent(next);
+      return next;
+    });
     setReceipts(prev => prev.filter(r => r.id !== id));
   }, []);
 
@@ -166,7 +163,9 @@ export function useOrderReceipts(programId?: string) {
     try {
       const records = await requestRecords(PROGRAM_ID);
       raw = records.filter(
-        (r: any) => (r.recordName === 'OrderReceipt' || r.recordName === 'LimitReceipt') && !r.spent
+        (r: any) => (r.recordName === 'OrderReceipt' || r.recordName === 'LimitReceipt')
+          && !r.spent
+          && !spentIds.has(r.commitment || r.id || '')
       );
       setRawRecords(raw);
       setRecordCount(raw.length);
@@ -232,21 +231,7 @@ export function useOrderReceipts(programId?: string) {
       }
       const filtered = parsed.filter(r => !spentIds.has(r.id));
 
-      // Chain-verify limit receipts only — hide executed ones
-      const EXPLORER = 'https://api.explorer.provable.com/v1/testnet';
-      const verified = await Promise.all(
-        filtered.map(async (r) => {
-          if (r.orderType !== 0) return r;
-          try {
-            const res = await fetch(`${EXPLORER}/program/${PROGRAM_ID}/mapping/pending_orders/${r.orderId}`);
-            const val = await res.text();
-            if (!val || val === 'null' || val.includes('false') || res.status === 404) return null;
-            return r;
-          } catch { return r; }
-        })
-      );
-      const active = verified.filter(Boolean) as typeof filtered;
-      setReceipts(active);
+      setReceipts(filtered);
       setDecrypted(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to decrypt OrderReceipt records');

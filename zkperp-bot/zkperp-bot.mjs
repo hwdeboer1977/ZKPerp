@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 
 /**
- * ZKPerp Oracle + Liquidation + Order Execution Bot v13
+ * ZKPerp Liquidation + Order Execution Bot v14
  * ====================================
  *
- * All transaction proving is delegated to Provable's TEE-backed Delegated Proving Service
- * simply skips and retries on the next interval.
- *  • Oracle and liquidation ticks are fully decoupled — a slow liquidation no longer
- *    delays the next oracle update.
+ * Oracle price updates are now handled by zkperp_oracle_v2.aleo directly.
+ * This bot no longer calls update_price or receives POST /oracle/update.
+ * Price is read from zkperp_oracle_v2.aleo::oracle_prices on every liquidation tick.
+ *
+ * All transaction proving is delegated to Provable's TEE-backed Delegated Proving Service.
  *
  * API endpoints:
  *   GET /api/liq-auths          - All known open LiquidationAuth positions
@@ -20,6 +21,8 @@
  *   VIEW_KEY               - Orchestrator view key (for record scanning)
  *   PROVABLE_CONSUMER_ID   - Provable API consumer ID
  *   PROVABLE_API_KEY       - Provable API key
+ *   ORACLE_PROGRAM_ID      - Oracle program (default: zkperp_oracle_v2.aleo)
+ *   ASSET_ID               - BTC_USD | ETH_USD | SOL_USD
  *   API_PORT               - HTTP port (default: 3001)
  *   FRONTEND_ORIGIN        - CORS origin (default: http://localhost:5173)
  */
@@ -36,23 +39,21 @@ import { ProvableClient } from './provable-client.mjs';
 const CONFIG = {
   // Keys
   privateKey: process.env.PRIVATE_KEY || '',
-  viewKey: process.env.VIEW_KEY || '',
+  viewKey:    process.env.VIEW_KEY    || '',
 
   // Provable API
   consumerId: process.env.PROVABLE_CONSUMER_ID || '',
-  apiKey: process.env.PROVABLE_API_KEY || '',
+  apiKey:     process.env.PROVABLE_API_KEY     || '',
 
   // Single program + asset — deploy one bot per market
-  // BTC bot: PROGRAM_ID=zkperp_btc_v21.aleo ASSET_ID=BTC_USD
-  // ETH bot: PROGRAM_ID=zkperp_eth_v21.aleo ASSET_ID=ETH_USD
-  // SOL bot: PROGRAM_ID=zkperp_sol_v21.aleo ASSET_ID=SOL_USD
-  programId: process.env.PROGRAM_ID,
-  assetId:   process.env.ASSET_ID,   
-  network:   process.env.NETWORK    || 'testnet',
-  networkId: process.env.NETWORK_ID || '1',
-
-  // Oracle endpoint auth token (must match ZKPERP_ORCHESTRATOR_TOKEN in aleo-oracle .env)
-  oracleToken: process.env.ORACLE_TOKEN || '',
+  // BTC bot: PROGRAM_ID=zkperp_core_v26.aleo ASSET_ID=BTC_USD
+  // ETH bot: PROGRAM_ID=zkperp_eth_v26.aleo  ASSET_ID=ETH_USD
+  // SOL bot: PROGRAM_ID=zkperp_sol_v26.aleo  ASSET_ID=SOL_USD
+  programId:       process.env.PROGRAM_ID,
+  assetId:         process.env.ASSET_ID,
+  oracleProgramId: process.env.ORACLE_PROGRAM_ID || 'zkperp_oracle_v2.aleo',
+  network:         process.env.NETWORK    || 'testnet',
+  networkId:       process.env.NETWORK_ID || '1',
 
   // Endpoints
   apiEndpoint:       process.env.API_ENDPOINT       || 'https://api.explorer.provable.com/v1/testnet',
@@ -60,66 +61,48 @@ const CONFIG = {
   broadcastEndpoint: process.env.BROADCAST_ENDPOINT || 'https://api.explorer.provable.com/v1/testnet/transaction/broadcast',
 
   // Intervals
-  priceIntervalMs: parseInt(process.env.PRICE_INTERVAL || '30000'),
-  scanIntervalMs:  parseInt(process.env.SCAN_INTERVAL  || '60000'),
+  scanIntervalMs: parseInt(process.env.SCAN_INTERVAL || '60000'),
 
   // HTTP API
   apiPort:        parseInt(process.env.API_PORT || '3001'),
   frontendOrigin: process.env.FRONTEND_ORIGIN || 'http://localhost:5173',
 
-  // Set EXEC_USE_FEE_MASTER=true if your Provable account has a fee master —
-  // the DPS prover will then pay the transaction fee on your behalf.
   execUseFeeMaster: process.env.EXEC_USE_FEE_MASTER === 'true',
-
-  // Set DISABLE_ORACLE=true to skip Binance price pushes but still run order execution
-  // Useful for testing TP/SL with a manually seeded oracle price
-  disableOracle: process.env.DISABLE_ORACLE === 'true',
 
   // Contract constants
   liquidationThresholdBps: 10000n,  // 1%
   liquidationRewardBps:    5000n,   // 0.5%
 };
 
+// Oracle asset key mapping — matches zkperp_oracle_v2.aleo markets.json
+const ORACLE_ASSET_KEYS = {
+  'BTC_USD': '1field',
+  'ETH_USD': '2field',
+  'SOL_USD': '3field',
+};
+
 const ALL_PROGRAM_IDS = new Set([CONFIG.programId]);
 
 // ═══════════════════════════════════════════════════════════════
-// STATE: In-memory position store
+// STATE
 // ═══════════════════════════════════════════════════════════════
 
-const positionStore = new Map();
-// (slotPlaintextStore removed for TP/SL — trader now keeps PositionSlot, orchestrator uses ExecTPSLAuth)
-// Still used for limit orders: frontend registers reserved PositionSlot via POST /api/register-slot
+const positionStore      = new Map();
 const slotPlaintextStore = new Map();
-
-// Pending orders store: orderId => { orderId, orderType, isLong, triggerPrice,
-//   size, collateral, entryPrice, positionId, slotId, plaintext, scannedAt }
-const pendingOrderStore = new Map();
-// ExecTPSLAuth store: orderId => { orderId, orderType, trader, triggerPrice, ... plaintext, scannedAt }
-// Orchestrator scans these to execute TP/SL when price triggers — no PositionSlot needed.
-const execTPSLAuthStore = new Map();
-
-// ExecLimitAuth store: orderId => { orderId, trader, isLong, triggerPrice, size, collateral, slotId, nonce, plaintext, scannedAt }
-// Orchestrator scans these to execute limit orders when price triggers.
+const pendingOrderStore  = new Map();
+const execTPSLAuthStore  = new Map();
 const execLimitAuthStore = new Map();
-let lastScanAt          = null;
-let currentOraclePrice  = 0n;
-let botStartedAt        = new Date().toISOString();
-let botPaused           = false;
 
-// ── Quorum oracle price store ───────────────────────────────────
-// Populated by POST /oracle/update from aleo-oracle coordinator.
-// assetId => { price: BigInt, updatedAt: number, roundId: string, receivedAt: number }
-const quorumPrices = new Map();
-
-// Oracle tick guard — prevents a stalled Provable Execute from queueing duplicate updates
-let oracleInFlight = false;
-// Liquidation tick guard (unchanged semantics from v8)
-let isProcessing   = false;
+let lastScanAt         = null;
+let currentOraclePrice = 0n;
+let botStartedAt       = new Date().toISOString();
+let botPaused          = false;
+let isProcessing       = false;
 
 // ── Memory management ───────────────────────────────────────────
-const MAX_POSITION_STORE_SIZE       = Number(process.env.MAX_POSITION_STORE_SIZE || 2000);
-const POSITION_TTL_MS               = Number(process.env.POSITION_TTL_MS         || 30 * 60 * 1000);
-const POSITION_CLEANUP_INTERVAL_MS  = Number(process.env.POSITION_CLEANUP_INTERVAL_MS || 5 * 60 * 1000);
+const MAX_POSITION_STORE_SIZE      = Number(process.env.MAX_POSITION_STORE_SIZE      || 2000);
+const POSITION_TTL_MS              = Number(process.env.POSITION_TTL_MS              || 30 * 60 * 1000);
+const POSITION_CLEANUP_INTERVAL_MS = Number(process.env.POSITION_CLEANUP_INTERVAL_MS || 5 * 60 * 1000);
 
 function upsertPosition(pos) {
   if (!pos?.positionId) return;
@@ -222,6 +205,22 @@ async function fetchJsonPost(url, body) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// ORACLE PRICE — reads from zkperp_oracle_v2.aleo
+// ═══════════════════════════════════════════════════════════════
+
+async function getCurrentOraclePriceFromChain() {
+  const assetKey = ORACLE_ASSET_KEYS[CONFIG.assetId] || '1field';
+  try {
+    const raw = await fetchText(
+      `${CONFIG.apiEndpoint}/program/${CONFIG.oracleProgramId}/mapping/oracle_prices/${assetKey}`
+    );
+    if (!raw || raw === 'null') return null;
+    const match = raw.match(/price:\s*(\d+)u64/);
+    return match ? BigInt(match[1]) : null;
+  } catch { return null; }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // HTTP API SERVER
 // ═══════════════════════════════════════════════════════════════
 
@@ -268,9 +267,6 @@ function startApiServer() {
 
     const url = new URL(req.url, `http://localhost:${CONFIG.apiPort}`);
 
-    // register-slot: used for LIMIT ORDERS only — frontend registers the reserved
-    // PositionSlot so the bot can execute execute_limit_order when price hits.
-    // TP/SL no longer use this — trader keeps their slot, bot uses ExecTPSLAuth.
     if (req.method === 'POST' && url.pathname === '/api/register-slot') {
       let body = '';
       req.on('data', chunk => body += chunk);
@@ -283,7 +279,6 @@ function startApiServer() {
             return;
           }
           const entry = { slotPlaintext, trader, registeredAt: new Date().toISOString() };
-          // Keyed by nonce for limit orders (bot finds slot via PendingOrder.nonce)
           if (nonce) slotPlaintextStore.set(nonce, entry);
           slotPlaintextStore.set(positionId, entry);
           log('API', `Registered slot for limit order (positionId: ${positionId.slice(0,20)}, trader: ${trader?.slice(0,20)})`);
@@ -296,10 +291,6 @@ function startApiServer() {
       });
       return;
     }
-
-    // cancel-order endpoint removed — trader now cancels TP/SL directly on-chain
-    // via cancel_tp_sl(slot, receipt) using their own wallet. No bot involvement needed.
-
 
     if (req.method === 'POST' && url.pathname === '/api/bot/pause') {
       botPaused = true;
@@ -317,48 +308,6 @@ function startApiServer() {
       return;
     }
 
-    // ── POST /oracle/update ────────────────────────────────────────────────────
-    // Called by aleo-oracle coordinator when 2-of-3 relayers reach quorum.
-    // Body: { assetId, price, updatedAt, roundId, sourceChainId, feedAddress, quorum[] }
-    if (req.method === 'POST' && url.pathname === '/oracle/update') {
-      const auth = req.headers['authorization'] || '';
-      if (CONFIG.oracleToken && auth !== `Bearer ${CONFIG.oracleToken}`) {
-        res.writeHead(401, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Unauthorized' }));
-        return;
-      }
-      let body = '';
-      req.on('data', chunk => body += chunk);
-      req.on('end', () => {
-        try {
-          const { assetId, price, updatedAt, roundId } = JSON.parse(body);
-          if (!assetId || !price || !updatedAt || !roundId) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Missing fields: assetId, price, updatedAt, roundId' }));
-            return;
-          }
-          if (assetId !== CONFIG.assetId) {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: true, ignored: true, reason: `bot handles ${CONFIG.assetId}` }));
-            return;
-          }
-          quorumPrices.set(assetId, {
-            price:      BigInt(price),
-            updatedAt:  Number(updatedAt),
-            roundId:    String(roundId),
-            receivedAt: Date.now(),
-          });
-          log('ORACLE', `Quorum price received: ${assetId} @ ${(Number(BigInt(price)) / 1e8).toFixed(2)} (round ${roundId})`);
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: true }));
-        } catch (err) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Invalid JSON' }));
-        }
-      });
-      return;
-    }
-
     if (req.method !== 'GET') { res.writeHead(405); res.end(); return; }
 
     if (url.pathname === '/health') {
@@ -367,21 +316,21 @@ function startApiServer() {
         status:        'ok',
         paused:        botPaused,
         programId:     CONFIG.programId,
+        oracleProgramId: CONFIG.oracleProgramId,
+        assetId:       CONFIG.assetId,
         positionCount: positionStore.size,
-        oracleInFlight,
         isProcessing,
         lastScanAt,
         currentPrice:  currentOraclePrice.toString(),
         netUnrealisedPnl: computeNetPnl(currentOraclePrice).toString(),
-        pendingOrderCount: pendingOrderStore.size,
-        execTPSLAuthCount: execTPSLAuthStore.size,
+        pendingOrderCount:  pendingOrderStore.size,
+        execTPSLAuthCount:  execTPSLAuthStore.size,
         execLimitAuthCount: execLimitAuthStore.size,
-        upSince:       botStartedAt,
+        upSince: botStartedAt,
       }));
       return;
     }
 
-    // Look up order_id by nonce — frontend calls this after place_tp/sl to get orderId
     if (url.pathname.startsWith('/api/order-by-nonce/')) {
       const nonce = url.pathname.split('/').pop();
       const found = Array.from(pendingOrderStore.values()).find(o => o.nonce === nonce);
@@ -458,84 +407,9 @@ function startApiServer() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ORACLE
+// PNL + POOL STATE
 // ═══════════════════════════════════════════════════════════════
 
-// ── Multi-asset oracle update (Chainlink quorum) ──────────────────────────────
-
-async function updateOraclePriceForAsset(assetId, priceOnChain, timestamp) {
-  const programId = CONFIG.programId;
-  if (assetId !== CONFIG.assetId) { logError('ORACLE', `Wrong assetId: ${assetId}`); return false; }
-
-  try {
-    const raw = await fetchText(`${CONFIG.apiEndpoint}/program/${programId}/mapping/oracle_prices/0field`);
-    if (raw && raw !== 'null') {
-      const match = raw.match(/price:\s*(\d+)u64/);
-      if (match) {
-        const onChainPrice = BigInt(match[1]);
-        const diff = onChainPrice > priceOnChain ? onChainPrice - priceOnChain : priceOnChain - onChainPrice;
-        const pctChange = Number(diff * 10000n / (onChainPrice + 1n)) / 100;
-        if (pctChange < 1.0) {
-          log('ORACLE', `${assetId} change ${pctChange.toFixed(2)}% < 1% — skipping`);
-          currentOraclePrice = priceOnChain;
-          return true;
-        }
-        log('ORACLE', `${assetId} change ${pctChange.toFixed(2)}% — updating`);
-      }
-    }
-  } catch { /* first update, no existing price */ }
-
-  log('ORACLE', `Updating ${assetId} on ${programId} → ${priceOnChain}u64`);
-  try {
-    await provableClient.executeTransaction({
-      privateKey:    CONFIG.privateKey,
-      programId,
-      functionName:  'update_price',
-      inputs:        ['0field', `${priceOnChain}u64`, `${timestamp}u32`],
-      useFeeMaster:  CONFIG.execUseFeeMaster,
-      timeoutMs:     120_000,
-    });
-    log('ORACLE', `✅ ${assetId} updated on ${programId} ($${(Number(priceOnChain) / 1e8).toLocaleString()})`);
-    currentOraclePrice = priceOnChain;
-    return true;
-  } catch (err) {
-    logError('ORACLE', `${assetId} update_price failed: ${err.message}`);
-    return false;
-  }
-}
-
-async function fetchBtcPrice() {
-  try {
-    const data = await fetchJson('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT');
-    if (data?.price) { log('ORACLE', `Binance BTC: $${parseFloat(data.price).toLocaleString()}`); return parseFloat(data.price); }
-  } catch (err) { log('ORACLE', `Binance failed: ${err.message}, trying CoinGecko...`); }
-  try {
-    const data = await fetchJson('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
-    if (data?.bitcoin?.usd) { log('ORACLE', `CoinGecko BTC: $${data.bitcoin.usd.toLocaleString()}`); return data.bitcoin.usd; }
-  } catch (err) { logError('ORACLE', `All price sources failed: ${err.message}`); }
-  return null;
-}
-
-async function getCurrentOraclePriceFromChain() {
-  try {
-    const raw = await getMapping('oracle_prices', '0field');
-    if (!raw || raw === 'null') return null;
-    const match = raw.match(/price:\s*(\d+)u64/);
-    return match ? BigInt(match[1]) : null;
-  } catch { return null; }
-}
-
-async function updateOraclePrice(priceUsd) {
-  const priceOnChain = BigInt(Math.round(priceUsd * 100_000_000));
-  const timestamp    = Math.floor(Date.now() / 1000);
-  return updateOraclePriceForAsset(CONFIG.assetId, priceOnChain, timestamp);
-}
-
-// Compute net unrealised PnL across all positions in positionStore.
-// Uses BigInt arithmetic consistent with calculateMarginRatio.
-// Returns signed BigInt in same u64 units as size/collateral (6-decimal USDC).
-// Positive = traders net profitable (pool liability).
-// Negative = traders net losing    (pool asset).
 function computeNetPnl(price) {
   if (!price || price === 0n) return 0n;
   let net = 0n;
@@ -549,69 +423,53 @@ function computeNetPnl(price) {
   return net;
 }
 
-// Submit net PnL to the on-chain net_unrealized_pnl mapping.
-// Called after every successful oracle price update.
-// Non-fatal if it fails — contract defaults to 0i64 (conservative full-OI lock).
 async function submitNetPnl(price) {
   const netPnl   = computeNetPnl(price);
   const posCount = positionStore.size;
   log('PNL', `Net unrealised PnL: ${netPnl >= 0n ? '+' : ''}${netPnl} (${posCount} position(s))`);
 
-  // No positions — skip the transaction, mapping stays at last submitted value
-  // (or 0i64 default). No point paying tx fees for a no-op.
   if (posCount === 0) {
     log('PNL', 'No open positions, skipping update_net_pnl');
     return;
   }
 
-  // Serialise: Leo i64 wants e.g. "123i64" or "-123i64".
-  // Use .toString() explicitly — avoids any BigInt quirks in template literals.
   const pnlInput = `${netPnl.toString()}i64`;
   log('PNL', `Submitting update_net_pnl input: ${pnlInput}`);
 
   try {
-    // Submit update_net_pnl to all configured programs
-    {
-      await provableClient.executeTransaction({
-        privateKey:   CONFIG.privateKey,
-        programId:    pid,
-        functionName: 'update_net_pnl',
-        inputs:       [pnlInput],
-        useFeeMaster: CONFIG.execUseFeeMaster,
-        timeoutMs:    120_000,
-      });
-      log('PNL', `✅ update_net_pnl submitted to ${pid} (${pnlInput})`);
-    }
+    const pid = CONFIG.programId;
+    await provableClient.executeTransaction({
+      privateKey:   CONFIG.privateKey,
+      programId:    pid,
+      functionName: 'update_net_pnl',
+      inputs:       [pnlInput],
+      useFeeMaster: CONFIG.execUseFeeMaster,
+      timeoutMs:    120_000,
+    });
+    log('PNL', `✅ update_net_pnl submitted to ${pid} (${pnlInput})`);
   } catch (err) {
-    // Log full error — err may be a string, Error, or object depending on Provable client
     const msg = err?.message ?? (typeof err === 'string' ? err : JSON.stringify(err));
     logError('PNL', `update_net_pnl failed: ${msg}`);
   }
 }
 
-
-// Submit pool state to on-chain pool_state mapping.
-// Called after every liquidation scan so Long/Short OI reflects reality.
-// Computes OI from positionStore, reads current liquidity from chain.
 async function submitPoolState() {
   if (!provableClient) return;
   const pid = CONFIG.programId;
 
   try {
-    // Read current pool state from chain
     const raw = await fetchText(`${CONFIG.apiEndpoint}/program/${pid}/mapping/pool_state/0field`);
     if (!raw || raw === 'null') { log('POOL', `No pool_state on ${pid} — skipping`); return; }
 
-    const liqMatch   = raw.match(/total_liquidity:\s*(\d+)u64/);
-    const lpMatch    = raw.match(/total_lp_tokens:\s*(\d+)u64/);
-    const feesMatch  = raw.match(/accumulated_fees:\s*(\d+)u64/);
+    const liqMatch  = raw.match(/total_liquidity:\s*(\d+)u64/);
+    const lpMatch   = raw.match(/total_lp_tokens:\s*(\d+)u64/);
+    const feesMatch = raw.match(/accumulated_fees:\s*(\d+)u64/);
     if (!liqMatch) { log('POOL', 'Could not parse pool_state'); return; }
 
     const totalLiquidity = BigInt(liqMatch[1]);
-    const totalLpTokens  = BigInt(lpMatch?.[1] || '0');
+    const totalLpTokens  = BigInt(lpMatch?.[1]  || '0');
     const accFees        = BigInt(feesMatch?.[1] || '0');
 
-    // Compute OI from in-memory position store (keyed by positionId)
     let longOI = 0n, shortOI = 0n;
     for (const pos of positionStore.values()) {
       if (pos.isLong) longOI  += pos.size || 0n;
@@ -648,7 +506,7 @@ async function submitPoolState() {
 let provableClient    = null;
 let scannerRegistered = false;
 
-const SCANNER_RETRY_DELAYS_MS = [5_000, 15_000, 30_000, 60_000]; // backoff sequence
+const SCANNER_RETRY_DELAYS_MS = [5_000, 15_000, 30_000, 60_000];
 
 async function initScanner({ attempt = 0 } = {}) {
   if (!CONFIG.consumerId || !CONFIG.apiKey || !CONFIG.viewKey) {
@@ -678,15 +536,9 @@ async function initScanner({ attempt = 0 } = {}) {
 }
 
 async function scanPositions() {
-  // If scanner isn't registered yet (e.g. startup registration failed and retry
-  // is still pending), skip the Provable path silently — the retry timer will
-  // re-register and subsequent scans will use it.
   if (scannerRegistered && provableClient) {
     const results = await scanViaProvableScanner();
     if (results.length > 0) return results;
-    // Scanner returned 0 results — could be genuinely empty or all records
-    // lacked plaintext. Either way, do NOT fall through to Leo RPC; that path
-    // has no access to private LiquidationAuth records anyway.
     return [];
   }
   log('SCAN', 'Scanner not registered — skipping scan (retry pending)');
@@ -703,17 +555,14 @@ async function scanViaProvableScanner() {
     const liquidationRecords = allList
       .filter(r => ALL_PROGRAM_IDS.has(r.program_name) && r.record_name === 'LiquidationAuth')
       .slice(0, MAX_RECORDS_PER_SCAN);
-    // Map record → programId for use in liquidation execution
     const liqProgramMap = new Map(liquidationRecords.map(r => [r, r.program_name || CONFIG.programId]));
     log('SCAN', `Provable Scanner: ${liquidationRecords.length} LiquidationAuth records (cap=${MAX_RECORDS_PER_SCAN})`);
 
-    // Scan ExecTPSLAuth records — orchestrator uses these to execute TP/SL (no PositionSlot needed)
     const authRecords = allList
       .filter(r => ALL_PROGRAM_IDS.has(r.program_name) && r.record_name === 'ExecTPSLAuth')
       .slice(0, MAX_RECORDS_PER_SCAN);
     log('SCAN', `Provable Scanner: ${authRecords.length} ExecTPSLAuth records`);
 
-    // Process ExecTPSLAuth records
     for (const record of authRecords) {
       let ptStr = record.record_plaintext || record.plaintext || '';
       if (!ptStr && record.record_ciphertext) {
@@ -728,7 +577,6 @@ async function scanViaProvableScanner() {
       const auth = parseExecTPSLAuthFromPlaintext(ptStr);
       if (!auth) continue;
 
-      // Verify order still active on-chain
       try {
         const tpslPid = record.program_name || CONFIG.programId;
         const activeRaw = await getMapping('pending_orders', auth.orderId, tpslPid);
@@ -749,7 +597,6 @@ async function scanViaProvableScanner() {
     }
     log('SCAN', `ExecTPSLAuth store: ${execTPSLAuthStore.size} active TP/SL auth(s)`);
 
-    // Scan ExecLimitAuth records — orchestrator executes limit orders when price triggers
     const limitAuthRecords = allList
       .filter(r => ALL_PROGRAM_IDS.has(r.program_name) && r.record_name === 'ExecLimitAuth')
       .slice(0, MAX_RECORDS_PER_SCAN);
@@ -783,7 +630,6 @@ async function scanViaProvableScanner() {
     }
     log('SCAN', `ExecLimitAuth store: ${execLimitAuthStore.size} active limit auth(s)`);
 
-    // Also scan PendingOrder records (limit orders only)
     const orderRecords = allList
       .filter(r => ALL_PROGRAM_IDS.has(r.program_name) && r.record_name === 'PendingOrder')
       .slice(0, MAX_RECORDS_PER_SCAN);
@@ -801,7 +647,7 @@ async function scanViaProvableScanner() {
       }
       if (!ptStr) continue;
       const order = parsePendingOrderFromPlaintext(ptStr);
-      if (!order || order.orderType !== 0) continue; // limit orders only
+      if (!order || order.orderType !== 0) continue;
 
       try {
         const activeRaw = await getMapping('pending_orders', order.orderId);
@@ -821,16 +667,9 @@ async function scanViaProvableScanner() {
     }
     log('SCAN', `PendingOrder store: ${pendingOrderStore.size} active limit order(s)`);
 
-    const programRecords = liquidationRecords;
-
     const positions = [];
-    for (const record of programRecords) {
-      // Prefer pre-decrypted plaintext provided by Provable scanner
+    for (const record of liquidationRecords) {
       let ptStr = record.record_plaintext || record.plaintext || '';
-
-      // record_plaintext can be absent when the Provable scanner hasn't finished
-      // indexing that block yet. Fall back to in-process SDK decrypt (WASM,
-      // milliseconds, no subprocess) so we never miss a liquidatable position.
       if (!ptStr && record.record_ciphertext) {
         try {
           ptStr = await provableClient.decryptRecord(record.record_ciphertext, CONFIG.viewKey);
@@ -840,7 +679,6 @@ async function scanViaProvableScanner() {
           continue;
         }
       }
-
       if (!ptStr) continue;
       const pos = parsePositionFromPlaintext(ptStr);
       if (!pos) continue;
@@ -858,7 +696,7 @@ async function scanViaProvableScanner() {
         .replace(/\s*{\s*/g, '{').replace(/\s*}\s*/g, '}').trim();
 
       positions.push({ ...pos, ciphertext: record.record_ciphertext, plaintext: compactPt });
-      await sleep(50); // yield to event loop between records
+      await sleep(50);
     }
 
     if (positions.length > 0) log('SCAN', `Scanner found ${positions.length} position(s)`);
@@ -920,16 +758,6 @@ async function scanViaLeoRpc() {
 // STARTUP RECOVERY
 // ═══════════════════════════════════════════════════════════════
 
-// Called once at startup after scanner is registered.
-// Re-populates execTPSLAuthStore and pendingOrderStore from on-chain records.
-//
-// New architecture: trader keeps PositionSlot, orchestrator gets ExecTPSLAuth.
-// On restart, scan ExecTPSLAuth records (mirrors LiquidationAuth scan).
-// Limit order PendingOrders also recovered.
-//
-// Recovery map:
-//   ExecTPSLAuth → execTPSLAuthStore  (keyed by orderId)
-//   PendingOrder → pendingOrderStore  (limit orders only, keyed by orderId)
 async function recoverPendingOrders() {
   if (!scannerRegistered || !provableClient) {
     log('RECOVER', 'Scanner not ready — recovery skipped');
@@ -940,13 +768,12 @@ async function recoverPendingOrders() {
     const allRecords = await provableClient.getOwnedRecords({ decrypt: true, unspent: true });
     const allList = Array.isArray(allRecords) ? allRecords : (allRecords?.records || []);
 
-    const authRecords       = allList.filter(r => ALL_PROGRAM_IDS.has(r.program_name) && r.record_name === 'ExecTPSLAuth');
-    const limitAuthRecords  = allList.filter(r => ALL_PROGRAM_IDS.has(r.program_name) && r.record_name === 'ExecLimitAuth');
-    const orderRecords      = allList.filter(r => ALL_PROGRAM_IDS.has(r.program_name) && r.record_name === 'PendingOrder');
+    const authRecords      = allList.filter(r => ALL_PROGRAM_IDS.has(r.program_name) && r.record_name === 'ExecTPSLAuth');
+    const limitAuthRecords = allList.filter(r => ALL_PROGRAM_IDS.has(r.program_name) && r.record_name === 'ExecLimitAuth');
+    const orderRecords     = allList.filter(r => ALL_PROGRAM_IDS.has(r.program_name) && r.record_name === 'PendingOrder');
 
     log('RECOVER', `Found ${authRecords.length} ExecTPSLAuth + ${limitAuthRecords.length} ExecLimitAuth + ${orderRecords.length} PendingOrder record(s)`);
 
-    // ── Step 1: Recover ExecTPSLAuth records (TP/SL execution) ──
     let recoveredAuths = 0;
     for (const record of authRecords) {
       let ptStr = record.record_plaintext || record.plaintext || '';
@@ -955,10 +782,8 @@ async function recoverPendingOrders() {
         catch (e) { logError('RECOVER', `ExecTPSLAuth decrypt failed: ${e.message}`); continue; }
       }
       if (!ptStr) continue;
-
       const auth = parseExecTPSLAuthFromPlaintext(ptStr);
       if (!auth) continue;
-
       try {
         const activeRaw = await getMapping('pending_orders', auth.orderId);
         if (!activeRaw || activeRaw === 'null' || activeRaw.includes('false')) {
@@ -966,12 +791,10 @@ async function recoverPendingOrders() {
           continue;
         }
       } catch { continue; }
-
       const recordOnly = ptStr.substring(ptStr.indexOf('{'));
       const compactPt  = recordOnly
         .replace(/:\s+/g, ':').replace(/,\s+/g, ',')
         .replace(/\s*{\s*/g, '{').replace(/\s*}\s*/g, '}').trim();
-
       const typeStr = auth.orderType === 1 ? 'TP' : 'SL';
       const tpslProgramId = record.program_name || CONFIG.programId;
       execTPSLAuthStore.set(auth.orderId, { ...auth, plaintext: compactPt, programId: tpslProgramId, scannedAt: new Date().toISOString() });
@@ -979,7 +802,6 @@ async function recoverPendingOrders() {
       log('RECOVER', `✅ Restored ${typeStr} ExecTPSLAuth ${auth.orderId.slice(0, 20)} | trigger: $${(Number(auth.triggerPrice) / 1e8).toFixed(0)} | trader: ${auth.trader.slice(0, 20)}`);
     }
 
-    // ── Step 2: Recover PendingOrder records (limit orders only) ──
     let recoveredOrders = 0;
     for (const record of orderRecords) {
       let ptStr = record.record_plaintext || record.plaintext || '';
@@ -988,10 +810,8 @@ async function recoverPendingOrders() {
         catch (e) { logError('RECOVER', `PendingOrder decrypt failed: ${e.message}`); continue; }
       }
       if (!ptStr) continue;
-
       const order = parsePendingOrderFromPlaintext(ptStr);
-      if (!order || order.orderType !== 0) continue; // limit orders only
-
+      if (!order || order.orderType !== 0) continue;
       try {
         const activeRaw = await getMapping('pending_orders', order.orderId);
         if (!activeRaw || activeRaw === 'null' || activeRaw.includes('false')) {
@@ -999,20 +819,15 @@ async function recoverPendingOrders() {
           continue;
         }
       } catch { continue; }
-
       const recordOnly = ptStr.substring(ptStr.indexOf('{'));
       const compactPt  = recordOnly
         .replace(/:\s+/g, ':').replace(/,\s+/g, ',')
         .replace(/\s*{\s*/g, '{').replace(/\s*}\s*/g, '}').trim();
-
       pendingOrderStore.set(order.orderId, { ...order, plaintext: compactPt, scannedAt: new Date().toISOString() });
       recoveredOrders++;
       log('RECOVER', `✅ Restored LIMIT order ${order.orderId.slice(0, 20)}`);
     }
 
-    log('RECOVER', `Recovery complete — ${recoveredAuths} ExecTPSLAuth(s), ${recoveredOrders} limit order(s) restored`);
-
-    // ── Step 3: Recover ExecLimitAuth records ──
     let recoveredLimitAuths = 0;
     for (const record of limitAuthRecords) {
       let ptStr = record.record_plaintext || record.plaintext || '';
@@ -1021,10 +836,8 @@ async function recoverPendingOrders() {
         catch (e) { logError('RECOVER', `ExecLimitAuth decrypt failed: ${e.message}`); continue; }
       }
       if (!ptStr) continue;
-
       const auth = parseExecLimitAuthFromPlaintext(ptStr);
       if (!auth) continue;
-
       try {
         const activeRaw = await getMapping('pending_orders', auth.orderId);
         if (!activeRaw || activeRaw === 'null' || activeRaw.includes('false')) {
@@ -1032,12 +845,10 @@ async function recoverPendingOrders() {
           continue;
         }
       } catch { continue; }
-
       const recordOnly = ptStr.substring(ptStr.indexOf('{'));
       const compactPt  = recordOnly
         .replace(/:\s+/g, ':').replace(/,\s+/g, ',')
         .replace(/\s*{\s*/g, '{').replace(/\s*}\s*/g, '}').trim();
-
       execLimitAuthStore.set(auth.orderId, { ...auth, plaintext: compactPt, scannedAt: new Date().toISOString() });
       recoveredLimitAuths++;
       log('RECOVER', `✅ Restored LIMIT ExecLimitAuth ${auth.orderId.slice(0, 20)} | trigger: $${(Number(auth.triggerPrice) / 1e8).toFixed(0)} | trader: ${auth.trader.slice(0, 20)}`);
@@ -1064,7 +875,7 @@ function parsePositionFromPlaintext(plaintext) {
     if (!posIdMatch || !sizeMatch || !entryPriceMatch) return null;
     const sizeUsdc = BigInt(sizeMatch[1]);
     if (sizeUsdc < 10000n) return null;
-    const slotIdMatch2  = plaintext.match(/slot_id:\s*(\d+)u8(?:\.private)?/);
+    const slotIdMatch2   = plaintext.match(/slot_id:\s*(\d+)u8(?:\.private)?/);
     const slotNonceMatch = plaintext.match(/_nonce:\s*(\d+)group/);
     return {
       positionId: posIdMatch[1],
@@ -1084,16 +895,16 @@ function parsePositionFromTransition(transition) {
   try {
     const futureOutput = (transition.outputs || []).find(o => o.type === 'future');
     if (!futureOutput?.value) return null;
-    const futureStr    = String(futureOutput.value);
+    const futureStr     = String(futureOutput.value);
     const innerBlockEnd = futureStr.indexOf('},');
     if (innerBlockEnd === -1) return null;
-    const afterBlock   = futureStr.substring(innerBlockEnd + 2);
-    const posIdMatch   = afterBlock.match(/(\d{30,})field/);
+    const afterBlock  = futureStr.substring(innerBlockEnd + 2);
+    const posIdMatch  = afterBlock.match(/(\d{30,})field/);
     if (!posIdMatch) return null;
-    const positionId   = posIdMatch[0];
-    const traderMatch  = afterBlock.match(/(aleo1[a-z0-9]+)/);
-    const u64Matches   = afterBlock.match(/(\d+)u64/g) || [];
-    const u64Values    = u64Matches.map(m => BigInt(m.replace('u64', '')));
+    const positionId  = posIdMatch[0];
+    const traderMatch = afterBlock.match(/(aleo1[a-z0-9]+)/);
+    const u64Matches  = afterBlock.match(/(\d+)u64/g) || [];
+    const u64Values   = u64Matches.map(m => BigInt(m.replace('u64', '')));
     if (u64Values.length < 3) return null;
     return {
       positionId,
@@ -1103,6 +914,89 @@ function parsePositionFromTransition(transition) {
       collateral: u64Values.length >= 6 ? u64Values[5] : u64Values[0],
       entryPrice: u64Values[2],
       scannedAt:  new Date().toISOString(),
+    };
+  } catch { return null; }
+}
+
+function parseExecTPSLAuthFromPlaintext(plaintext) {
+  try {
+    const orderIdMatch   = plaintext.match(/order_id:\s*(\d+field)(?:\.private)?/);
+    const orderTypeMatch = plaintext.match(/order_type:\s*(\d+)u8(?:\.private)?/);
+    const traderMatch    = plaintext.match(/trader:\s*(aleo1[a-z0-9]+)(?:\.private)?/);
+    const slotIdMatch    = plaintext.match(/slot_id:\s*(\d+)u8(?:\.private)?/);
+    const posIdMatch     = plaintext.match(/position_id:\s*(\d+field)(?:\.private)?/);
+    const isLongMatch    = plaintext.match(/is_long:\s*(true|false)(?:\.private)?/);
+    const triggerMatch   = plaintext.match(/trigger_price:\s*(\d+)u64(?:\.private)?/);
+    const sizeMatch      = plaintext.match(/size_usdc:\s*(\d+)u64(?:\.private)?/);
+    const collMatch      = plaintext.match(/collateral_usdc:\s*(\d+)u64(?:\.private)?/);
+    const entryMatch     = plaintext.match(/entry_price:\s*(\d+)u64(?:\.private)?/);
+    const nonceMatch     = plaintext.match(/nonce:\s*(\d+field)(?:\.private)?/);
+    if (!orderIdMatch || !triggerMatch || !traderMatch) return null;
+    return {
+      orderId:      orderIdMatch[1],
+      orderType:    parseInt(orderTypeMatch?.[1] || '1'),
+      trader:       traderMatch[1],
+      slotId:       parseInt(slotIdMatch?.[1] || '0'),
+      positionId:   posIdMatch?.[1] || '0field',
+      isLong:       isLongMatch?.[1] === 'true',
+      triggerPrice: BigInt(triggerMatch[1]),
+      size:         BigInt(sizeMatch?.[1] || '0'),
+      collateral:   BigInt(collMatch?.[1] || '0'),
+      entryPrice:   BigInt(entryMatch?.[1] || '0'),
+      nonce:        nonceMatch?.[1] || null,
+    };
+  } catch { return null; }
+}
+
+function parseExecLimitAuthFromPlaintext(plaintext) {
+  try {
+    const orderIdMatch  = plaintext.match(/order_id:\s*(\d+field)(?:\.private)?/);
+    const traderMatch   = plaintext.match(/trader:\s*(aleo1[a-z0-9]+)(?:\.private)?/);
+    const slotIdMatch   = plaintext.match(/slot_id:\s*(\d+)u8(?:\.private)?/);
+    const isLongMatch   = plaintext.match(/is_long:\s*(true|false)(?:\.private)?/);
+    const triggerMatch  = plaintext.match(/trigger_price:\s*(\d+)u64(?:\.private)?/);
+    const sizeMatch     = plaintext.match(/size_usdc:\s*(\d+)u64(?:\.private)?/);
+    const collMatch     = plaintext.match(/collateral_usdc:\s*(\d+)u64(?:\.private)?/);
+    const nonceMatch    = plaintext.match(/nonce:\s*(\d+field)(?:\.private)?/);
+    if (!orderIdMatch || !triggerMatch || !traderMatch) return null;
+    return {
+      orderId:      orderIdMatch[1],
+      trader:       traderMatch[1],
+      slotId:       parseInt(slotIdMatch?.[1] || '0'),
+      isLong:       isLongMatch?.[1] === 'true',
+      triggerPrice: BigInt(triggerMatch[1]),
+      size:         BigInt(sizeMatch?.[1] || '0'),
+      collateral:   BigInt(collMatch?.[1] || '0'),
+      nonce:        nonceMatch?.[1] || null,
+      orderType:    0,
+    };
+  } catch { return null; }
+}
+
+function parsePendingOrderFromPlaintext(plaintext) {
+  try {
+    const orderIdMatch   = plaintext.match(/order_id:\s*(\d+field)(?:\.private)?/);
+    const orderTypeMatch = plaintext.match(/order_type:\s*(\d+)u8(?:\.private)?/);
+    const isLongMatch    = plaintext.match(/is_long:\s*(true|false)(?:\.private)?/);
+    const triggerMatch   = plaintext.match(/trigger_price:\s*(\d+)u64(?:\.private)?/);
+    const sizeMatch      = plaintext.match(/size_usdc:\s*(\d+)u64(?:\.private)?/);
+    const collMatch      = plaintext.match(/collateral_usdc:\s*(\d+)u64(?:\.private)?/);
+    const entryMatch     = plaintext.match(/entry_price:\s*(\d+)u64(?:\.private)?/);
+    const posIdMatch     = plaintext.match(/position_id:\s*(\d+field)(?:\.private)?/);
+    const slotIdMatch    = plaintext.match(/slot_id:\s*(\d+)u8(?:\.private)?/);
+    if (!orderIdMatch || !triggerMatch || !sizeMatch) return null;
+    const nonceMatch = plaintext.match(/nonce:\s*(\d+field)(?:\.private)?/);
+    return {
+      orderId:      orderIdMatch[1],
+      orderType:    parseInt(orderTypeMatch?.[1] || '0'),
+      isLong:       isLongMatch?.[1] === 'true',
+      triggerPrice: BigInt(triggerMatch[1]),
+      size:         BigInt(sizeMatch[1]),
+      collateral:   BigInt(collMatch?.[1] || '0'),
+      entryPrice:   BigInt(entryMatch?.[1] || '0'),
+      positionId:   posIdMatch?.[1] || '0field',
+      slotId:       parseInt(slotIdMatch?.[1] || '0'),
+      nonce:        nonceMatch?.[1] || null,
     };
   } catch { return null; }
 }
@@ -1162,62 +1056,8 @@ async function liquidatePosition(position) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// MAIN TICKS
+// MAIN TICK
 // ═══════════════════════════════════════════════════════════════
-
-async function oracleTick() {
-  if (botPaused)      { log('ORACLE', 'Bot paused, skipping oracle update'); return; }
-  if (oracleInFlight) { log('ORACLE', 'Previous oracle update still in flight, skipping'); return; }
-  oracleInFlight = true;
-  try {
-    if (CONFIG.disableOracle) {
-      const onChainPrice = await getCurrentOraclePriceFromChain();
-      const priceChanged = onChainPrice && onChainPrice !== currentOraclePrice;
-      if (onChainPrice) currentOraclePrice = onChainPrice;
-      log('ORACLE', `Oracle disabled — chain price: $${(Number(currentOraclePrice)/1e8).toLocaleString()}`);
-      if (priceChanged && provableClient && positionStore.size > 0) await submitNetPnl(currentOraclePrice);
-      if (provableClient) await executePendingOrders(currentOraclePrice);
-      return;
-    }
-
-    const timestamp = Math.floor(Date.now() / 1000);
-    const QUORUM_MAX_AGE_MS = 5 * 60 * 1000; // reject quorum prices older than 5 min
-
-    // ── Try Chainlink quorum prices first (all assets) ────────────────────────
-    const quorumAssets = [...quorumPrices.entries()]
-      .filter(([, q]) => Date.now() - q.receivedAt < QUORUM_MAX_AGE_MS);
-
-    if (quorumAssets.length > 0) {
-      log('ORACLE', `Processing ${quorumAssets.length} quorum price(s) from Chainlink relay`);
-      let btcUpdated = false;
-      for (const [assetId, q] of quorumAssets) {
-        if (!provableClient) {
-          log('ORACLE', `${assetId} quorum received but Provable not ready — queued`);
-          continue;
-        }
-        const updated = await updateOraclePriceForAsset(assetId, q.price, timestamp);
-        if (updated) btcUpdated = true;
-        if (updated) await sleep(3000); // wait 3s between Provable tx submissions
-      }
-            if (btcUpdated && provableClient && positionStore.size > 0) await submitNetPnl(currentOraclePrice);
-      if (provableClient) await executePendingOrders(currentOraclePrice);
-      return;
-    }
-
-    // ── Fallback: Binance/CoinGecko for BTC only ──────────────────────────────
-    log('ORACLE', 'No fresh quorum prices — falling back to Binance for BTC');
-    const btcPrice = await fetchBtcPrice();
-    if (btcPrice) {
-      const updated = await updateOraclePrice(btcPrice);
-      if (updated && provableClient && positionStore.size > 0) await submitNetPnl(currentOraclePrice);
-      if (updated && provableClient) await executePendingOrders(currentOraclePrice);
-    }
-  } catch (err) {
-    logError('ORACLE', `Tick error: ${err.message}`);
-  } finally {
-    oracleInFlight = false;
-  }
-}
 
 async function liquidationTick() {
   if (botPaused)    { log('SCAN', 'Bot paused, skipping liquidation scan'); return; }
@@ -1225,25 +1065,29 @@ async function liquidationTick() {
   isProcessing = true;
 
   try {
+    // Read current price from zkperp_oracle_v2.aleo
     const onChainPrice = await getCurrentOraclePriceFromChain();
-    if (onChainPrice) currentOraclePrice = onChainPrice;
-    if (!currentOraclePrice) { log('SCAN', 'No oracle price, skipping'); return; }
+    if (onChainPrice) {
+      currentOraclePrice = onChainPrice;
+      log('PRICE', `${CONFIG.assetId} @ $${(Number(onChainPrice) / 1e8).toLocaleString()}`);
+    }
+    if (!currentOraclePrice) { log('SCAN', 'No oracle price yet, skipping'); return; }
 
     const positions = await scanPositions();
     lastScanAt = new Date().toISOString();
 
     for (const pos of positions) {
       upsertPosition({
-        positionId:    pos.positionId,
-        trader:        pos.trader,
-        isLong:        pos.isLong,
-        size:          pos.size,
-        collateral:    pos.collateral,
-        entryPrice:    pos.entryPrice,
-        slotNonce:     pos.slotNonce,      // needed for TP/SL slot reconstruction
-        slotId:        pos.slotId,
-        programId:     pos.programId || CONFIG.programId,  // which market this position belongs to
-        scannedAt:     pos.scannedAt || new Date().toISOString(),
+        positionId: pos.positionId,
+        trader:     pos.trader,
+        isLong:     pos.isLong,
+        size:       pos.size,
+        collateral: pos.collateral,
+        entryPrice: pos.entryPrice,
+        slotNonce:  pos.slotNonce,
+        slotId:     pos.slotId,
+        programId:  pos.programId || CONFIG.programId,
+        scannedAt:  pos.scannedAt || new Date().toISOString(),
       });
     }
 
@@ -1253,8 +1097,9 @@ async function liquidationTick() {
 
     if (positions.length === 0) { log('SCAN', 'No open positions'); return; }
 
-    // Update on-chain pool state
     if (provableClient) await submitPoolState();
+    if (provableClient && positionStore.size > 0) await submitNetPnl(currentOraclePrice);
+    if (provableClient) await executePendingOrders(currentOraclePrice);
 
     for (const pos of positions) {
       const m        = calculateMarginRatio(pos, currentOraclePrice);
@@ -1275,107 +1120,14 @@ async function liquidationTick() {
   }
 }
 
-
 // ═══════════════════════════════════════════════════════════════
 // PENDING ORDER HELPERS
 // ═══════════════════════════════════════════════════════════════
 
-function parseExecTPSLAuthFromPlaintext(plaintext) {
-  try {
-    const orderIdMatch    = plaintext.match(/order_id:\s*(\d+field)(?:\.private)?/);
-    const orderTypeMatch  = plaintext.match(/order_type:\s*(\d+)u8(?:\.private)?/);
-    const traderMatch     = plaintext.match(/trader:\s*(aleo1[a-z0-9]+)(?:\.private)?/);
-    const slotIdMatch     = plaintext.match(/slot_id:\s*(\d+)u8(?:\.private)?/);
-    const posIdMatch      = plaintext.match(/position_id:\s*(\d+field)(?:\.private)?/);
-    const isLongMatch     = plaintext.match(/is_long:\s*(true|false)(?:\.private)?/);
-    const triggerMatch    = plaintext.match(/trigger_price:\s*(\d+)u64(?:\.private)?/);
-    const sizeMatch       = plaintext.match(/size_usdc:\s*(\d+)u64(?:\.private)?/);
-    const collMatch       = plaintext.match(/collateral_usdc:\s*(\d+)u64(?:\.private)?/);
-    const entryMatch      = plaintext.match(/entry_price:\s*(\d+)u64(?:\.private)?/);
-    const nonceMatch      = plaintext.match(/nonce:\s*(\d+field)(?:\.private)?/);
-
-    if (!orderIdMatch || !triggerMatch || !traderMatch) return null;
-
-    return {
-      orderId:      orderIdMatch[1],
-      orderType:    parseInt(orderTypeMatch?.[1] || '1'),
-      trader:       traderMatch[1],
-      slotId:       parseInt(slotIdMatch?.[1] || '0'),
-      positionId:   posIdMatch?.[1] || '0field',
-      isLong:       isLongMatch?.[1] === 'true',
-      triggerPrice: BigInt(triggerMatch[1]),
-      size:         BigInt(sizeMatch?.[1] || '0'),
-      collateral:   BigInt(collMatch?.[1] || '0'),
-      entryPrice:   BigInt(entryMatch?.[1] || '0'),
-      nonce:        nonceMatch?.[1] || null,
-    };
-  } catch { return null; }
-}
-
-function parseExecLimitAuthFromPlaintext(plaintext) {
-  try {
-    const orderIdMatch   = plaintext.match(/order_id:\s*(\d+field)(?:\.private)?/);
-    const traderMatch    = plaintext.match(/trader:\s*(aleo1[a-z0-9]+)(?:\.private)?/);
-    const slotIdMatch    = plaintext.match(/slot_id:\s*(\d+)u8(?:\.private)?/);
-    const isLongMatch    = plaintext.match(/is_long:\s*(true|false)(?:\.private)?/);
-    const triggerMatch   = plaintext.match(/trigger_price:\s*(\d+)u64(?:\.private)?/);
-    const sizeMatch      = plaintext.match(/size_usdc:\s*(\d+)u64(?:\.private)?/);
-    const collMatch      = plaintext.match(/collateral_usdc:\s*(\d+)u64(?:\.private)?/);
-    const nonceMatch     = plaintext.match(/nonce:\s*(\d+field)(?:\.private)?/);
-
-    if (!orderIdMatch || !triggerMatch || !traderMatch) return null;
-
-    return {
-      orderId:      orderIdMatch[1],
-      trader:       traderMatch[1],
-      slotId:       parseInt(slotIdMatch?.[1] || '0'),
-      isLong:       isLongMatch?.[1] === 'true',
-      triggerPrice: BigInt(triggerMatch[1]),
-      size:         BigInt(sizeMatch?.[1] || '0'),
-      collateral:   BigInt(collMatch?.[1] || '0'),
-      nonce:        nonceMatch?.[1] || null,
-      // orderType 0 = limit (for isOrderTriggered compatibility)
-      orderType:    0,
-    };
-  } catch { return null; }
-}
-
-function parsePendingOrderFromPlaintext(plaintext) {
-  try {
-    const orderIdMatch    = plaintext.match(/order_id:\s*(\d+field)(?:\.private)?/);
-    const orderTypeMatch  = plaintext.match(/order_type:\s*(\d+)u8(?:\.private)?/);
-    const isLongMatch     = plaintext.match(/is_long:\s*(true|false)(?:\.private)?/);
-    const triggerMatch    = plaintext.match(/trigger_price:\s*(\d+)u64(?:\.private)?/);
-    const sizeMatch       = plaintext.match(/size_usdc:\s*(\d+)u64(?:\.private)?/);
-    const collMatch       = plaintext.match(/collateral_usdc:\s*(\d+)u64(?:\.private)?/);
-    const entryMatch      = plaintext.match(/entry_price:\s*(\d+)u64(?:\.private)?/);
-    const posIdMatch      = plaintext.match(/position_id:\s*(\d+field)(?:\.private)?/);
-    const slotIdMatch     = plaintext.match(/slot_id:\s*(\d+)u8(?:\.private)?/);
-
-    if (!orderIdMatch || !triggerMatch || !sizeMatch) return null;
-
-    const nonceMatch = plaintext.match(/nonce:\s*(\d+field)(?:\.private)?/);
-    return {
-      orderId:      orderIdMatch[1],
-      orderType:    parseInt(orderTypeMatch?.[1] || '0'),
-      isLong:       isLongMatch?.[1] === 'true',
-      triggerPrice: BigInt(triggerMatch[1]),
-      size:         BigInt(sizeMatch[1]),
-      collateral:   BigInt(collMatch?.[1] || '0'),
-      entryPrice:   BigInt(entryMatch?.[1] || '0'),
-      positionId:   posIdMatch?.[1] || '0field',
-      slotId:       parseInt(slotIdMatch?.[1] || '0'),
-      nonce:        nonceMatch?.[1] || null,
-    };
-  } catch { return null; }
-}
-
-// Check if an order's trigger condition is met at the given price
 function isOrderTriggered(order, price) {
   if (!price || price === 0n) return false;
   const { orderType, isLong, triggerPrice } = order;
   if (orderType === 0) {
-    // Limit order: long triggers when price <= trigger, short when price >= trigger
     return isLong ? price <= triggerPrice : price >= triggerPrice;
   } else if (orderType === 1) {
     // Take profit: long triggers when price >= trigger, short when price <= trigger
@@ -1387,31 +1139,7 @@ function isOrderTriggered(order, price) {
   return false;
 }
 
-// Calculate expected payout for TP/SL at given price
-function calcExpectedPayout(order, execPrice) {
-  const { size, collateral, entryPrice, isLong } = order;
-  const safeEntry = entryPrice + 1n;
-  const higher = execPrice > entryPrice ? execPrice : entryPrice;
-  const lower  = execPrice > entryPrice ? entryPrice : execPrice;
-  const priceDiff = higher - lower;
-  const pnlAbs = (size * priceDiff) / safeEntry;
-  const traderProfits = (isLong && execPrice > entryPrice) || (!isLong && execPrice < entryPrice);
-
-  let maxPayout;
-  if (traderProfits) {
-    maxPayout = collateral + pnlAbs;
-  } else {
-    maxPayout = collateral > pnlAbs ? collateral - pnlAbs : 0n;
-  }
-  // 5% safety buffer (generous — TP/SL can have slippage)
-  return (maxPayout * 95n) / 100n;
-}
-
-// Execute all triggered pending orders
 async function executePendingOrders(price) {
-  if (!provableClient) return;
-
-  // Execute triggered TP/SL using ExecTPSLAuth records
   if (execTPSLAuthStore.size > 0) {
     const triggeredAuths = Array.from(execTPSLAuthStore.values())
       .filter(a => isOrderTriggered(a, price));
@@ -1429,7 +1157,6 @@ async function executePendingOrders(price) {
     }
   }
 
-  // Execute triggered limit orders using ExecLimitAuth records
   if (execLimitAuthStore.size > 0) {
     const triggeredLimits = Array.from(execLimitAuthStore.values())
       .filter(a => isOrderTriggered(a, price));
@@ -1447,7 +1174,6 @@ async function executePendingOrders(price) {
     }
   }
 
-  // Legacy: execute limit orders via PendingOrder records (old pattern, kept for backward compat)
   if (pendingOrderStore.size > 0) {
     const triggeredOrders = Array.from(pendingOrderStore.values())
       .filter(o => isOrderTriggered(o, price));
@@ -1466,7 +1192,6 @@ async function executePendingOrders(price) {
   }
 }
 
-// Execute a limit order using ExecLimitAuth — no PositionSlot needed
 async function executeExecLimitAuth(auth, price) {
   const { orderId, isLong, triggerPrice, trader, slotId } = auth;
   log('ORDER', `Executing LIMIT auth ${orderId.slice(0,20)} | trigger: $${(Number(triggerPrice)/1e8).toFixed(0)} | price: $${(Number(price)/1e8).toFixed(0)} | trader: ${trader.slice(0,20)}`);
@@ -1490,18 +1215,17 @@ async function executeExecLimitAuth(auth, price) {
   execLimitAuthStore.delete(orderId);
 }
 
-// Execute a TP or SL using ExecTPSLAuth — no PositionSlot needed
 async function executeTPSLAuth(auth, price) {
   const { orderId, orderType, triggerPrice, positionId, trader } = auth;
   const typeStr = orderType === 1 ? 'take_profit' : 'stop_loss';
   log('ORDER', `Executing ${typeStr} auth ${orderId.slice(0,20)} | trigger: $${(Number(triggerPrice)/1e8).toFixed(0)} | price: $${(Number(price)/1e8).toFixed(0)} | trader: ${trader.slice(0,20)}`);
 
   const executionNonce = generateNonce();
-  const execPrice = orderType === 2 ? price : triggerPrice; // SL = market, TP = trigger price
+  const execPrice = orderType === 2 ? price : triggerPrice;
   const expectedPayout = calcExpectedPayout(auth, execPrice);
 
-  const functionName = orderType === 1 ? 'execute_take_profit' : 'execute_stop_loss';
-  const tpslProgramId = auth.programId || CONFIG.programId;
+  const functionName   = orderType === 1 ? 'execute_take_profit' : 'execute_stop_loss';
+  const tpslProgramId  = auth.programId || CONFIG.programId;
   log('ORDER', `Using program: ${tpslProgramId}`);
   await provableClient.executeTransaction({
     privateKey:   CONFIG.privateKey,
@@ -1520,7 +1244,6 @@ async function executeTPSLAuth(auth, price) {
   positionStore.delete(positionId);
 }
 
-// Execute a limit order using PendingOrder + registered PositionSlot
 async function executeOrder(order, price) {
   const { orderId, orderType } = order;
   if (orderType !== 0) {
@@ -1553,7 +1276,15 @@ async function executeOrder(order, price) {
   pendingOrderStore.delete(orderId);
 }
 
-// Nonce generator (mirrors frontend)
+function calcExpectedPayout(auth, execPrice) {
+  const PRICE_PRECISION = 100_000_000_000n;
+  const rawPnl = auth.isLong
+    ? (execPrice - auth.entryPrice) * auth.size / PRICE_PRECISION
+    : (auth.entryPrice - execPrice) * auth.size / PRICE_PRECISION;
+  const payout = auth.collateral + rawPnl;
+  return payout > 0n ? payout : 0n;
+}
+
 function generateNonce() {
   const bytes = new Uint8Array(31);
   for (let i = 0; i < 31; i++) bytes[i] = Math.floor(Math.random() * 256);
@@ -1579,16 +1310,17 @@ async function getOrchestratorAddress() {
 async function main() {
   console.log('');
   console.log('╔════════════════════════════════════════════════════════════╗');
-  console.log('║  ZKPerp Oracle + Liquidation + Order Bot v13 (+ API Server) ║');
+  console.log('║  ZKPerp Liquidation + Order Bot v14                        ║');
+  console.log('║  Oracle: zkperp_oracle_v2.aleo (2-of-3 Chainlink quorum)  ║');
   console.log('╚════════════════════════════════════════════════════════════╝');
   console.log('');
-  log('BOT', `Program:        ${CONFIG.programId}`);
-  log('BOT', `Network:        ${CONFIG.network}`);
-  log('BOT', `Exec:           Provable DPS (fee master: ${CONFIG.execUseFeeMaster})`);
-  log('BOT', `Oracle interval: ${CONFIG.priceIntervalMs / 1000}s`);
+  log('BOT', `Program:         ${CONFIG.programId}`);
+  log('BOT', `Asset:           ${CONFIG.assetId}`);
+  log('BOT', `Oracle program:  ${CONFIG.oracleProgramId}`);
+  log('BOT', `Network:         ${CONFIG.network}`);
+  log('BOT', `Exec:            Provable DPS (fee master: ${CONFIG.execUseFeeMaster})`);
   log('BOT', `Scan interval:   ${CONFIG.scanIntervalMs / 1000}s`);
   log('BOT', `API port:        ${CONFIG.apiPort}`);
-  log('BOT', `Max store size: ${MAX_POSITION_STORE_SIZE} | TTL: ${POSITION_TTL_MS/60000}min | Max records/scan: ${MAX_RECORDS_PER_SCAN}`);
   console.log('');
 
   if (!CONFIG.privateKey || CONFIG.privateKey.includes('...')) {
@@ -1602,22 +1334,15 @@ async function main() {
     if (!scannerOk) {
       log('BOT', 'Provable Scanner unavailable — will use API fallbacks');
     } else {
-      // Recover PendingOrders + PositionSlots owned by orchestrator after restart.
-      // The orchestrator holds both record types when a SL/TP is placed —
-      // so full cancel/execute capability is restored from chain state alone.
       await recoverPendingOrders();
     }
   } else {
     log('BOT', 'No Provable credentials — using API fallbacks for scanning');
   }
 
-  log('BOT', 'Initial oracle update...');
-  await oracleTick();
-
   log('BOT', 'Initial liquidation scan...');
   await liquidationTick();
 
-  setInterval(oracleTick, CONFIG.priceIntervalMs);
   setInterval(liquidationTick, CONFIG.scanIntervalMs);
   setInterval(() => {
     cleanupExpiredPositions();

@@ -3,7 +3,7 @@
 /**
  * ZKPerp Bot Manager
  * ==================
- * A lightweight always-on process manager for zkperp-bot_v3.mjs.
+ * A lightweight always-on process manager for zkperp-bot.mjs.
  * Runs on a separate port and can start/stop/restart the bot process.
  *
  * API endpoints:
@@ -219,7 +219,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ── Proxy everything else to bot (/api/*, /health on bot port)
-  if (url.pathname.startsWith('/api/') || url.pathname === '/bot-health' || url.pathname === '/oracle/update') {
+  if (url.pathname.startsWith('/api/') || url.pathname === '/bot-health') {
     if (!isRunning()) {
       return json({ error: 'Bot is not running', running: false }, 503);
     }
@@ -240,7 +240,7 @@ const managerStartedAt = new Date().toISOString();
 server.listen(CONFIG.managerPort, () => {
   console.log('');
   console.log('╔════════════════════════════════════════════════════════════╗');
-  console.log('║              ZKPerp Bot Manager                            ║');
+  console.log('║              ZKPerp Bot Manager v14                       ║');
   console.log('╚════════════════════════════════════════════════════════════╝');
   console.log('');
   log(`Manager listening on port ${CONFIG.managerPort}`);

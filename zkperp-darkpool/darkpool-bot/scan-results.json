@@ -1,0 +1,41 @@
+{
+  "program": "test_usdcx_stablecoin.aleo",
+  "scanned": "2026-04-10T07:03:52.040Z",
+  "records": [
+    {
+      "index": 0,
+      "type": "Token",
+      "block": 15684201,
+      "tx": "at1mfwwegp3zjp4e4dg96yusvrgzuhc79lcyxacl8yj8nlsu5yajv9sgcv4ge    ",
+      "plaintext": "{owner:aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0.private,amount:558474998u128.private,_nonce:2818644526115759292520730852957809146173326049381663955142716432589668778007group.public,_version:1u8.public}"
+    },
+    {
+      "index": 1,
+      "type": "Credentials",
+      "block": 15683843,
+      "tx": "at1rpuenqwf8als3g0sd9kjpvgcu5mlyaul7aysaye8pxyst5pe0urqgf0h0g    ",
+      "plaintext": "{owner:aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0.private,freeze_list_root:3642222252059314292809609689035560016959342421640560347114299934615987159853field.private,_nonce:7340869034243050589402845136738085321290013178388666352477890314883837301313group.public,_version:1u8.public}"
+    },
+    {
+      "index": 2,
+      "type": "Token",
+      "block": 15615266,
+      "tx": "at1xkrexs0eep0jth44fxxmfrweaj7m45655zh5u3f9k5cy6wfdrvzqfxhdyy    ",
+      "plaintext": "{owner:aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0.private,amount:0u128.private,_nonce:2592955910856431863799805587451965614965835616652390648074370602574600232245group.public,_version:1u8.public}"
+    },
+    {
+      "index": 3,
+      "type": "Token",
+      "block": 15615260,
+      "tx": "at1v5r3gyn2zzp8fmxu8zepaw6c5ale9yy9356wkl2lwzahyqgr2gzs36dhl2    ",
+      "plaintext": "{owner:aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0.private,amount:0u128.private,_nonce:4037089795793273523500499984318803754157060042844303617080101998108137600814group.public,_version:1u8.public}"
+    },
+    {
+      "index": 4,
+      "type": "Token",
+      "block": 15615255,
+      "tx": "at14jqjlxmtz83ek83eqwcudhp4rvpy8fvu6cuptefrv5n2msp6qyqqm4ylh0    ",
+      "plaintext": "{owner:aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0.private,amount:0u128.private,_nonce:1838187574272072937630544538344862473623355230157227348973732538863542732944group.public,_version:1u8.public}"
+    }
+  ]
+}

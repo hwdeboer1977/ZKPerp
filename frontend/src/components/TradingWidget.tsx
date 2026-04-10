@@ -4,7 +4,6 @@ import type { TransactionOptions } from '@provablehq/aleo-types';
 import { useTransaction } from '@/hooks/useTransaction';
 import { useSlots } from '@/hooks/useSlots';
 import { useUSDCx } from '@/hooks/useUSDCx';
-import { useZKPerp } from '@/hooks/useZKPerp';
 import { useCompliance } from '@/hooks/useCompliance';
 import { InitializeSlotsPrompt } from '@/components/InitializeSlotsPrompt';
 import { TransactionStatus } from '@/components/TransactionStatus';
@@ -160,7 +159,7 @@ export function TradingWidget({
   const PROGRAM_ID = pairConfig.programId;
 
   const { address, connected } = useWallet();
-  const { complianceRecord, loading: complianceLoading } = useCompliance();
+  const { complianceRecord } = useCompliance();
   // burn_stale_slot called directly via useTransaction in LiquidatedBanner
   const openTx = useTransaction();
 

@@ -17,7 +17,7 @@ interface ProviderProps {
   programId?: string;
 }
 
-export function PrivateDataProvider({ children, programId }: ProviderProps) {
+export function PrivateDataProvider({ children }: ProviderProps) {
   const usdcx  = useUSDCx();
   const orders = useOrderReceipts('zkperp_core_v26.aleo');
 

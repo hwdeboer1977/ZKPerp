@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
-import type { TransactionOptions } from '@provablehq/aleo-types';
 import { useTransaction } from '@/hooks/useTransaction';
 import { TransactionStatus } from '@/components/TransactionStatus';
 import { useSlots, type PositionSlotRecord } from '@/hooks/useSlots';

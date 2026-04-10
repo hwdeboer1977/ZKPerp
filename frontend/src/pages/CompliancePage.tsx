@@ -59,11 +59,10 @@ function StepRow({ step, num }: { step: Step; num: number }) {
 
 export function CompliancePage() {
   const { address, connected } = useWallet();
-  const { hasRecord, complianceRecord, loading: crLoading, decryptRecord, refetch } = useCompliance();
+  const { hasRecord, complianceRecord, loading: crLoading, refetch } = useCompliance();
 
   const [steps, setSteps] = useState<Step[] | null>(null);
   const [running, setRunning] = useState(false);
-  const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const issueTx = useTransaction();
 
   function initSteps(): Step[] {
@@ -110,7 +109,6 @@ export function CompliancePage() {
       const proofData = await proofRes.json();
       if (proofData.error) throw new Error(proofData.error);
       const expiry = currentBlock + EXPIRY_BLOCKS;
-      setExpiresAt(expiry);
       updateStep('proof', {
         state: 'done',
         sub: `Root: ${proofData.root.slice(0, 18)}... · Expiry block ${expiry.toLocaleString()}`,
@@ -213,7 +211,7 @@ export function CompliancePage() {
               )}
               <div className="flex gap-2">
                 <button
-                  onClick={async () => { await refetch(); await decryptRecord(); }}
+                  onClick={async () => { await refetch(); }}
                   disabled={crLoading}
                   className="flex-1 py-2 rounded-lg border border-zkperp-border bg-zkperp-dark text-gray-400 text-sm hover:border-gray-500 hover:text-white transition-colors disabled:opacity-50"
                 >
@@ -242,7 +240,7 @@ export function CompliancePage() {
                 Get verified by completing the KYC flow on the right.
               </p>
               <button
-                onClick={async () => { await refetch(); await decryptRecord(); }}
+                onClick={async () => { await refetch(); }}
                 disabled={crLoading}
                 className="w-full py-2 rounded-lg border border-zkperp-border bg-zkperp-dark text-gray-400 text-xs hover:border-gray-500 hover:text-white transition-colors disabled:opacity-50"
               >

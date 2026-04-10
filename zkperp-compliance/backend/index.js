@@ -28,7 +28,7 @@ function saveAllowlist(data) {
 
 let currentTree = null;
 
-function rebuildTree(addresses, existingLeafHashes = {}) {
+async function rebuildTree(addresses, existingLeafHashes = {}) {
   // Try cache first — instant if addresses unchanged
   const cached = MerkleTree.fromCache(addresses);
   if (cached) {
@@ -36,7 +36,7 @@ function rebuildTree(addresses, existingLeafHashes = {}) {
     return currentTree;
   }
   // Build from scratch — only for new/changed allowlist
-  currentTree = MerkleTree.build(addresses, existingLeafHashes);
+  currentTree = await MerkleTree.build(addresses, existingLeafHashes);
   return currentTree;
 }
 

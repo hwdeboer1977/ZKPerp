@@ -1,19 +1,38 @@
-import { createRequire } from 'module';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-
-const require = createRequire(import.meta.url);
-const { spawnSync } = require('child_process');
+import { initThreadPool, BHP256, Address, Field } from '@provablehq/sdk';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const LEO_HASHER_DIR = process.env.LEO_HASHER_DIR || '/tmp/test_hashes';
-const LEO_BIN = process.env.LEO_BIN || '/home/lupo1977/.cargo/bin/leo';
 const CACHE_PATH = path.join(__dirname, 'tree-cache.json');
 const DEPTH = 10;
 const TREE_SIZE = 2 ** DEPTH;
 
-// ─── Hardcoded zero hashes ────────────────────────────────────────────────────
+// SDK init
+let _sdkReady = false;
+async function ensureSDK() {
+  if (_sdkReady) return;
+  await initThreadPool();
+  _sdkReady = true;
+}
+
+// BHP256 hashing — matches test_hashes_v1.aleo exactly:
+//   get_leaf(addr)        = BHP256::hash_to_field(addr)
+//   get_node(left, right) = BHP256::hash_to_field(FieldPair { left, right })
+
+export async function hashLeaf(address) {
+  await ensureSDK();
+  return BHP256.hashToField(address, 'address', 'field');
+}
+
+export async function hashNode(left, right) {
+  await ensureSDK();
+  // FieldPair { left, right } encodes as two consecutive fields
+  const encoded = left + right;
+  return BHP256.hashToField(encoded, 'struct', 'field');
+}
+
+// Pre-computed zero hashes (BHP256 chained) — unchanged from original
 export const ZERO_HASHES = [
   '0field',
   '5975188031198556945789735160261123857786460669093998299590878014857269115118field',
@@ -28,73 +47,47 @@ export const ZERO_HASHES = [
   '2453189239101005812802743895228514508924424802739289099477965789488702684817field',
 ];
 
-// ─── Leo subprocess ───────────────────────────────────────────────────────────
-
-function leoRun(fnName, ...args) {
-  const result = spawnSync(LEO_BIN, ['run', fnName, ...args], {
-    cwd: LEO_HASHER_DIR,
-    encoding: 'utf8',
-    env: { ...process.env, PATH: `/home/lupo1977/.cargo/bin:/usr/bin:/bin` },
-  });
-  if (result.error) throw result.error;
-  const output = (result.stdout || '') + (result.stderr || '');
-  const match = output.match(/•\s*([^\n]+field)/);
-  if (!match) throw new Error(`leo run ${fnName} failed: ${output.slice(0, 200)}`);
-  return match[1].trim();
-}
-
-export function hashLeaf(address) { return leoRun('get_leaf', address); }
-export function hashNode(left, right) { return leoRun('get_node', left, right); }
-
-// ─── Cache ────────────────────────────────────────────────────────────────────
-
+// Cache
 function loadCache() {
   if (!fs.existsSync(CACHE_PATH)) return null;
-  try {
-    return JSON.parse(fs.readFileSync(CACHE_PATH, 'utf8'));
-  } catch { return null; }
+  try { return JSON.parse(fs.readFileSync(CACHE_PATH, 'utf8')); }
+  catch { return null; }
 }
 
 function saveCache(data) {
   fs.writeFileSync(CACHE_PATH, JSON.stringify(data, null, 2));
 }
 
-// ─── MerkleTree ───────────────────────────────────────────────────────────────
-
 export class MerkleTree {
   constructor(addresses, layers, leafHashes) {
     this.addresses  = [...addresses];
     this.zeroHashes = ZERO_HASHES;
     this.layers     = layers;
-    this.leafHashes = leafHashes; // { address: fieldHash }
+    this.leafHashes = leafHashes;
   }
 
-  // Load from disk cache — instant, no leo run
   static fromCache(addresses) {
     const cache = loadCache();
-    if (
-      cache &&
-      JSON.stringify(cache.addresses) === JSON.stringify(addresses)
-    ) {
+    if (cache && JSON.stringify(cache.addresses) === JSON.stringify(addresses)) {
       console.log('[tree] Loaded from cache ✓');
       return new MerkleTree(cache.addresses, cache.layers, cache.leafHashes);
     }
     return null;
   }
 
-  // Build from scratch — calls leo run for new leaves/nodes
-  static build(addresses, existingLeafHashes = {}) {
+  // Note: build() is now async because hashLeaf/hashNode are async
+  static async build(addresses, existingLeafHashes = {}) {
     console.log(`[tree] Building tree for ${addresses.length} addresses...`);
+    await ensureSDK();
     const leafHashes = { ...existingLeafHashes };
 
-    // Hash any new leaves
     const leaves = [];
     for (let i = 0; i < TREE_SIZE; i++) {
       if (i < addresses.length) {
         const addr = addresses[i];
         if (!leafHashes[addr]) {
           console.log(`  computing leaf for ${addr.slice(0, 16)}...`);
-          leafHashes[addr] = hashLeaf(addr);
+          leafHashes[addr] = await hashLeaf(addr);
         }
         leaves.push(leafHashes[addr]);
       } else {
@@ -108,13 +101,10 @@ export class MerkleTree {
     for (let level = 0; level < DEPTH; level++) {
       const next = [];
       for (let i = 0; i < current.length; i += 2) {
-        if (
-          current[i] === ZERO_HASHES[level] &&
-          current[i + 1] === ZERO_HASHES[level]
-        ) {
+        if (current[i] === ZERO_HASHES[level] && current[i + 1] === ZERO_HASHES[level]) {
           next.push(ZERO_HASHES[level + 1]);
         } else {
-          next.push(hashNode(current[i], current[i + 1]));
+          next.push(await hashNode(current[i], current[i + 1]));
         }
       }
       layers.push(next);
@@ -123,11 +113,8 @@ export class MerkleTree {
     }
 
     const tree = new MerkleTree(addresses, layers, leafHashes);
-
-    // Persist cache
     saveCache({ addresses, layers, leafHashes });
     console.log(`[tree] Root: ${tree.root} (cached)`);
-
     return tree;
   }
 
@@ -136,16 +123,16 @@ export class MerkleTree {
   getProof(address) {
     const leafIndex = this.addresses.indexOf(address);
     if (leafIndex === -1) throw new Error(`Address ${address} not in allowlist`);
-    const path = [];
+    const pathArr = [];
     let index = leafIndex;
     for (let level = 0; level < DEPTH; level++) {
       const isLeft       = index % 2 === 1;
       const siblingIndex = isLeft ? index - 1 : index + 1;
       const sibling      = this.layers[level][siblingIndex] ?? this.zeroHashes[level];
-      path.push({ sibling, is_left: isLeft });
+      pathArr.push({ sibling, is_left: isLeft });
       index = Math.floor(index / 2);
     }
-    return { path };
+    return { path: pathArr };
   }
 
   formatProofForLeo(address) {

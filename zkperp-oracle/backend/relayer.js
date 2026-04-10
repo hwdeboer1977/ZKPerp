@@ -80,15 +80,9 @@ async function processMarket(marketId, market) {
 
   // 4. Normalize price to 8 decimals → u64 for Aleo
   const price = BigInt(normalizeTo8(feed.answer, feed.decimals));
+  const timestamp = Number(feed.updatedAt);
 
-  // Fetch current Aleo block height — the Leo contract uses block.height for
-  // staleness checks (price_age = block.height - timestamp), so we must store
-  // a block number here, NOT a Unix timestamp (~1.7B vs ~15.6M causes u32 underflow).
-  const aleoEndpoint = (process.env.ALEO_ENDPOINT || 'https://api.explorer.provable.com/v1/testnet').replace(/\/$/, '');
-  const heightRes = await fetch(`${aleoEndpoint}/latest/height`);
-  const timestamp = await heightRes.json();
-
-  log(`📡 ${marketId} price=${price} roundId=${feed.roundId} age=${age}s block=${timestamp} — submitting on-chain`);
+  log(`📡 ${marketId} price=${price} roundId=${feed.roundId} age=${age}s — submitting on-chain`);
 
   // 5. Submit directly to zkperp_oracle.aleo
   await submitPriceOnChain({

@@ -150,7 +150,7 @@ function AppContent() {
           </div>
           <div className="mt-4 pt-4 border-t border-zkperp-border">
             <p className="text-center text-xs text-gray-600">
-              Aleo Testnet Beta • Contracts: zkperp_btc_v21.aleo · zkperp_eth_v21.aleo · zkperp_sol_v21.aleo
+              Aleo Testnet Beta • Contracts: zkperp_core_v26.aleo · zkperp_core_v26.aleo · zkperp_eth_v21.aleo · zkperp_sol_v21.aleo
             </p>
           </div>
         </div>
@@ -169,7 +169,7 @@ function App() {
         network={Network.TESTNET}
         decryptPermission={DecryptPermission.UponRequest}
         // All three pair programs registered so Shield Wallet can decrypt their records
-        programs={['zkperp_btc_v21.aleo', 'zkperp_eth_v21.aleo', 'zkperp_sol_v21.aleo', 'test_usdcx_stablecoin.aleo', 'credits.aleo']}
+        programs={['zkperp_core_v26.aleo', 'zkperp_compliance_v7.aleo', 'zkperp_eth_v21.aleo', 'zkperp_sol_v21.aleo', 'test_usdcx_stablecoin.aleo', 'credits.aleo']}
         onError={(error) => console.error(error.message)}
       >
         <WalletModalProvider>

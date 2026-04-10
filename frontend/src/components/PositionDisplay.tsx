@@ -7,6 +7,7 @@ import { useSlots, type PositionSlotRecord } from '@/hooks/useSlots';
 import { getPair } from '@/config/pairs';
 import type { PairId } from '@/config/pairs';
 import { usePrivateData } from '@/contexts/PrivateDataContext';
+import { useCompliance } from '@/hooks/useCompliance';
 import {
   formatUsdc,
   formatPrice,
@@ -14,6 +15,7 @@ import {
   calculateLeverage,
   generateNonce,
   parsePrice,
+  ORDERS_PROGRAM_ID,
 } from '@/utils/aleo';
 
 interface Props {
@@ -48,6 +50,7 @@ export function PositionDisplay({
   const pairConfig = getPair(pair);
   const PROGRAM_ID = pairConfig.programId;
   const { connected, address } = useWallet();
+  const { complianceRecord } = useCompliance();
   const closeTx = useTransaction();
   const tpTx = useTransaction();
   const slTx = useTransaction();
@@ -57,6 +60,8 @@ export function PositionDisplay({
   const { orders } = usePrivateData();
   const orderReceipts = orders.receipts;
   const markReceiptSpent = orders.markSpent;
+  const fetchAndDecryptOrders = orders.fetchAndDecrypt;
+  const ordersDecrypted = orders.decrypted;
 
 
 
@@ -165,6 +170,77 @@ export function PositionDisplay({
   // Only show open slots (is_open === true)
   const openSlots = positionSlots.filter(s => s.isOpen);
 
+  // ── Stale OrderReceipt detection ──────────────────────────────────────────
+  // After TP/SL executed by orchestrator, order_id is gone from pending_orders
+  const [staleReceipts, setStaleReceipts] = useState<typeof orderReceipts>([]);
+  const [burningReceiptId, setBurningReceiptId] = useState<string | null>(null);
+  const burnReceiptTx = useTransaction();
+
+  useEffect(() => {
+    if (!ordersDecrypted || orderReceipts.length === 0) { setStaleReceipts([]); return; }
+    let cancelled = false;
+    async function check() {
+      const stale: typeof orderReceipts = [];
+      for (const r of orderReceipts) {
+        if (r.orderType === 0) continue; // skip limit receipts
+        try {
+          const res = await fetch(
+            `${ALEO_API}/program/${ORDERS_PROGRAM_ID}/mapping/pending_orders/${r.orderId}`
+          );
+          const val = await res.text();
+          if (!val || val === 'null' || val === '"null"') stale.push(r);
+        } catch {}
+      }
+      if (!cancelled) setStaleReceipts(stale);
+    }
+    check();
+    return () => { cancelled = true; };
+  }, [ordersDecrypted, orderReceipts]);
+
+  const handleBurnOrderReceipt = async (receipt: typeof orderReceipts[0]) => {
+    if (!connected) return;
+    setBurningReceiptId(receipt.id);
+    burnReceiptTx.reset();
+    try {
+      const compact = (pt: string) => pt.substring(pt.indexOf('{'))
+        .replace(/:\s+/g, ':').replace(/,\s+/g, ',')
+        .replace(/\s*{\s*/g, '{').replace(/\s*}\s*/g, '}').trim();
+
+      await burnReceiptTx.execute({
+        program: ORDERS_PROGRAM_ID,
+        function: 'burn_order_receipt',
+        inputs: [compact(receipt.plaintext)],
+        fee: 1_000_000,
+        privateFee: false,
+      });
+
+      // Poll until confirmed on-chain (order_id still absent from pending_orders)
+      for (let i = 0; i < 60; i++) {
+        await new Promise(r => setTimeout(r, 5000));
+        try {
+          const res = await fetch(
+            `${ALEO_API}/program/${ORDERS_PROGRAM_ID}/mapping/pending_orders/${receipt.orderId}`
+          );
+          const val = await res.text();
+          // Still null = confirmed (burn accepted)
+          if (!val || val === 'null' || val === '"null"') {
+            markReceiptSpent(receipt.id);
+            setStaleReceipts(prev => prev.filter(r => r.id !== receipt.id));
+            setBurningReceiptId(null);
+            return;
+          }
+        } catch {}
+      }
+      // Timeout fallback
+      markReceiptSpent(receipt.id);
+      setStaleReceipts(prev => prev.filter(r => r.id !== receipt.id));
+    } catch (err) {
+      console.error('burn_order_receipt failed:', err);
+    } finally {
+      setBurningReceiptId(null);
+    }
+  };
+
   // Cancel TP or SL
   const handleCancelOrder = useCallback(async (
     positionId: string,
@@ -186,9 +262,16 @@ export function PositionDisplay({
       : orderReceipts.find(r => r.positionId === positionId && r.orderType === (orderType === 'tp' ? 1 : 2));
 
     // Use receipt if found, otherwise try positionId-only fallback
+    // Auto-decrypt if needed, then user clicks cancel again
+    if (!ordersDecrypted) {
+      setCancellingOrderKey(`${positionId}-${orderType}`);
+      try { await fetchAndDecryptOrders(); } finally { setCancellingOrderKey(null); }
+      return;
+    }
+
     const finalReceipt = receipt ?? orderReceipts.find(r => r.positionId === positionId);
     if (!finalReceipt?.plaintext) {
-      alert('Cancel failed: OrderReceipt not found — click Orders to decrypt your order records first, then retry');
+      alert('Cancel failed: OrderReceipt not found. Try clicking the Orders tab to decrypt first.');
       return;
     }
 
@@ -201,9 +284,13 @@ export function PositionDisplay({
 
     try {
       await cancelTx.execute({
-        program: PROGRAM_ID,
+        program: ORDERS_PROGRAM_ID,
         function: 'cancel_tp_sl',
-        inputs: [compact(slot.plaintext), compact(finalReceipt.plaintext)],
+        inputs: [
+        ...(complianceRecord ? [complianceRecord.plaintext] : []),
+        compact(slot.plaintext),
+        compact(finalReceipt.plaintext),
+      ],
         fee: 3_000_000,
         privateFee: false,
       });
@@ -216,7 +303,7 @@ export function PositionDisplay({
         for (let i = 0; i < 30; i++) {
           await new Promise(r => setTimeout(r, 5000));
           try {
-            const check = await fetch(`${ALEO_API}/program/${PROGRAM_ID}/mapping/pending_orders/${checkId}`);
+            const check = await fetch(`${ALEO_API}/program/${ORDERS_PROGRAM_ID}/mapping/pending_orders/${checkId}`);
             const val = await check.text();
             if (!val || val.includes('null') || val.includes('false')) {
               // Confirmed on-chain — now safe to clear
@@ -257,7 +344,9 @@ export function PositionDisplay({
       const orchestrator = (await orchestratorRes.json()).replace(/"/g, '');
       const nonce = generateNonce();
 
+      if (!complianceRecord) { console.error('No compliance record'); return; }
       const inputs = [
+        complianceRecord.plaintext,        // cr: ZKPerpComplianceRecord
         slot.plaintext,                    // slot: PositionSlot
         `${triggerPrice}u64`,              // trigger_price: u64
         orchestrator,                      // orchestrator: address
@@ -267,7 +356,7 @@ export function PositionDisplay({
       console.log('place_take_profit inputs:', inputs);
 
       await tpTx.execute({
-        program: PROGRAM_ID,
+        program: ORDERS_PROGRAM_ID,
         function: 'place_take_profit',
         inputs,
         fee: 4_000_000,
@@ -301,7 +390,9 @@ export function PositionDisplay({
       const orchestrator = (await orchestratorRes.json()).replace(/"/g, '');
       const nonce = generateNonce();
 
+      if (!complianceRecord) { console.error('No compliance record'); return; }
       const inputs = [
+        complianceRecord.plaintext,        // cr: ZKPerpComplianceRecord
         slot.plaintext,                    // slot: PositionSlot
         `${triggerPrice}u64`,              // trigger_price: u64
         orchestrator,                      // orchestrator: address
@@ -311,7 +402,7 @@ export function PositionDisplay({
       console.log('place_stop_loss inputs:', inputs);
 
       await slTx.execute({
-        program: PROGRAM_ID,
+        program: ORDERS_PROGRAM_ID,
         function: 'place_stop_loss',
         inputs,
         fee: 4_000_000,
@@ -329,62 +420,49 @@ export function PositionDisplay({
     }
   }, [connected, address, slInputs, slTx, activeOrders]);
 
-  // Close position using the slot's plaintext
+  // Close position — fetches on-chain oracle price at close time.
+  // exit_price must match oracle_prices[asset_id].price exactly (Gate 2).
+  // Using currentPrice from UI would fail if the feed is stale.
   const handleClose = useCallback(async (slot: PositionSlotRecord) => {
     if (!connected) return;
 
     setClosingId(slot.id);
     try {
-      const slippageAmount = (currentPrice * 1n) / 100n;
-      const minPrice = currentPrice - slippageAmount;
-      const maxPrice = currentPrice + slippageAmount;
-
-      const priceDiff = currentPrice > slot.entryPrice
-        ? currentPrice - slot.entryPrice
-        : slot.entryPrice - currentPrice;
-      const safeEntryPrice = slot.entryPrice + 1n;
-      const pnlAbs = (slot.sizeUsdc * priceDiff) / safeEntryPrice;
-      const isProfit = slot.isLong
-        ? currentPrice > slot.entryPrice
-        : currentPrice < slot.entryPrice;
-
-      let expectedPayout: bigint;
-      if (isProfit) {
-        expectedPayout = slot.collateralUsdc + pnlAbs;
-      } else {
-        expectedPayout = pnlAbs >= slot.collateralUsdc
-          ? BigInt(0)
-          : slot.collateralUsdc - pnlAbs;
-      }
-
-      // 10% safety buffer
-      expectedPayout = (expectedPayout * BigInt(90)) / BigInt(100);
-      if (expectedPayout < BigInt(1)) expectedPayout = BigInt(1);
+          const oracleRes = await fetch(
+      `${ALEO_API}/program/${PROGRAM_ID}/mapping/oracle_prices/${pairConfig.oracleMappingKey}`
+    );
+    const oracleRaw = await oracleRes.text();
+    // Response is a JSON string containing Leo struct text, e.g.:
+    // "{\n  price: 6800000000000u64,\n  timestamp: 1u32\n}"
+    const priceMatch = oracleRaw.match(/price:\s*(\d+)u64/);
+    if (!priceMatch) throw new Error('Failed to parse oracle price: ' + oracleRaw);
+    const onChainPrice = BigInt(priceMatch[1]);
 
       console.log('=== CLOSE POSITION (slot-based) ===');
       console.log('Slot ID:', slot.slotId);
       console.log('Position ID:', slot.positionId);
-      console.log('Plaintext:', slot.plaintext);
-      console.log('Min price:', minPrice.toString());
-      console.log('Max price:', maxPrice.toString());
-      console.log('Expected payout:', expectedPayout.toString());
+      console.log('On-chain oracle price:', onChainPrice.toString());
+      console.log('UI current price:', currentPrice.toString());
 
+      if (!complianceRecord) { console.error('No compliance record'); return; }
       const inputs = [
+        complianceRecord.plaintext,    // cr: ZKPerpComplianceRecord
         slot.plaintext,
-        `${minPrice}u64`,
-        `${maxPrice}u64`,
-        `${expectedPayout}u128`,
+        pairConfig.oracleMappingKey,   // asset_id: field (public)
+        `${onChainPrice}u64`,          // exit_price: u64 (public) — fetched from chain
+        `${slot.entryPrice}u64`,       // entry_price: u64 (private)
+        `${slot.sizeUsdc}u64`,         // size_usdc: u64 (private)
+        `${slot.collateralUsdc}u64`,   // collateral_usdc: u64 (private)
+        slot.isLong.toString(),        // is_long: bool (private)
       ];
 
-      const options: TransactionOptions = {
+      await closeTx.execute({
         program: PROGRAM_ID,
         function: 'close_position',
         inputs,
         fee: 5_000_000,
         privateFee: false,
-      };
-
-      await closeTx.execute(options);
+      });
 
       // Mark slot as spent so it disappears from UI immediately
       markSpent(slot.id);
@@ -393,7 +471,7 @@ export function PositionDisplay({
     } finally {
       setClosingId(null);
     }
-  }, [connected, currentPrice, closeTx, markSpent]);
+  }, [connected, currentPrice, PROGRAM_ID, pairConfig, closeTx, markSpent]);
 
   if (!connected) {
     return (
@@ -456,6 +534,53 @@ export function PositionDisplay({
           )}
         </div>
       )}
+
+      {/* ── TP/SL executed banners ── */}
+      {decrypted && staleReceipts.map(receipt => {
+        const label = receipt.orderType === 1 ? 'Take Profit' : 'Stop Loss';
+        const isBurning = burningReceiptId === receipt.id;
+        return (
+          <div key={receipt.id} className="mx-4 mb-3 bg-green-900/30 border border-green-500 rounded-lg p-4">
+            <div className="flex items-start gap-3 mb-2">
+              <span className="text-green-400 text-lg mt-0.5">✅</span>
+              <div>
+                <p className="text-green-300 font-semibold text-sm">
+                  Your {label} was executed!
+                </p>
+                <p className="text-gray-400 text-xs mt-1">
+                  Trigger: ${formatPrice(receipt.triggerPrice)} · Size: ${formatUsdc(receipt.sizeUsdc)}
+                </p>
+                <p className="text-gray-400 text-xs">
+                  Your payout has been sent privately to your wallet.
+                </p>
+              </div>
+            </div>
+            {burnReceiptTx.status !== 'idle' && burningReceiptId === receipt.id && (
+              <div className="mb-2">
+                <TransactionStatus
+                  status={burnReceiptTx.status}
+                  tempTxId={burnReceiptTx.tempTxId}
+                  onChainTxId={burnReceiptTx.onChainTxId}
+                  error={burnReceiptTx.error}
+                  onDismiss={burnReceiptTx.reset}
+                />
+              </div>
+            )}
+            <button
+              onClick={() => handleBurnOrderReceipt(receipt)}
+              disabled={isBurning}
+              className="w-full mt-2 py-2 rounded-lg text-xs font-medium transition-colors bg-green-600 hover:bg-green-500 disabled:bg-green-900 disabled:cursor-not-allowed text-white flex items-center justify-center gap-2"
+            >
+              {isBurning ? (
+                <><svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                </svg>Removing {label} record...</>
+              ) : `Remove ${label} Record`}
+            </button>
+          </div>
+        );
+      })}
 
       {/* Open positions */}
       {decrypted && allOpenPositions.length > 0 && (
@@ -539,36 +664,46 @@ export function PositionDisplay({
                         </div>
                       )}
                       {(isTpActive || isSlActive) && (
-                        <div className="flex gap-2 text-xs">
+                        <div className="space-y-2">
                           {isTpActive && (
-                            <span className="flex items-center gap-1 px-2 py-1 rounded bg-zkperp-green/10 border border-zkperp-green/30 text-zkperp-green">
-                              {cancellingOrderKey === `${slot.positionId}-tp` ? (
-                                <span className="text-xs opacity-60">Cancelling...</span>
-                              ) : (
-                                <>✓ TP ${order.tp}</>
-                              )}
+                            <div className="rounded-lg border border-zkperp-green/30 bg-zkperp-green/5 p-3">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-zkperp-green text-sm">🎯</span>
+                                  <span className="text-zkperp-green text-xs font-semibold">Take Profit Active</span>
+                                </div>
+                                <span className="text-white text-xs font-medium">${order.tp}</span>
+                              </div>
                               <button
                                 onClick={() => handleCancelOrder(slot.positionId, 'tp')}
-                                disabled={isCancelBusy}
-                                className="ml-1 opacity-60 hover:opacity-100 disabled:opacity-20"
-                                title="Cancel TP on-chain"
-                              >×</button>
-                            </span>
+                                disabled={isCancelBusy || cancellingOrderKey === `${slot.positionId}-tp`}
+                                className="w-full py-1.5 rounded text-xs font-medium transition-colors border border-zkperp-green/40 text-zkperp-green hover:bg-zkperp-green/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                {cancellingOrderKey === `${slot.positionId}-tp`
+                                  ? '⏳ Cancelling TP...'
+                                  : '✕ Cancel Take Profit'}
+                              </button>
+                            </div>
                           )}
                           {isSlActive && (
-                            <span className="flex items-center gap-1 px-2 py-1 rounded bg-zkperp-red/10 border border-zkperp-red/30 text-zkperp-red">
-                              {cancellingOrderKey === `${slot.positionId}-sl` ? (
-                                <span className="text-xs opacity-60">Cancelling...</span>
-                              ) : (
-                                <>✓ SL ${order.sl}</>
-                              )}
+                            <div className="rounded-lg border border-zkperp-red/30 bg-zkperp-red/5 p-3">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-zkperp-red text-sm">🛡️</span>
+                                  <span className="text-zkperp-red text-xs font-semibold">Stop Loss Active</span>
+                                </div>
+                                <span className="text-white text-xs font-medium">${order.sl}</span>
+                              </div>
                               <button
                                 onClick={() => handleCancelOrder(slot.positionId, 'sl')}
-                                disabled={isCancelBusy}
-                                className="ml-1 opacity-60 hover:opacity-100 disabled:opacity-20"
-                                title="Cancel SL on-chain"
-                              >×</button>
-                            </span>
+                                disabled={isCancelBusy || cancellingOrderKey === `${slot.positionId}-sl`}
+                                className="w-full py-1.5 rounded text-xs font-medium transition-colors border border-zkperp-red/40 text-zkperp-red hover:bg-zkperp-red/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                {cancellingOrderKey === `${slot.positionId}-sl`
+                                  ? '⏳ Cancelling SL...'
+                                  : '✕ Cancel Stop Loss'}
+                              </button>
+                            </div>
                           )}
                         </div>
                       )}

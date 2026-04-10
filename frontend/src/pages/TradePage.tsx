@@ -123,6 +123,8 @@ export function TradePage({ pair, currentPrice, oracleSet, onPriceChange }: Prop
             decrypted={slots.decrypted}
             initializeSlots={slots.initializeSlots}
             getEmptyPositionSlot={slots.getEmptyPositionSlot}
+            getStaleSlots={slots.getStaleSlots}
+            fetchAndDecryptSlots={slots.fetchAndDecryptSlots}
             isInitializing={slots.isInitializing}
             initTx={slots.initTx}
             markSpent={slots.markSpent}

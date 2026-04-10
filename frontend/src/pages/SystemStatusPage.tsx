@@ -4,7 +4,7 @@ import { formatUsdc, formatPrice } from '@/utils/aleo';
 const EXPLORER = 'https://api.explorer.provable.com/v1/testnet';
 
 const PAIRS = [
-  { id: 'BTC/USDC', program: 'zkperp_btc_v21.aleo',  emoji: '₿' },
+  { id: 'BTC/USDC', program: 'zkperp_core_v26.aleo',  emoji: '₿' },
   { id: 'ETH/USDC', program: 'zkperp_eth_v21.aleo', emoji: 'Ξ' },
   { id: 'SOL/USDC', program: 'zkperp_sol_v21.aleo', emoji: '◎' },
 ];

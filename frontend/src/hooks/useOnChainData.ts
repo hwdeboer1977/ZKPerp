@@ -1,6 +1,6 @@
 // src/hooks/useOnChainData.ts
 import { useState, useEffect, useCallback } from 'react';
-import { getPair } from '@/config/pairs';
+import { getPair, ORACLE_PROGRAM_ID } from '@/config/pairs';
 import type { PairId } from '@/config/pairs';
 
 const EXPLORER_BASE = 'https://api.explorer.provable.com/v1/testnet';
@@ -69,8 +69,11 @@ export function useOnChainData(pair: PairId = 'btc'): OnChainData {
 
       // ── Oracle price ──────────────────────────────────────────────────────
       // Mapping name is oracle_prices (plural), key is always 0field per program.
+      // const priceRes = await fetch(
+      //   `${EXPLORER_BASE}/program/${pairConfig.programId}/mapping/oracle_prices/${pairConfig.oracleMappingKey}`
+      // );
       const priceRes = await fetch(
-        `${EXPLORER_BASE}/program/${pairConfig.programId}/mapping/oracle_prices/${pairConfig.oracleMappingKey}`
+        `${EXPLORER_BASE}/program/${ORACLE_PROGRAM_ID}/mapping/oracle_prices/${pairConfig.oracleMappingKey}`
       );
       if (priceRes.ok) {
         const cleaned = parseMapping(await priceRes.text());

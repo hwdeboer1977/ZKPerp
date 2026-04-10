@@ -297,6 +297,8 @@ function LiquidityTab({ pool }: { pool: PoolState | null }) {
     try {
       const merkleProof = await getMerkleProof(USDCX_ID, '')
       const inputs = buildMintInputs(quote, normalize(selected), pool!, merkleProof)
+      console.log('[mint_position] inputs:')
+      inputs.forEach((inp, i) => console.log(`  [${i}]`, typeof inp === 'string' && inp.length > 100 ? inp.slice(0, 80) + '...' : inp))
       const result = await executeTransaction({ program: PROGRAM_ID, function: 'mint_position', inputs, fee: 5_000_000, privateFee: false })
       const id = result?.transactionId || 'submitted'
       setTxId(id as string); setStatus('done')
@@ -317,11 +319,11 @@ function LiquidityTab({ pool }: { pool: PoolState | null }) {
       <div>
         <label className="text-muted text-xs uppercase tracking-widest block mb-2">Price Range (ALEO per USDCx)</label>
         <div className="grid grid-cols-2 gap-2">
-          {[['Min price', priceLo, setPriceLo], ['Max price', priceHi, setPriceHi]].map(([label, val, setter]) => (
-            <div key={label as string}>
+          {([['Min price', priceLo, setPriceLo], ['Max price', priceHi, setPriceHi]] as [string, string, (v: string) => void][]).map(([label, val, setter]) => (
+            <div key={label}>
               <div className="text-muted text-xs mb-1">{label}</div>
               <div className="flex bg-bg border border-border rounded-lg focus-within:border-accent transition-colors overflow-hidden">
-                <input type="number" value={val as string} onChange={e => (setter as any)(e.target.value)} placeholder="0.00"
+                <input type="number" value={val as string} onChange={e => setter(e.target.value)} placeholder="0.00"
                   className="flex-1 bg-transparent text-[#c8d8e8] text-sm font-light px-3 py-2 outline-none w-0" />
               </div>
             </div>

@@ -1,184 +1,160 @@
-# aleo-oracle
+# zkperp_oracle_v2.aleo
 
-2-of-3 threshold oracle relay: Chainlink (ETH Mainnet + Arbitrum) → ZKPerp bot → Aleo testnet.
+On-chain 2-of-3 price quorum oracle for ZKPerp. Three independent oracle nodes each hold their own Aleo private key and submit prices independently. Quorum is enforced by the Leo program — no coordinator process, no single point of failure.
+
+---
 
 ## Architecture
 
 ```
-Chainlink ETH Mainnet (BTC/USD, ETH/USD)
-Chainlink Arbitrum    (SOL/USD)
+Chainlink Feed (BTC/ETH/SOL)
         │
-        ▼
-Relayer A ──┐
-Relayer B ──┼──► Coordinator (port 3010) ──► ZKPerp Bot (POST /oracle/update)
-Relayer C ──┘                                      │
-                                                   ▼
-                                     Aleo: zkperp_btc_v21.aleo  (BTC)
-                                           zkperp_eth_v21.aleo  (ETH)
-                                           zkperp_sol_v21.aleo  (SOL)
+        ├── Relayer A (own Aleo key) ──┐
+        ├── Relayer B (own Aleo key) ──┤──▶ zkperp_oracle_v2.aleo/submit_price
+        └── Relayer C (own Aleo key) ──┘
+                                            │
+                                    2-of-3 agree on price
+                                            │
+                                    oracle_prices mapping updated
+                                            │
+                                    zkperp_core reads committed price
 ```
 
-Each relayer independently reads Chainlink feeds via `latestRoundData()`, signs
-the canonical payload with its secp256k1 key, and POSTs to the coordinator.
-When 2-of-3 relayers agree on the exact same payload, the coordinator forwards
-it to the ZKPerp bot's `POST /oracle/update` endpoint. The bot then calls
-`update_price` on the relevant Aleo program (one per asset).
-
-### Key design decisions
-
-- **Per-asset program fan-out** — BTC, ETH, SOL each have their own deployed Aleo program. The bot routes each quorum price to the correct program.
-- **1% deviation guard** — the bot only submits an on-chain update if price moved ≥1% from the current on-chain value. Saves transaction fees.
-- **Sequential Provable submission** — assets are updated one at a time (BTC → ETH → SOL) with a 3s gap to avoid Provable rate limits.
-- **Binance fallback** — if no fresh quorum price is available (oracle not running), the bot falls back to Binance/CoinGecko for BTC only.
-- **Deduplication** — coordinator will not resubmit the same `(assetId, roundId, updatedAt)` twice.
+Each relayer runs independently. When ≥2 submit the same price for the same asset, the Leo program commits it to `oracle_prices`. No single key can write a price unilaterally.
 
 ---
 
-## Setup
+## Security Model
 
-### 1. Install dependencies
+Each `submit_price` call is an Aleo transaction — Ed25519 signature verification happens at the protocol level before the Leo program executes. `self.caller` inside the program is a cryptographically verified identity, not a trust assertion.
 
-```bash
-npm install
-```
+**What a single compromised key can do:** delay a round by submitting a divergent price, causing the proposal to reset. It cannot commit a bad price alone.
 
-### 2. Generate relayer signing keys
+**What requires 2 compromised keys:** write an arbitrary price to `oracle_prices`.
 
-These are **secp256k1** keys used only for relayer-to-coordinator authentication.
-They are NOT your Aleo keys.
-
-```bash
-node -e "
-import('ethers').then(({ ethers }) => {
-  ['A','B','C'].forEach(r => {
-    const w = ethers.Wallet.createRandom();
-    console.log(\`RELAYER_\${r}_PK=\${w.privateKey}\`);
-    console.log(\`RELAYER_\${r}_ADDR=\${w.address}\`);
-  });
-});
-"
-```
-
-### 3. Configure .env
-
-```bash
-cp .env.example .env
-```
-
-Fill in:
-
-| Variable | Description |
-|----------|-------------|
-| `EVM_RPC_URL` | Ethereum Mainnet RPC (Alchemy/Infura) — used for BTC/USD and ETH/USD |
-| `EVM_RPC_URL_ARB` | Arbitrum Mainnet RPC — used for SOL/USD |
-| `RELAYER_A/B/C_PK` | Relayer private keys (generated above) |
-| `RELAYER_A/B/C_ADDR` | Relayer addresses (generated above, used as coordinator allowlist) |
-| `ZKPERP_ORCHESTRATOR_URL` | ZKPerp bot URL, e.g. `http://localhost:3001` |
-| `ZKPERP_ORCHESTRATOR_TOKEN` | Shared secret — must match `ORACLE_TOKEN` in zkperp-bot `.env` |
-| `POLL_INTERVAL_MS` | How often relayers poll Chainlink (default: `15000`) |
-
-### 4. ZKPerp bot .env additions
-
-Add these to your zkperp-bot `.env`:
-
-```bash
-ORACLE_TOKEN=same_value_as_ZKPERP_ORCHESTRATOR_TOKEN
-PROGRAM_ID_BTC=zkperp_btc_v21.aleo
-PROGRAM_ID_ETH=zkperp_eth_v21.aleo
-PROGRAM_ID_SOL=zkperp_sol_v21.aleo
-```
-
-### 5. Run
-
-**Terminal 1 — ZKPerp bot:**
-```bash
-cd ~/ZKPerp/zkperp-bot
-node zkperp-bot.mjs
-```
-
-**Terminal 2 — Oracle (coordinator + all 3 relayers):**
-```bash
-cd ~/ZKPerp/aleo-oracle
-npm start
-```
-
-`npm start` runs `manager.js` which spawns the coordinator + relayers A/B/C as
-child processes with auto-restart on crash.
-
-### 6. Health checks
-
-```bash
-# Coordinator status + last 5 submissions
-curl http://localhost:3010/health
-
-# Full coordinator state (all entries in window, dedup keys)
-curl http://localhost:3010/state
-
-# ZKPerp bot status + current oracle price
-curl http://localhost:3001/health
-```
-
-### 7. Test the oracle/update endpoint manually
-
-```bash
-curl -X POST http://localhost:3001/oracle/update \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_ORACLE_TOKEN" \
-  -d '{"assetId":"BTC_USD","price":"6876167000000","updatedAt":"1234567890","roundId":"129127208515966880224"}'
-# Expected: {"ok":true}
-```
+This is the closest design to Chainlink OCR that Leo currently allows. The ideal architecture — a single transaction carrying a co-signed report with both signatures verified on-chain — requires a `verify_schnorr(pk, msg, sig)` opcode that Leo does not yet expose. That upgrade path (FROST threshold Schnorr) is documented as future work.
 
 ---
 
-## Feeds configured (config/markets.json)
+## On-Chain Program (`main.leo`)
 
-| Market  | Chain            | Feed Address                               | Heartbeat | RPC env var       |
-|---------|------------------|--------------------------------------------|-----------|-------------------|
-| BTC/USD | ETH Mainnet (1)  | 0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c | 1h        | `EVM_RPC_URL`     |
-| ETH/USD | ETH Mainnet (1)  | 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419 | 1h        | `EVM_RPC_URL`     |
-| SOL/USD | Arbitrum (42161) | 0x24ceA4b8ce57cdA5058b924B9B9987992450590c | 1h        | `EVM_RPC_URL_ARB` |
+### Mappings
 
-Feed addresses are the **proxy** addresses from Chainlink docs. Always use the
-proxy, never the underlying aggregator.
+| Mapping | Key | Value | Purpose |
+|---|---|---|---|
+| `roles` | `u8` (0–3) | `address` | Oracle node addresses (0=A, 1=B, 2=C, 3=admin) |
+| `oracle_prices` | `field` (asset_id) | `PriceData` | Committed prices read by core contracts |
+| `price_proposals` | `field` (asset_id) | `PriceProposal` | Pending votes accumulating toward quorum |
 
-> Chainlink heartbeat is 1h but prices update immediately on >0.5% deviation.
-> Polling every 15s means you catch price moves within 15s of Chainlink publishing them.
+### Transitions
 
-## Adding more markets
+**`submit_price(asset_id: field, price: u64, timestamp: u32)`**
+Called independently by each oracle node. Finalize logic:
+1. Assert caller is a registered oracle node (roles 0–2)
+2. Load existing proposal or create empty one
+3. If proposal price differs from submitted price → reset proposal (new round)
+4. Assert caller has not already voted in current round
+5. Record vote in next empty slot
+6. If `votes >= 2` → write to `oracle_prices`, mark quorum reached
 
-Add an entry to `config/markets.json`:
+**`set_oracle(slot: u8, new_addr: address)`**
+Admin-only. Rotates oracle node address without redeployment.
+
+**`set_admin(new_admin: address)`**
+Admin-only. Transfers admin role.
+
+---
+
+## Off-Chain Stack
+
+### `manager.js`
+Spawns relayers A, B, C as child processes with staggered 1s startup. Each receives its own `ALEO_PRIVATE_KEY_A/B/C` from the environment. Auto-restarts on exit with 3s delay.
+
+### `relayer.js`
+Each relayer independently:
+1. Reads Chainlink feed via EVM RPC
+2. Checks freshness against `heartbeatSec` per market
+3. Deduplicates by `roundId` — skips if same Chainlink round already submitted
+4. Normalizes price to 8 decimals → `u64`
+5. Calls `aleoClient.js/submitPriceOnChain`
+
+### `aleoClient.js`
+Wraps the Provable SDK. Builds and broadcasts the `submit_price` transaction with the relayer's private key. Fee: 0.01 credits, public fee.
+
+---
+
+## Configuration
+
+### Environment Variables
+
+```env
+# One per relayer process (set in manager env)
+ALEO_PRIVATE_KEY_A=APrivateKey1...
+ALEO_PRIVATE_KEY_B=APrivateKey1...
+ALEO_PRIVATE_KEY_C=APrivateKey1...
+
+# Aleo network
+ALEO_ENDPOINT=https://api.explorer.provable.com/v1
+ALEO_NETWORK=testnet
+
+# EVM RPC for Chainlink feeds
+EVM_RPC_URL=https://mainnet.infura.io/v3/...
+EVM_RPC_URL_ARB=https://arb-mainnet.infura.io/v3/...
+
+# Oracle program name
+ORACLE_PROGRAM=zkperp_oracle_v2.aleo
+
+# Polling interval (ms, default 15000)
+POLL_INTERVAL_MS=15000
+```
+
+### `config/markets.json` (expected shape)
 
 ```json
-"ASSET_USD": {
-  "assetId": "ASSET_USD",
-  "assetKey": "4field",
-  "sourceChainId": 1,
-  "feedAddress": "0x...",
-  "priceDecimals": 8,
-  "heartbeatSec": 3600,
-  "rpcEnvVar": "EVM_RPC_URL"
+{
+  "BTC": {
+    "assetKey": "1field",
+    "feedAddress": "0x...",
+    "rpcEnvVar": "EVM_RPC_URL",
+    "heartbeatSec": 3600
+  },
+  "ETH": {
+    "assetKey": "2field",
+    "feedAddress": "0x...",
+    "rpcEnvVar": "EVM_RPC_URL",
+    "heartbeatSec": 3600
+  }
 }
 ```
 
-Then add `PROGRAM_ID_ASSET=zkperp_asset_v21.aleo` to the bot `.env` and extend
-`CONFIG.programs` in `zkperp-bot.mjs`.
+---
+
+## Deployment
+
+```bash
+# Deploy oracle program
+leo deploy --network testnet
+
+# Initialize roles (call once after deploy)
+# Set oracle A, B, C addresses via set_oracle transitions
+leo execute set_oracle 0u8 aleo1..._node_a --network testnet
+leo execute set_oracle 1u8 aleo1..._node_b --network testnet
+leo execute set_oracle 2u8 aleo1..._node_c --network testnet
+
+# Start all three relayers
+npm start
+```
 
 ---
 
-## Troubleshooting
+## Known Limitations & Future Work
 
-| Problem | Fix |
-|---------|-----|
-| `EADDRINUSE :::3010` | `kill $(lsof -t -i:3010)` then restart |
-| `HTTP 405` on `/oracle/update` | Handler is above the `GET`-only guard — ensure you're running the latest `zkperp-bot.mjs` |
-| `HTTP 401` on `/oracle/update` | `ORACLE_TOKEN` in bot `.env` doesn't match `ZKPERP_ORCHESTRATOR_TOKEN` in oracle `.env` |
-| `ECONNREFUSED` from coordinator | Bot not running or wrong port in `ZKPERP_ORCHESTRATOR_URL` |
-| Quorum fires but no Aleo update | Check `PROGRAM_ID_BTC/ETH/SOL` are set correctly in bot `.env` |
-| ETH/SOL not updating | Start the oracle alongside the bot — fallback is BTC-only via Binance |
+**Caller-supplied timestamp** — `timestamp` is provided by the relayer, not derived from `block.height`. A malicious relayer could supply a stale or future timestamp. Mitigation: replace with `block.height` in finalize and use block-based staleness checks in core contracts.
 
-## Deployment on Render
+**No price tolerance band** — if relayers submit divergent prices (e.g. due to feed latency), the proposal resets silently and the round produces no quorum. Staleness checks in consuming contracts catch this as a downstream effect.
 
-- **aleo-oracle**: one Render service, start command `npm start`
-- **zkperp-bot**: existing Render service, add `ORACLE_TOKEN` + `PROGRAM_ID_*` env vars
-- Set `ZKPERP_ORCHESTRATOR_URL` in oracle to the Render URL of the bot service
-- All 4 oracle processes (coordinator + 3 relayers) managed by `manager.js` with auto-restart
+**Proposal not cleared after quorum** — a third relayer submitting after quorum increments `votes` to 3 and re-writes the same price harmlessly. A post-quorum reset would avoid the redundant write.
+
+**`@custom constructor` / `self.program_owner`** — these are not valid Leo syntax. Role initialization is handled via a post-deploy `set_oracle` sequence called by the deployer address. The constructor block in the current file is non-functional and will be removed in v3.
+
+**Threshold Schnorr (FROST)** — the cryptographically ideal design is a single transaction carrying a co-signed report verified on-chain against two public keys. This requires a `verify_schnorr(pk, msg, sig)` opcode. Leo does not expose this yet. When Aleo ships lower-level signature verification primitives, the oracle can be upgraded to single-transaction quorum with no change to the consuming contracts.

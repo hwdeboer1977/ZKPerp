@@ -1,0 +1,21 @@
+{
+  "name": "zkperp-oracle",
+  "version": "2.0.0",
+  "description": "ZKPerp 2-of-3 oracle relay — submits Chainlink prices to zkperp_oracle_v2.aleo",
+  "type": "module",
+  "scripts": {
+    "start": "node manager.js",
+    "relayer:a": "RELAYER_NAME=A ALEO_PRIVATE_KEY=$ALEO_PRIVATE_KEY_A node relayer.js",
+    "relayer:b": "RELAYER_NAME=B ALEO_PRIVATE_KEY=$ALEO_PRIVATE_KEY_B node relayer.js",
+    "relayer:c": "RELAYER_NAME=C ALEO_PRIVATE_KEY=$ALEO_PRIVATE_KEY_C node relayer.js"
+  },
+  "dependencies": {
+    "@provablehq/sdk": "^0.10.1",
+    "dotenv": "^16.4.7",
+    "ethers": "^6.15.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}

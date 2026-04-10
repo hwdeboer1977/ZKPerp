@@ -21,22 +21,22 @@ export async function readChainlinkFeed(rpcUrl, feedAddress) {
   if (updatedAt === 0n) throw new Error(`[Chainlink] updatedAt = 0 for ${feedAddress}`);
 
   return {
-    decimals: Number(decimals),
-    description: String(description),
-    roundId: roundId.toString(),
-    answer: answer.toString(),
-    startedAt: startedAt.toString(),
-    updatedAt: updatedAt.toString(),
+    decimals:        Number(decimals),
+    description:     String(description),
+    roundId:         roundId.toString(),
+    answer:          answer.toString(),
+    startedAt:       startedAt.toString(),
+    updatedAt:       updatedAt.toString(),
     answeredInRound: answeredInRound.toString()
   };
 }
 
 /**
- * Normalise any Chainlink feed price to 8 decimal places (u128-safe integer string).
+ * Normalise any Chainlink feed price to 8 decimal places (u64-safe integer string).
  */
 export function normalizeTo8(answer, feedDecimals) {
   const value = BigInt(answer);
   if (feedDecimals === 8) return value.toString();
-  if (feedDecimals > 8) return (value / 10n ** BigInt(feedDecimals - 8)).toString();
+  if (feedDecimals > 8)  return (value / 10n ** BigInt(feedDecimals - 8)).toString();
   return (value * 10n ** BigInt(8 - feedDecimals)).toString();
 }

@@ -1,2 +1,5 @@
-*.env
-node-modules/
+.env
+*.avm
+*.prover
+*.verifier
+outputs/

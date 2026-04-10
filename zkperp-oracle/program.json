@@ -1,0 +1,9 @@
+{
+  "program": "zkperp_oracle_v2.aleo",
+  "version": "0.1.0",
+  "description": "",
+  "license": "MIT",
+  "leo": "4.0.0",
+  "dependencies": null,
+  "dev_dependencies": null
+}

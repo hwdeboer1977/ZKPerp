@@ -67,7 +67,7 @@ function parseLimitPrice(authPt) {
 }
 
 // ── Manual settlement using records.json ──────────────────
-// ── Delegated proving via Provable SDK, leo fallback ───────────
+// ── Delegated proving via Provable SDK ────────────────────────
 async function executeWithDelegated({ buyAuth, sellAuth, depositAuth, token, credentials, clearingPrice, fillSize, root }) {
   const CONSUMER_ID = process.env.PROVABLE_CONSUMER_ID ?? ''
   const API_KEY     = process.env.PROVABLE_API_KEY ?? ''
@@ -223,12 +223,14 @@ export async function settleMatch(match) {
 
   const rec = loadRecords()
 
-  // Use records.json values, falling back to in-memory DepositAuth
-  const buyAuth     = rec?.buyAuth     || match.buyOrder?.plaintext  || ''
-  const sellAuth    = rec?.sellAuth    || match.sellOrder?.plaintext || ''
-  const depositAuth = rec?.depositAuth || depositAuthPt              || ''
-  const token       = rec?.token       || ''
-  const credentials = rec?.credentials || ''
+  // Use match/memory values — records.json is optional fallback only
+  const buyAuth     = match.buyOrder?.plaintext  || rec?.buyAuth     || ''
+  const sellAuth    = match.sellOrder?.plaintext || rec?.sellAuth    || ''
+  const depositAuth = depositAuthPt              || rec?.depositAuth || ''
+  // Token/credentials: try cache first, then records.json
+  let { getCachedToken: _gt, getCachedCredentials: _gc } = await import('./usdcx-scanner.mjs').catch(() => ({}))
+  const token       = _gt?.()           || rec?.token       || ''
+  const credentials = _gc?.()           || rec?.credentials || ''
 
   const missing = []
   if (!buyAuth)     missing.push('buyAuth (records.json or OrderAuth scan)')
@@ -259,21 +261,21 @@ export async function settleMatch(match) {
   ].join('\n')
 
   console.log('\n[settler] Refreshing USDCx records before execution...')
+  let token2       = token
+  let credentials2 = credentials
   try {
-    const { refreshUSDCxRecords } = await import('./usdcx-scanner.mjs')
+    const { refreshUSDCxRecords, getCachedToken, getCachedCredentials } = await import('./usdcx-scanner.mjs')
     await refreshUSDCxRecords()
+    token2       = getCachedToken()       || token2
+    credentials2 = getCachedCredentials() || credentials2
+    if (token2)       console.log('[settler] ✓ Token from memory cache')
+    if (credentials2) console.log('[settler] ✓ Credentials from memory cache')
   } catch (e) {
     console.warn('[settler] USDCx rescan failed:', e.message)
   }
 
-  // Re-read records after rescan
-  const recFresh = loadRecords()
-  const token2       = recFresh?.token       || token
-  const credentials2 = recFresh?.credentials || credentials
-
   console.log('\n[settler] ✓ Executing settle_match...\n')
 
-  // Try delegated proving first, fall back to local leo
   const confirmed = await executeWithDelegated({
     buyAuth: normalize(buyAuth), sellAuth: normalize(sellAuth),
     depositAuth: normalize(depositAuth), token: normalize(token2),

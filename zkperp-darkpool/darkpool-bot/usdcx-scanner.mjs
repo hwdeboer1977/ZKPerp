@@ -89,6 +89,12 @@ function saveRecords(data) {
   writeFileSync(RECORDS_FILE, JSON.stringify(data, null, 2))
 }
 
+// ── In-memory cache — settler reads this instead of records.json ──
+let _cachedToken       = null
+let _cachedCredentials = null
+export function getCachedToken()       { return _cachedToken }
+export function getCachedCredentials() { return _cachedCredentials }
+
 // ── Main export: scan and update records.json ──────────────
 export async function refreshUSDCxRecords() {
   if (!CONSUMER_ID || !API_KEY) {
@@ -174,6 +180,8 @@ export async function refreshUSDCxRecords() {
     }
     saveRecords(updated)
 
+    if (token)       _cachedToken       = token
+    if (credentials) _cachedCredentials = credentials
     if (token || credentials) {
       console.log('[usdcx] ✓ records.json updated')
     }

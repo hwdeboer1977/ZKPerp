@@ -2,7 +2,7 @@
 // Shows compliance status and lets users get their ZKPerpComplianceRecord
 // by going through the KYC flow (register → Merkle proof → issue_compliance).
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 import { useTransaction } from '@/hooks/useTransaction';
 import { TransactionStatus } from '@/components/TransactionStatus';
@@ -79,6 +79,11 @@ export function CompliancePage() {
 
   const [steps, setSteps] = useState<Step[] | null>(null);
   const [running, setRunning] = useState(false);
+  const [currentBlock, setCurrentBlock] = useState<number>(0);
+
+  useEffect(() => {
+    getCurrentBlock().then(setCurrentBlock);
+  }, []);
   const issueTx = useTransaction();
 
   function initSteps(): Step[] {
@@ -167,8 +172,8 @@ export function CompliancePage() {
     }
   }, [connected, address, refetch]);
 
-  const daysLeft = complianceRecord?.expiresAt
-    ? Math.max(0, Math.floor((complianceRecord.expiresAt - Date.now() / 1000) / 86400))
+  const daysLeft = complianceRecord?.expiresAt && currentBlock
+    ? Math.max(0, Math.floor((complianceRecord.expiresAt - currentBlock) / 86400))
     : null;
 
   return (

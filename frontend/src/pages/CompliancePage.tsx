@@ -110,25 +110,19 @@ export function CompliancePage() {
       const regData = await regRes.json();
       if (regData.error) throw new Error(regData.error);
 
-      // If newly registered, wait for update_root tx to confirm on-chain
-      // before fetching proof — otherwise proof root won't match on-chain root
-      if (regData.status === 'registered' && regData.root) {
-        updateStep('register', {
-          state: 'active',
-          sub: `Registered · waiting for root update on-chain (~2 min)...`,
-        });
-        await waitForRootMatch(regData.root);
-      }
-
       updateStep('register', {
         state: 'done',
         sub: regData.status === 'already_registered'
-          ? 'Already in allowlist — fetching proof'
-          : `Registered · root confirmed on-chain ✓`,
+          ? 'Already in allowlist ✓'
+          : `Registered · tx: ${regData.tx_id?.slice(0, 20) ?? 'pending'}...`,
       });
 
-      // Step 2: Merkle proof + block height
-      // Fetch proof fresh after root is confirmed — add cache-busting param
+      // Step 2: Always wait for server root to match on-chain before fetching proof.
+      // Handles both new registrations and existing addresses where another user
+      // may have registered concurrently, changing the root.
+      updateStep('proof', { state: 'active', sub: 'Syncing Merkle root with chain...' });
+      await waitForRootMatch(regData.root);
+
       updateStep('proof', { state: 'active', sub: 'Computing Merkle proof...' });
       const [proofRes, currentBlock] = await Promise.all([
         fetch(`${COMPLIANCE_API}/api/compliance/proof/${address}?t=${Date.now()}`),

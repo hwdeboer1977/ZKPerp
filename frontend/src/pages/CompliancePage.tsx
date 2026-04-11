@@ -30,6 +30,22 @@ async function getCurrentBlock(): Promise<number> {
   } catch { return 0; }
 }
 
+// Poll on-chain compliance_root until it matches expectedRoot (up to maxWaitMs)
+async function waitForRootMatch(expectedRoot: string, maxWaitMs = 300_000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    try {
+      const res = await fetch(
+        `${ALEO_API}/program/${COMPLIANCE_PROGRAM_ID}/mapping/compliance_root/0u8`
+      );
+      const onChainRoot = (await res.text()).replace(/"/g, '').trim();
+      if (onChainRoot === expectedRoot) return;
+    } catch {}
+    await new Promise(r => setTimeout(r, 5000));
+  }
+  throw new Error('Timed out waiting for on-chain root update (~5 min). Try again shortly.');
+}
+
 function StepRow({ step, num }: { step: Step; num: number }) {
   const colors = {
     idle:   { border: 'border-zkperp-border',    bg: 'bg-zkperp-dark',        text: 'text-gray-500',       icon: 'text-gray-600' },
@@ -93,17 +109,29 @@ export function CompliancePage() {
       });
       const regData = await regRes.json();
       if (regData.error) throw new Error(regData.error);
+
+      // If newly registered, wait for update_root tx to confirm on-chain
+      // before fetching proof — otherwise proof root won't match on-chain root
+      if (regData.status === 'registered' && regData.root) {
+        updateStep('register', {
+          state: 'active',
+          sub: `Registered · waiting for root update on-chain (~2 min)...`,
+        });
+        await waitForRootMatch(regData.root);
+      }
+
       updateStep('register', {
         state: 'done',
         sub: regData.status === 'already_registered'
           ? 'Already in allowlist — fetching proof'
-          : `Registered · tx: ${regData.tx_id?.slice(0, 20) ?? 'pending'}...`,
+          : `Registered · root confirmed on-chain ✓`,
       });
 
       // Step 2: Merkle proof + block height
+      // Fetch proof fresh after root is confirmed — add cache-busting param
       updateStep('proof', { state: 'active', sub: 'Computing Merkle proof...' });
       const [proofRes, currentBlock] = await Promise.all([
-        fetch(`${COMPLIANCE_API}/api/compliance/proof/${address}`),
+        fetch(`${COMPLIANCE_API}/api/compliance/proof/${address}?t=${Date.now()}`),
         getCurrentBlock(),
       ]);
       const proofData = await proofRes.json();
@@ -168,63 +196,29 @@ export function CompliancePage() {
         {/* Status */}
         <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-6">
           <h2 className="font-semibold text-white mb-4">Your Compliance Status</h2>
-          {!connected ? (
-            <div className="text-center py-6">
-              <p className="text-gray-400 text-sm mb-1">Connect your wallet to check</p>
-              <p className="text-gray-600 text-xs">Shield wallet required</p>
-            </div>
-          ) : crLoading ? (
-            <div className="flex items-center gap-2 text-gray-400 py-4">
-              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-              <span className="text-sm">Checking wallet...</span>
-            </div>
-          ) : hasRecord ? (
+          {hasRecord && complianceRecord ? (
             <div className="space-y-3">
               <div className="flex items-center gap-3 p-4 rounded-lg bg-zkperp-green/5 border border-zkperp-green/30">
-                <span className="text-2xl">✓</span>
+                <span className="text-2xl text-zkperp-green">✓</span>
                 <div>
-                  <p className="text-zkperp-green font-semibold">Verified Trader</p>
-                  <p className="text-gray-400 text-xs mt-0.5">Active compliance record found in wallet</p>
+                  <p className="text-zkperp-green font-semibold">Verified</p>
+                  <p className="text-gray-400 text-xs mt-0.5">
+                    Active compliance record in wallet
+                    {daysLeft !== null && ` · ${daysLeft} days remaining`}
+                  </p>
                 </div>
               </div>
-              {complianceRecord ? (
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-400">Issued under root</span>
-                    <span className="text-white font-mono text-xs">{complianceRecord.issuedUnder.slice(0, 16)}...</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-400">Expires at block</span>
-                    <span className="text-white">{complianceRecord.expiresAt.toLocaleString()}</span>
-                  </div>
-                  {daysLeft !== null && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-400">Estimated days left</span>
-                      <span className={daysLeft < 14 ? 'text-yellow-400' : 'text-zkperp-green'}>
-                        ~{daysLeft} days
-                      </span>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <p className="text-xs text-gray-500">Record found · click Refresh to decrypt details.</p>
-              )}
-              <div className="flex gap-2">
-                <button
-                  onClick={async () => { await refetch(); }}
-                  disabled={crLoading}
-                  className="flex-1 py-2 rounded-lg border border-zkperp-border bg-zkperp-dark text-gray-400 text-sm hover:border-gray-500 hover:text-white transition-colors disabled:opacity-50"
-                >
-                  {crLoading ? 'Checking...' : '↻ Refresh'}
-                </button>
-                <button
-                  onClick={handleGetVerified}
-                  disabled={running}
-                  className="flex-1 py-2 rounded-lg border border-zkperp-border bg-zkperp-dark text-gray-400 text-sm hover:border-gray-500 hover:text-white transition-colors disabled:opacity-50"
-                >
-                  Renew
-                </button>
+              <div className="text-xs text-gray-500 space-y-1 font-mono bg-zkperp-dark rounded-lg p-3 border border-zkperp-border">
+                <p><span className="text-gray-400">issued_under:</span> {complianceRecord.issuedUnder.slice(0, 24)}...</p>
+                <p><span className="text-gray-400">expires_at:</span> block {complianceRecord.expiresAt.toLocaleString()}</p>
               </div>
+              <button
+                onClick={handleGetVerified}
+                disabled={!connected || running}
+                className="w-full py-2 rounded-lg border border-zkperp-border bg-zkperp-dark text-gray-400 text-xs hover:border-gray-500 hover:text-white transition-colors disabled:opacity-50"
+              >
+                Renew
+              </button>
             </div>
           ) : (
             <div className="space-y-3">

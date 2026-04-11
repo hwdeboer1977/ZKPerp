@@ -8,7 +8,7 @@ import { useTransaction } from '@/hooks/useTransaction';
 import { TransactionStatus } from '@/components/TransactionStatus';
 import { useCompliance } from '@/hooks/useCompliance';
 
-const COMPLIANCE_API = (import.meta as any).env?.VITE_COMPLIANCE_API || 'http://localhost:3001';
+const COMPLIANCE_API = (import.meta as any).env?.VITE_COMPLIANCE_API || '';
 const COMPLIANCE_PROGRAM_ID = 'zkperp_compliance_v7.aleo';
 const EXPIRY_BLOCKS = 7_776_000; // ~90 days
 const ALEO_API = 'https://api.explorer.provable.com/v1/testnet';

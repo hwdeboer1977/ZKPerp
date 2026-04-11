@@ -1,5 +1,8 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    {
+      "source": "/api/compliance/:path*",
+      "destination": "http://95.179.138.191:3001/api/compliance/:path*"
+    }
   ]
 }

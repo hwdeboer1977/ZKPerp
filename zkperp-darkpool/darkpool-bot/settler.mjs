@@ -29,7 +29,6 @@ import 'dotenv/config'
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
-import { spawn } from 'child_process'
 
 const __dirname  = dirname(fileURLToPath(import.meta.url))
 const RECORDS_FILE = join(__dirname, 'records.json')
@@ -69,7 +68,7 @@ function parseLimitPrice(authPt) {
 
 // ── Manual settlement using records.json ──────────────────
 // ── Delegated proving via Provable SDK, leo fallback ───────────
-async function executeWithDelegatedOrLocal({ buyAuth, sellAuth, depositAuth, token, credentials, clearingPrice, fillSize, root, leoDir }) {
+async function executeWithDelegated({ buyAuth, sellAuth, depositAuth, token, credentials, clearingPrice, fillSize, root }) {
   const CONSUMER_ID = process.env.PROVABLE_CONSUMER_ID ?? ''
   const API_KEY     = process.env.PROVABLE_API_KEY ?? ''
   const PRIVATE_KEY = process.env.OPERATOR_PRIVATE_KEY ?? ''
@@ -127,11 +126,12 @@ async function executeWithDelegatedOrLocal({ buyAuth, sellAuth, depositAuth, tok
         pm.networkClient = nc
         pm.setAccount(account)
 
+        console.log(`[settler] depositAuth being passed: ${depositAuth.slice(0,120)}`)
         const inputs = [buyAuth, sellAuth, depositAuth, token, credentials, `${clearingPrice}u64`, `${fillSize}u64`, root]
 
         console.log('[settler] Building proving request...')
         const provingRequest = await pm.provingRequest({
-          programName:  'zkdarkpool_v5.aleo',
+          programName:  process.env.PROGRAM_ID ?? 'zkdarkpool_v8.aleo',
           functionName: 'settle_match',
           fee:          0.02,
           privateFee:   false,
@@ -192,36 +192,16 @@ async function executeWithDelegatedOrLocal({ buyAuth, sellAuth, depositAuth, tok
           continue
         }
         if (attempt === MAX_RETRIES) {
-          console.warn(`[settler] All ${MAX_RETRIES} delegated proving attempts failed — falling back to local leo`)
+          console.error(`[settler] All ${MAX_RETRIES} delegated proving attempts failed`)
         } else {
-          console.warn(`[settler] Delegated proving failed: ${e.message} — falling back to local leo`)
-          break
+          console.warn(`[settler] Attempt ${attempt} failed: ${e.message} — retrying...`)
+          continue
         }
       }
     }
   }
 
-  // Fallback: local leo execute
-  return new Promise((resolve) => {
-    const args = [
-      'execute', 'settle_match',
-      buyAuth, sellAuth, depositAuth, token, credentials,
-      `${clearingPrice}u64`, `${fillSize}u64`, root,
-      '--network', 'testnet',
-      '--endpoint', 'https://api.explorer.provable.com/v1',
-      '--broadcast', '--yes',
-    ]
-    console.log('[settler] Running local leo execute...')
-    const child = spawn('leo', args, { cwd: leoDir, env: process.env, shell: false })
-    let output = ''
-    child.stdout.on('data', d => { const s = d.toString(); output += s; process.stdout.write('[leo] ' + s) })
-    child.stderr.on('data', d => process.stderr.write('[leo] ' + d.toString()))
-    child.on('close', code => {
-      if (output.includes('Transaction accepted') || output.includes('Execution confirmed')) resolve(true)
-      else { console.error(`[settler] ✗ leo exited ${code}`); resolve(false) }
-    })
-    child.on('error', e => { console.error('[settler] spawn error:', e.message); resolve(false) })
-  })
+  return false
 }
 
 export async function settleMatch(match) {
@@ -236,13 +216,10 @@ export async function settleMatch(match) {
   console.log(`  buyer:  ${match.buyOrder?.user || '(unknown)'}`)
   console.log(`  seller: ${match.sellOrder?.user || '(unknown)'}`)
 
-  // Try to get DepositAuth from in-memory store (linked by sell order nonce)
-  let depositAuthPt = null
-  try {
-    const { getDepositAuth } = await import('./orderbook.mjs')
-    depositAuthPt = getDepositAuth(match.sellOrder?.nonce)
-    if (depositAuthPt) console.log(`[settler] ✓ DepositAuth found in memory`)
-  } catch {}
+  // Use DepositAuth attached to match object by orderbook (keyed by user+assetId)
+  const depositAuthPt = match.depositAuth ?? null
+  if (depositAuthPt) console.log(`[settler] ✓ DepositAuth from match: ${depositAuthPt.slice(0,80)}...`)
+  else console.warn(`[settler] ⚠ No depositAuth on match object`)
 
   const rec = loadRecords()
 
@@ -297,12 +274,11 @@ export async function settleMatch(match) {
   console.log('\n[settler] ✓ Executing settle_match...\n')
 
   // Try delegated proving first, fall back to local leo
-  const confirmed = await executeWithDelegatedOrLocal({
+  const confirmed = await executeWithDelegated({
     buyAuth: normalize(buyAuth), sellAuth: normalize(sellAuth),
     depositAuth: normalize(depositAuth), token: normalize(token2),
     credentials: normalize(credentials2),
     clearingPrice, fillSize, root,
-    leoDir: join(__dirname, '..'),
   })
 
   if (confirmed) {
@@ -334,7 +310,7 @@ export async function settleMatch(match) {
       const assetId   = match.buyOrder?.assetId ?? 0
       if (buyNonce)  removeOrder(assetId, true,  buyNonce)
       if (sellNonce) removeOrder(assetId, false, sellNonce)
-      if (sellNonce) removeDepositAuth(sellNonce)
+      if (match.depositNonce) removeDepositAuth(match.sellOrder?.user, assetId, match.depositNonce)
     } catch (e) {
       console.warn('[settler] Could not remove from memory:', e.message)
     }
@@ -346,7 +322,7 @@ export async function settleMatch(match) {
 
 function printInstructions() {
   console.log('\n[settler] Fill ~/ZK_Darkpool/darkpool-bot/records.json:')
-  console.log('  1. PROGRAM_ID=zkdarkpool_v5.aleo node provable-scanner.mjs')
+  console.log(`  1. PROGRAM_ID=${process.env.PROGRAM_ID ?? 'zkdarkpool_v8.aleo'} node provable-scanner.mjs`)
   console.log('     → find OrderAuth (buy), OrderAuth (sell), DepositAuth')
   console.log('  2. PROGRAM_ID=test_usdcx_stablecoin.aleo node provable-scanner.mjs')
   console.log('     → find Token (amount > 0) and Credentials')

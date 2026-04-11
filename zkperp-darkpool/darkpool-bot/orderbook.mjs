@@ -6,27 +6,81 @@
 
 import { isOrderConsumed } from './api.mjs'
 import { MIN_FILL_SIZE } from './config.mjs'
+import { writeFileSync, readFileSync, existsSync } from 'fs'
+
+const DEPOSIT_AUTHS_FILE = './deposit-auths.json'
+
+function saveDepositAuths() {
+  try {
+    writeFileSync(DEPOSIT_AUTHS_FILE, JSON.stringify(depositAuths, null, 2))
+  } catch (e) {
+    console.warn('[orderbook] Failed to save deposit-auths.json:', e.message)
+  }
+}
+
+export function loadDepositAuths() {
+  try {
+    if (!existsSync(DEPOSIT_AUTHS_FILE)) return
+    const data = JSON.parse(readFileSync(DEPOSIT_AUTHS_FILE, 'utf8'))
+    for (const [key, entries] of Object.entries(data)) {
+      depositAuths[key] = entries
+    }
+    const total = Object.values(depositAuths).reduce((n, arr) => n + arr.length, 0)
+    console.log(`[orderbook] Loaded ${total} DepositAuth(s) from disk`)
+  } catch (e) {
+    console.warn('[orderbook] Failed to load deposit-auths.json:', e.message)
+  }
+}
 
 // orders[assetId][direction] = array of order objects
 // direction: true = buy, false = sell
 const orders = {}
 
-// depositAuths[orderNonce] = DepositAuth plaintext
-// Linked to sell orders by nonce — used in settle_match
+// depositAuths[user:assetId] = array of DepositAuth entries
+// Matched to sell orders by user + asset_id — no nonce linkage needed
 const depositAuths = {}
 
 // ── Store a DepositAuth ────────────────────────────────────────
 export function addDepositAuth(nonce, plaintext, blockHeight = 0) {
-  if (depositAuths[nonce]) return false
-  depositAuths[nonce] = { plaintext, blockHeight }
-  console.log(`[orderbook] DepositAuth stored nonce=${nonce.slice(0,8)}... block=#${blockHeight}`)
+  // Parse user and asset_id from plaintext
+  const getField = (name) => {
+    for (const line of plaintext.split(/[,\n]/)) {
+      const t = line.trim()
+      if (t.startsWith(name + ':')) return t.slice(name.length + 1).trim()
+    }
+    return null
+  }
+  const user    = getField('user')?.replace('.private','').trim()
+  const assetId = getField('asset_id')?.replace('u8','').replace('.private','').trim()
+  if (!user || assetId == null) {
+    console.log(`[orderbook] DepositAuth parse failed — missing user or asset_id`)
+    return false
+  }
+  const key = `${user}:${assetId}`
+  if (!depositAuths[key]) depositAuths[key] = []
+  // Avoid duplicates by nonce
+  if (depositAuths[key].some(e => e.nonce === nonce)) return false
+  depositAuths[key].push({ nonce, plaintext, blockHeight })
+  saveDepositAuths()
+  console.log(`[orderbook] DepositAuth stored user=${user.slice(0,16)}... asset=${assetId} amount=${getField('amount')?.replace('u64','').replace('.private','').trim()} block=#${blockHeight}`)
   return true
 }
 
-export function getDepositAuth(nonce) {
-  const entry = depositAuths[nonce]
-  if (!entry) return null
-  return typeof entry === 'string' ? entry : entry.plaintext
+// Get first available DepositAuth for a user+asset combination
+export function getDepositAuth(user, assetId) {
+  const key = `${user}:${assetId}`
+  const entries = depositAuths[key]
+  if (!entries || entries.length === 0) return null
+  return entries[0].plaintext
+}
+
+// Remove a specific DepositAuth after settlement
+export function consumeDepositAuth(user, assetId, nonce) {
+  const key = `${user}:${assetId}`
+  if (!depositAuths[key]) return
+  depositAuths[key] = depositAuths[key].filter(e => e.nonce !== nonce)
+  saveDepositAuths()
+  console.log(`[orderbook] DepositAuth consumed user=${user.slice(0,16)}... asset=${assetId}`)
 }
 
 // ── Add an order (from scanner) ────────────────────────────────
@@ -71,12 +125,15 @@ export async function pruneOrders(currentBlock) {
       )
       const consumedNonces = new Set(consumed.filter(c => c.consumed).map(c => c.nonce))
       orders[assetId][key] = orders[assetId][key].filter(o => !consumedNonces.has(o.nonce))
-      // Remove sells with no DepositAuth — their escrow is spent
+      // Remove sells with no DepositAuth — keyed by user:assetId
       if (direction === false) {
+        console.log(`[debug] depositAuths keys:`, Object.keys(depositAuths))
         const before2 = orders[assetId][key].length
         orders[assetId][key] = orders[assetId][key].filter(o => {
-          const nonce = o.nonce.replace('field', '')
-          return !!depositAuths[nonce] || !!depositAuths[o.nonce]
+          const depKey = `${o.user}:${assetId}`
+          const has = !!(depositAuths[depKey]?.length)
+          if (!has) console.log(`[orderbook] Pruning SELL nonce=${o.nonce.slice(0,16)}... — no DepositAuth for ${depKey}`)
+          return has
         })
         const after2 = orders[assetId][key].length
         if (before2 !== after2) {
@@ -130,11 +187,11 @@ export function matchAsset(assetId) {
   if (!orders[assetId]) return []
   const buys  = [...orders[assetId].true]
 
-  // Only match sells that have a valid unspent DepositAuth in memory
+  // Only match sells that have a valid DepositAuth in memory (matched by user+asset)
   const sells = [...orders[assetId].false].filter(s => {
-    const nonce = s.nonce.replace('field', '')
-    const hasAuth = !!depositAuths[nonce] || !!depositAuths[s.nonce]
-    if (!hasAuth) console.log(`[orderbook] Skipping SELL nonce=${s.nonce.slice(0,8)}... — no DepositAuth in memory (likely spent)`)
+    const depKey = `${s.user}:${assetId}`
+    const hasAuth = !!(depositAuths[depKey]?.length)
+    if (!hasAuth) console.log(`[orderbook] Skipping SELL nonce=${s.nonce.slice(0,8)}... — no DepositAuth for user+asset`)
     return hasAuth
   })
 
@@ -165,7 +222,12 @@ export function matchAsset(assetId) {
       ? 'full'
       : 'partial'
 
-    matches.push({ buyOrder: buy, sellOrder: sell, clearingPrice: price, fillSize, type })
+    // Attach the DepositAuth plaintext so settler has it ready
+    const depKey      = `${sell.user}:${assetId}`
+    const depEntry    = depositAuths[depKey]?.[0] ?? null
+    const depositAuth = depEntry?.plaintext ?? null
+    const depositNonce = depEntry?.nonce ?? null
+    matches.push({ buyOrder: buy, sellOrder: sell, clearingPrice: price, fillSize, type, depositAuth, depositNonce })
 
     buyRemaining  -= fillSize
     sellRemaining -= fillSize
@@ -198,24 +260,26 @@ export function getOrderCount(assetId) {
 export function getAllAssets() { return Object.keys(orders).map(Number) }
 
 export function getAllDepositAuths() {
-  return Object.entries(depositAuths)
-    .map(([nonce, entry]) => {
-      const plaintext = typeof entry === 'string' ? entry : entry.plaintext
-      const blockHeight = typeof entry === 'string' ? 0 : (entry.blockHeight ?? 0)
-      const f = (name) => {
-        const m = plaintext?.match(new RegExp(`${name}:\\s*([^.,\\n}]+)`))
-        return m?.[1]?.replace('.private','').trim() ?? null
+  const result = []
+  for (const entries of Object.values(depositAuths)) {
+    for (const entry of entries) {
+      const getField = (name) => {
+        for (const line of (entry.plaintext ?? '').split(/[,\n]/)) {
+          const t = line.trim()
+          if (t.startsWith(name + ':')) return t.slice(name.length + 1).replace('.private','').trim()
+        }
+        return null
       }
-      const rawNonce = nonce.endsWith('field') ? nonce : `${nonce}field`
-      return {
-        nonce:   rawNonce,
-        user:    f('user'),
-        assetId: parseInt(f('asset_id')?.replace('u8','') ?? '-1'),
-        amount:  f('amount')?.replace('u64',''),
-        blockHeight,
-      }
-    })
-    .sort((a, b) => a.blockHeight - b.blockHeight) // oldest first, newest last
+      result.push({
+        nonce:       entry.nonce,
+        user:        getField('user'),
+        assetId:     parseInt(getField('asset_id')?.replace('u8','') ?? '-1'),
+        amount:      getField('amount')?.replace('u64',''),
+        blockHeight: entry.blockHeight ?? 0,
+      })
+    }
+  }
+  return result.sort((a, b) => a.blockHeight - b.blockHeight)
 }
 
 export function removeOrder(assetId, direction, nonce) {
@@ -227,16 +291,8 @@ export function removeOrder(assetId, direction, nonce) {
   if (before !== after) console.log(`[orderbook] Removed ${direction ? 'BUY' : 'SELL'} nonce=${nonce.slice(0,8)}... from order book`)
 }
 
-export function removeDepositAuth(nonce) {
-  const key = nonce.replace('field', '')
-  if (depositAuths[key]) {
-    delete depositAuths[key]
-    console.log(`[orderbook] Removed DepositAuth nonce=${key.slice(0,8)}... from memory`)
-  }
-  if (depositAuths[nonce]) {
-    delete depositAuths[nonce]
-    console.log(`[orderbook] Removed DepositAuth nonce=${nonce.slice(0,8)}... from memory`)
-  }
+export function removeDepositAuth(user, assetId, nonce) {
+  consumeDepositAuth(user, assetId, nonce)
 }
 
 export function getAllOrders() {

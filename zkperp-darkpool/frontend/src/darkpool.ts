@@ -41,7 +41,7 @@ export interface FillReceipt {
 }
 
 export type TxStatus    = 'idle' | 'submitting' | 'done' | 'error'
-export type DarkpoolTab = 'order' | 'receipts' | 'operator' | 'tools'
+export type DarkpoolTab = 'order' | 'receipts' | 'operator' | 'tools' | 'cancel'
 
 // ── Formatting ─────────────────────────────────────────────────
 export function fmtUsdc(n: bigint): string  { return (Number(n) / 1_000_000).toFixed(4) }
@@ -178,9 +178,9 @@ export function buildClaimTestAssetInputs(assetId: number): string[] {
 }
 
 export function buildDepositAssetInputs(params: {
-  assetRecord: string; amount: bigint; orderNonce: string; operatorAddress: string
+  assetRecord: string; amount: bigint; salt: string; operatorAddress: string
 }): string[] {
-  return [params.assetRecord, `${params.amount}u64`, params.orderNonce, params.operatorAddress]
+  return [params.assetRecord, `${params.amount}u64`, params.salt, params.operatorAddress]
 }
 
 export function buildCancelOrderInputs(orderRecord: string): string[] {

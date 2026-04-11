@@ -10,7 +10,7 @@ import { createServer } from 'http'
 import { BATCH_BLOCKS, POLL_MS, OPERATOR_ADDRESS, PROGRAM_ID, START_BLOCK, PORT } from './config.mjs'
 import { getBlockHeight, getFeeVault } from './api.mjs'
 import { scanNewOrders, setStartBlock } from './scanner.mjs'
-import { addOrder, addDepositAuth, getDepositAuth, getAllDepositAuths, matchAll, pruneOrders, getOrderCount, getAllAssets } from './orderbook.mjs'
+import { addOrder, addDepositAuth, getDepositAuth, consumeDepositAuth, getAllDepositAuths, loadDepositAuths, matchAll, pruneOrders, getOrderCount, getAllAssets } from './orderbook.mjs'
 import { settleMatch } from './settler.mjs'
 import { refreshUSDCxRecords } from './usdcx-scanner.mjs'
 
@@ -65,6 +65,10 @@ async function runMatching(block) {
       if (result?.status === 'confirmed') {
         totalSettled++
         console.log(`[bot] ✓ Settlement confirmed. Total: ${totalSettled}`)
+        // Consume the DepositAuth so it can't be reused
+        if (match.depositNonce) {
+          consumeDepositAuth(match.sellOrder.user, match.sellOrder.assetId, match.depositNonce)
+        }
         // Refresh USDCx for next settlement
         await refreshUSDCxRecords().catch(e => console.warn('[bot] USDCx refresh failed:', e.message))
       }
@@ -83,8 +87,8 @@ async function tick() {
     const newOrders = await scanNewOrders()
     for (const order of newOrders) {
       if (order.isDepositAuth) {
-        // DepositAuth — store by nonce, link to sell order at settle time
-        addDepositAuth(order.nonce, order.plaintext, order.blockHeight ?? 0)
+        // DepositAuth — store by user+asset, matched at settle time
+        addDepositAuth('', order.plaintext, order.blockHeight ?? 0)
       } else {
         // OrderAuth / OperatorOrderRef — add to order book
         order.limitPrice = order.limitPrice ?? (order.direction ? 999_999_999n : 1n)
@@ -165,6 +169,7 @@ async function main() {
   setStartBlock(scanFrom)
   lastBatchBlock = currentBlock
 
+  loadDepositAuths()
   console.log(`[bot] Current block: #${currentBlock}`)
   console.log(`[bot] Scanning from: #${scanFrom}`)
 

@@ -114,19 +114,24 @@ function extractFromBlock(block, orders) {
         }
 
         // DepositAuth — operator's copy of escrowed asset from deposit_asset
-        if (fn.includes('deposit_asset') && pt.includes('order_nonce') && pt.includes('user:') && pt.includes('amount')) {
+        // v6: no order_nonce field, matched by user+asset_id at settle time
+        if (fn.includes('deposit_asset')) {
+          // Use split-based parser — immune to regex char class issues
           const f = (name) => {
-            const m = pt.match(new RegExp(`${name}:\\s*([^.\\n,}]+)`))
-            return m?.[1]?.trim() ?? null
+            for (const line of pt.split(/[,\n]/)) {
+              const t = line.trim()
+              if (t.startsWith(name + ':')) return t.slice(name.length + 1).trim()
+            }
+            return null
           }
-          const user       = f('user')?.replace('.private','').trim()
-          const orderNonce = f('order_nonce')?.replace('.private','').trim() // keep 'field' suffix
-          const assetId    = parseInt(f('asset_id')?.replace('u8','').replace('.private','').trim() ?? '-1')
-          const amtStr     = f('amount')?.replace('u64','').replace('.private','').trim()
-          const amount     = amtStr ? BigInt(amtStr) : 0n
-          if (user && orderNonce && assetId >= 0 && amount > 0n) {
-            console.log(`[scanner] 🔓 DepositAuth: nonce=${orderNonce.slice(0,8)}... asset=${assetId} amount=${amount} user=${user.slice(0,20)}...`)
-            orders.push({ txId, blockHeight: height, user, nonce: orderNonce, assetId, direction: false, expiry: 99999999, size: amount, limitPrice: 1n, plaintext: pt, isDepositAuth: true })
+          const user    = f('user')?.replace('.private','').trim()
+          const assetId = parseInt(f('asset_id')?.replace('u8','').replace('.private','').trim() ?? '-1')
+          const amtStr  = f('amount')?.replace('u64','').replace('.private','').trim()
+          const amount  = amtStr ? BigInt(amtStr) : 0n
+          // Must have user field — AssetRecords don't, so this correctly skips them
+          if (user && assetId >= 0 && amount > 0n) {
+            console.log(`[scanner] 🔓 DepositAuth: asset=${assetId} amount=${amount} user=${user.slice(0,20)}...`)
+            orders.push({ txId, blockHeight: height, user, nonce: '', assetId, direction: false, expiry: 99999999, size: amount, limitPrice: 1n, plaintext: pt, isDepositAuth: true })
           }
           continue
         }

@@ -1,0 +1,9 @@
+{
+  "aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0:0": [
+    {
+      "nonce": "",
+      "plaintext": "{\n  owner: aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0.private,\n  user: aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0.private,\n  asset_id: 0u8.private,\n  amount: 1000000u64.private,\n  _nonce: 4837185379157837521078277879489765271828921032583138314722255666832271799404group.public,\n  _version: 1u8.public\n}",
+      "blockHeight": 15714251
+    }
+  ]
+}

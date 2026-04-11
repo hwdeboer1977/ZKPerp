@@ -220,7 +220,7 @@ function OrderTab() {
     setLoadingDeps(true)
     const BOT = import.meta.env.VITE_BOT_API ?? 'http://localhost:3001'
     fetch(`${BOT}/deposits?address=${encodeURIComponent(userAddress)}`)
-      .then(r => r.json()).then(d => { const deps = d.deposits ?? []; setPendingDeps(deps); if (deps.length > 0) setSellNonce(deps[deps.length-1].nonce) })
+      .then(r => r.json()).then(d => { const deps = d.deposits ?? []; setPendingDeps(deps); if (deps.length > 0) setSellNonce(randomField()) })
       .catch(() => setPendingDeps([])).finally(() => setLoadingDeps(false))
   }, [isBuy, userAddress])
 
@@ -229,14 +229,14 @@ function OrderTab() {
   const grossCost = sizeNum > 0n && priceNum > 0n ? sizeNum * priceNum / 1_000_000n : 0n
   const fee       = grossCost > 0n ? (grossCost * 10n) / 10_000n : 0n
   const canSubmit = connected && !!userAddress && sizeNum >= MIN_FILL && priceNum > 0n &&
-    (isBuy ? (selectedTok && selectedCred) : !!sellNonce) &&
+    (isBuy ? (selectedTok && selectedCred) : (!!sellNonce && pendingDeps.some((d: any) => d.assetId === assetId))) &&
     tx.status !== 'submitting' && tx.status !== 'pending'
 
   const submit = async () => {
     if (!canSubmit) return
     const block  = await getCurrentBlock()
     const expiry = block > 0 ? block + 50_000 : 99_999_999
-    const nonce  = isBuy ? randomField() : (sellNonce.endsWith('field') ? sellNonce : `${sellNonce}field`)
+    const nonce  = randomField()
     const salt   = randomField()
     await tx.execute({ program: PROGRAM_ID, function: 'submit_order', inputs: buildSubmitOrderInputs({ recipient: userAddress, operatorAddress: OPERATOR_ADDRESS, assetId, direction: isBuy, size: sizeNum, limitPrice: priceNum, salt, expiry, nonce }), fee: 3_000_000, privateFee: false })
   }
@@ -300,12 +300,12 @@ function OrderTab() {
               <button onClick={() => {
                 setLoadingDeps(true)
                 const BOT = import.meta.env.VITE_BOT_API ?? 'http://localhost:3001'
-                fetch(`${BOT}/deposits?address=${encodeURIComponent(userAddress)}`).then(r => r.json()).then(d => { setPendingDeps(d.deposits ?? []); const deps2 = d.deposits ?? []; if (deps2.length > 0) setSellNonce(deps2[deps2.length-1].nonce) }).catch(() => setPendingDeps([])).finally(() => setLoadingDeps(false))
+                fetch(`${BOT}/deposits?address=${encodeURIComponent(userAddress)}`).then(r => r.json()).then(d => { const deps2 = d.deposits ?? []; setPendingDeps(deps2); if (deps2.length > 0) setSellNonce(randomField()) }).catch(() => setPendingDeps([])).finally(() => setLoadingDeps(false))
               }} className="text-xs text-cyan-400 hover:text-cyan-300 transition-colors">{loadingDeps ? '⟳' : '↻ Refresh'}</button>
             </div>
             {loadingDeps ? <div className="text-slate-500 text-xs py-2 animate-pulse">Loading…</div>
               : pendingDeps.length === 0 ? <div className="text-slate-500 text-xs py-2 border border-cyan-400/10 rounded-xl text-center">No deposits found — deposit first, then refresh</div>
-              : <select value={sellNonce} onChange={e => setSellNonce(e.target.value)} className={selectClass}><option value="">— select deposit —</option>{pendingDeps.map((d: any, i: number) => <option key={i} value={d.nonce}>{ASSETS[d.assetId] ?? `asset_${d.assetId}`} — {Number(d.amount)/1e6} units — {d.nonce.slice(0,12)}…</option>)}</select>}
+              : <select value={pendingDeps.some((d:any) => d.assetId === assetId) ? String(assetId) : ''} onChange={e => { if (e.target.value) setSellNonce(randomField()) }} className={selectClass}><option value="">— select deposit —</option>{pendingDeps.filter((d:any) => d.assetId === assetId).map((d:any,i:number) => <option key={i} value={String(assetId)}>{ASSETS[d.assetId] ?? `asset_${d.assetId}`} — {Number(d.amount)/1_000_000} units escrowed ✓</option>)}</select>}
           </div>
         </>
       )}
@@ -315,6 +315,141 @@ function OrderTab() {
         {tx.status === 'submitting' ? '⟳ Submitting…' : isBuy ? '▲ Place Buy Order' : '▼ Place Sell Order'}
       </button>
       <TransactionStatus status={tx.status} tempTxId={tx.tempTxId} onChainTxId={tx.onChainTxId} error={tx.error} onDismiss={tx.reset} />
+    </div>
+  )
+}
+
+
+// ── Cancel Tab ────────────────────────────────────────────────
+function CancelTab() {
+  const wallet = useWallet() as any
+  const { connected, requestRecords, decrypt, execute } = wallet
+  const userAddress: string = wallet.address ?? wallet.publicKey ?? ''
+  const tx = useTransaction()
+  const assetTx = useTransaction()
+
+  const [orders,       setOrders]       = useState<any[]>([])
+  const [assetRecords, setAssetRecords] = useState<any[]>([])
+  const [escrows,      setEscrows]      = useState<any[]>([])
+  const [loading,      setLoading]      = useState(false)
+  const selectClass = "w-full bg-black/30 border border-cyan-400/15 text-white text-xs rounded-xl px-3 py-2 font-mono"
+  const outlineBtn  = "w-full py-2.5 text-xs font-mono border border-cyan-400/30 text-cyan-400 rounded-xl hover:bg-cyan-400/10 disabled:opacity-40 transition-colors"
+
+  const loadOrders = async () => {
+    if (!requestRecords || !decrypt) return
+    setLoading(true)
+    try {
+      const raw = await requestRecords(PROGRAM_ID, true) as any[]
+      const commitments: any[] = []
+      const escrowList: any[]  = []
+      const assetList:  any[]  = []
+      for (const r of raw) {
+        if (r.spent) continue
+        try {
+          const pt = await decrypt(r.recordCiphertext)
+          if (r.recordName === 'OrderCommitment') {
+            const dir   = pt.includes('direction:true') ? 'BUY' : 'SELL'
+            const asset = parseInt(pt.match(/asset_id:(\d+)u8/)?.[1] ?? '0')
+            const size  = pt.match(/size:(\d+)u64/)?.[1] ?? '0'
+            const price = pt.match(/limit_price:(\d+)u64/)?.[1] ?? '0'
+            const nonce = pt.match(/nonce:(\S+)field/)?.[1] ?? ''
+            commitments.push({ dir, asset, size: BigInt(size), price: BigInt(price), nonce: nonce + 'field', plaintext: pt, ciphertext: r.recordCiphertext })
+          } else if (r.recordName === 'AssetEscrowReceipt') {
+            const asset  = parseInt(pt.match(/asset_id:(\d+)u8/)?.[1] ?? '0')
+            const amount = pt.match(/amount:(\d+)u64/)?.[1] ?? '0'
+            const nonce  = pt.match(/order_nonce:(\S+)field/)?.[1] ?? ''
+            escrowList.push({ asset, amount: BigInt(amount), nonce: nonce + 'field', plaintext: pt })
+          } else if (r.recordName === 'AssetRecord') {
+            const asset  = parseInt(pt.match(/asset_id:(\d+)u8/)?.[1] ?? '0')
+            const amount = pt.match(/amount:(\d+)u64/)?.[1] ?? '0'
+            if (BigInt(amount) > 0n) assetList.push({ asset, amount: BigInt(amount), plaintext: pt })
+          }
+        } catch {}
+      }
+      setOrders(commitments)
+      setEscrows(escrowList)
+      setAssetRecords(assetList)
+    } finally { setLoading(false) }
+  }
+
+  const cancelBuy = async (order: any) => {
+    await tx.execute({ program: PROGRAM_ID, function: 'cancel_buy_order', inputs: [order.plaintext], fee: 3_000_000, privateFee: false })
+  }
+
+  const cancelSell = async (order: any) => {
+    // For sell: need OrderCommitment — just cancel_order (marks nonce consumed)
+    await tx.execute({ program: PROGRAM_ID, function: 'cancel_order', inputs: [order.plaintext], fee: 3_000_000, privateFee: false })
+  }
+
+  const cancelAndRefund = async (order: any) => {
+    // For sell with escrow: need AssetRecord + AssetEscrowReceipt
+    const escrow = escrows.find(e => e.nonce === order.nonce)
+    const asset  = assetRecords.find(a => a.asset === order.asset && a.amount === escrow?.amount)
+    if (!escrow || !asset) { alert('Could not find matching escrow receipt and asset record. Load records first.'); return }
+    await assetTx.execute({ program: PROGRAM_ID, function: 'cancel_and_refund_asset', inputs: [asset.plaintext, escrow.plaintext], fee: 3_000_000, privateFee: false })
+  }
+
+  const buys  = orders.filter(o => o.dir === 'BUY')
+  const sells = orders.filter(o => o.dir === 'SELL')
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex justify-between items-center">
+        <span className="text-slate-500 text-xs uppercase tracking-widest">Open Orders</span>
+        <button onClick={loadOrders} disabled={!connected || loading} className="text-xs text-cyan-400 hover:text-cyan-300 disabled:opacity-40 transition-colors">{loading ? '⟳ Loading…' : '↓ Load from Shield'}</button>
+      </div>
+
+      {orders.length === 0 && !loading && (
+        <div className="text-slate-500 text-xs text-center py-8 border border-cyan-400/10 rounded-xl">No open orders found — click Load</div>
+      )}
+
+      {buys.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <span className="text-cyan-300 text-xs uppercase tracking-widest">Buy Orders</span>
+          {buys.map((o, i) => (
+            <div key={i} className="bg-white/[0.03] border border-cyan-400/10 rounded-xl p-3 text-xs flex flex-col gap-2">
+              <div className="flex justify-between items-center">
+                <span className="text-cyan-300 font-bold">▲ BUY {ASSETS[o.asset] ?? `asset_${o.asset}`}</span>
+                <span className="text-slate-500 font-mono">{o.nonce.slice(0,10)}…</span>
+              </div>
+              <div className="flex justify-between"><span className="text-slate-500">Size</span><span>{fmtAsset(o.size)} {ASSETS[o.asset]}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">Limit price</span><span>{fmtPrice(o.price)} USDCx</span></div>
+              <button onClick={() => cancelBuy(o)} disabled={tx.status === 'submitting' || tx.status === 'pending'} className={outlineBtn}>
+                {tx.status === 'submitting' ? '⟳ Cancelling…' : tx.status === 'pending' ? '⟳ Confirming…' : '✕ Cancel Buy Order'}
+              </button>
+              <TransactionStatus status={tx.status} tempTxId={tx.tempTxId} onChainTxId={tx.onChainTxId} error={tx.error} onDismiss={tx.reset} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {sells.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <span className="text-red-400 text-xs uppercase tracking-widest">Sell Orders</span>
+          {sells.map((o, i) => {
+            const hasEscrow = escrows.some(e => e.nonce === o.nonce)
+            return (
+              <div key={i} className="bg-white/[0.03] border border-red-400/10 rounded-xl p-3 text-xs flex flex-col gap-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-red-400 font-bold">▼ SELL {ASSETS[o.asset] ?? `asset_${o.asset}`}</span>
+                  <span className="text-slate-500 font-mono">{o.nonce.slice(0,10)}…</span>
+                </div>
+                <div className="flex justify-between"><span className="text-slate-500">Size</span><span>{fmtAsset(o.size)} {ASSETS[o.asset]}</span></div>
+                <div className="flex justify-between"><span className="text-slate-500">Limit price</span><span>{fmtPrice(o.price)} USDCx</span></div>
+                {hasEscrow
+                  ? <button onClick={() => cancelAndRefund(o)} disabled={assetTx.status === 'submitting' || assetTx.status === 'pending'} className={outlineBtn}>
+                      {assetTx.status === 'submitting' ? '⟳ Cancelling…' : assetTx.status === 'pending' ? '⟳ Confirming…' : '✕ Cancel & Refund Asset'}
+                    </button>
+                  : <button onClick={() => cancelSell(o)} disabled={tx.status === 'submitting' || tx.status === 'pending'} className={outlineBtn}>
+                      {tx.status === 'submitting' ? '⟳ Cancelling…' : tx.status === 'pending' ? '⟳ Confirming…' : '✕ Cancel Sell Order'}
+                    </button>
+                }
+                <TransactionStatus status={hasEscrow ? assetTx.status : tx.status} tempTxId={hasEscrow ? assetTx.tempTxId : tx.tempTxId} onChainTxId={hasEscrow ? assetTx.onChainTxId : tx.onChainTxId} error={hasEscrow ? assetTx.error : tx.error} onDismiss={hasEscrow ? assetTx.reset : tx.reset} />
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -448,11 +583,9 @@ function ToolsTab() {
   const { records, loading: recLoading, load: loadRec } = useAssetRecords()
   const mintTx = useTransaction()
   const depTx  = useTransaction()
-  const credTx = useTransaction()
 
   const [mintAssetId, setMintAssetId] = useState(0)
   const [depAmount,   setDepAmount]   = useState('')
-  const [depNonce,    setDepNonce]    = useState('')
   const [depSelected, setDepSelected] = useState('')
 
   const claimAsset = async () => {
@@ -461,9 +594,9 @@ function ToolsTab() {
   }
 
   const depositAsset = async () => {
-    if (!connected || !depSelected || !depAmount || !depNonce) return
+    if (!connected || !depSelected || !depAmount) return
     const amountNum = BigInt(Math.floor(parseFloat(depAmount) * 1_000_000))
-    await depTx.execute({ program: PROGRAM_ID, function: 'deposit_asset', inputs: buildDepositAssetInputs({ assetRecord: norm(depSelected), amount: amountNum, orderNonce: depNonce, operatorAddress: OPERATOR_ADDRESS }), fee: 3_000_000, privateFee: false })
+    await depTx.execute({ program: PROGRAM_ID, function: 'deposit_asset', inputs: buildDepositAssetInputs({ assetRecord: norm(depSelected), amount: amountNum, salt: randomField(), operatorAddress: OPERATOR_ADDRESS }), fee: 3_000_000, privateFee: false })
   }
 
   const sectionClass = "flex flex-col gap-3"
@@ -495,36 +628,19 @@ function ToolsTab() {
             : <select value={depSelected} onChange={e => setDepSelected(e.target.value)} className={selectClass}><option value="">— select record —</option>{records.filter(r => r.amount > 0n).map((r,i) => <option key={i} value={r.plaintext}>{r.label}</option>)}</select>}
         </div>
         <InputRow label="Amount to escrow" value={depAmount} onChange={setDepAmount} token="units" placeholder="1.000000" />
-        <div>
-          <label className="text-slate-500 text-xs uppercase tracking-widest block mb-1">Order nonce <span className="normal-case text-slate-600">(auto-linked to sell order via bot)</span></label>
-          <div className="flex gap-2">
-            <input type="text" value={depNonce} onChange={e => setDepNonce(e.target.value)} placeholder="click Generate →"
-              className="flex-1 bg-black/30 border border-cyan-400/15 text-white text-xs rounded-xl px-3 py-2 font-mono outline-none focus:border-cyan-400/50" />
-            <button onClick={() => setDepNonce(randomField())} className="px-3 py-2 text-xs text-cyan-400 border border-cyan-400/40 rounded-xl hover:bg-cyan-400/10 transition-colors whitespace-nowrap">Generate</button>
-          </div>
-        </div>
-        <button onClick={depositAsset} disabled={!connected || !depSelected || !depAmount || !depNonce || depTx.status === 'submitting' || depTx.status === 'pending'} className={outlineBtn}>
+        <button onClick={depositAsset} disabled={!connected || !depSelected || !depAmount || depTx.status === 'submitting' || depTx.status === 'pending'} className={outlineBtn}>
           {depTx.status === 'submitting' ? '⟳ Depositing…' : depTx.status === 'pending' ? '⟳ Confirming…' : '↓ Deposit Asset'}
         </button>
         <TransactionStatus status={depTx.status} tempTxId={depTx.tempTxId} onChainTxId={depTx.onChainTxId} error={depTx.error} onDismiss={depTx.reset} />
       </div>
 
-      <div className={sectionClass}>
-        <div className={headerClass}>USDCx Credentials <span className="text-slate-500 ml-2">refresh for settlement</span></div>
-        <p className="text-xs text-slate-400 leading-relaxed">Credentials must match the current on-chain freeze list root. If settlement fails, refresh here.</p>
-        <button onClick={() => credTx.execute({ program: 'test_usdcx_stablecoin.aleo', function: 'get_credentials', inputs: [], fee: 3_000_000, privateFee: false })}
-          disabled={!connected || credTx.status === 'submitting' || credTx.status === 'pending'} className={outlineBtn}>
-          {credTx.status === 'submitting' ? '⟳ Submitting…' : credTx.status === 'pending' ? '⟳ Confirming…' : '🔑 Get Fresh Credentials'}
-        </button>
-        <TransactionStatus status={credTx.status} tempTxId={credTx.tempTxId} onChainTxId={credTx.onChainTxId} error={credTx.error} onDismiss={credTx.reset} />
-      </div>
     </div>
   )
 }
 
 // ── App ───────────────────────────────────────────────────────
 export default function App() {
-  const [tab, setTab] = useState<DarkpoolTab>('order')
+  const [tab, setTab] = useState<DarkpoolTab>(window.location.hash === '#operator' ? 'operator' : 'order')
   const [blockHeight, setBlockHeight] = useState<number | null>(null)
 
   useEffect(() => {
@@ -536,7 +652,7 @@ export default function App() {
     { id: 'order',    label: 'Order'    },
     { id: 'receipts', label: 'Receipts' },
     { id: 'tools',    label: 'Tools'    },
-    { id: 'operator', label: 'Operator' },
+    { id: 'cancel',   label: 'Cancel'   },
   ]
 
   return (
@@ -549,6 +665,7 @@ export default function App() {
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
           <div className="mb-8">
             <h2 className="text-2xl font-bold text-white tracking-tight">ZK <span className="text-cyan-400">Darkpool</span></h2>
+            <h2>Sellers must (1) mint test records, (2) deposit in escrow and (3) place sell order</h2>
             <p className="text-slate-400 text-sm mt-1">Uniform clearing price batch auction · ZK-encrypted orders · 0.10% fee</p>
           </div>
 
@@ -603,6 +720,7 @@ export default function App() {
                   {tab === 'receipts' && <ReceiptsTab />}
                   {tab === 'tools'    && <ToolsTab    />}
                   {tab === 'operator' && <OperatorTab />}
+                  {tab === 'cancel'   && <CancelTab   />}
                 </div>
               </div>
             </div>

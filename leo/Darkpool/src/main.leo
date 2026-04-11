@@ -1,3 +1,4 @@
+
 // ============================================================
 // zkdarkpool_v5.aleo — Leo 4.0
 // Privacy-preserving batch auction dark pool
@@ -15,7 +16,7 @@
 //     1. AssetRecord[escrowed] → user wallet  (user's copy)
 //     2. AssetRecord[change]   → user wallet  (remainder)
 //     3. AssetEscrowReceipt    → user wallet  (receipt)
-//     4. DepositAuth           → operator     (escrowed amount + nonce)
+//     4. DepositAuth           → operator     (escrowed amount, no nonce)
 //
 //   settle_match signature changes:
 //     BEFORE: (OrderCommitment, OrderCommitment, Token, Credentials, AssetRecord, ...)
@@ -60,7 +61,7 @@ final fn accrue_fee(fee: u64) {
 import test_usdcx_stablecoin.aleo;
 
 
-program zkdarkpool_v5.aleo {
+program zkdarkpool_v8.aleo {
 
 
     // --------------------------------------------------------
@@ -134,11 +135,10 @@ program zkdarkpool_v5.aleo {
 
     // Operator's copy of escrowed asset — used in settle_match sell side
     record DepositAuth {
-        owner:       address,   // operator
-        user:        address,   // seller (asset owner)
-        order_nonce: field,     // must match sell OrderAuth.order_nonce
-        asset_id:    u8,
-        amount:      u64,       // escrowed amount
+        owner:    address,   // operator
+        user:     address,   // seller (asset owner)
+        asset_id: u8,
+        amount:   u64,       // escrowed amount
     }
 
 
@@ -182,7 +182,7 @@ program zkdarkpool_v5.aleo {
     fn deposit_asset(
         input:            AssetRecord,
         amount:           u64,
-        order_nonce:      field,
+        salt:             field,
         operator_address: address,
     ) -> (AssetRecord, AssetRecord, AssetEscrowReceipt, DepositAuth) {
         let caller: address = self.caller;
@@ -204,21 +204,19 @@ program zkdarkpool_v5.aleo {
             amount:   input.amount - amount,
         };
 
-        // User's receipt — proof of deposit, used for cancel_and_refund_asset
+        // User's receipt — salt used as nonce for cancel_and_refund_asset
         let receipt: AssetEscrowReceipt = AssetEscrowReceipt {
             owner:       caller,
             asset_id:    input.asset_id,
             amount,
-            order_nonce,
+            order_nonce: salt,
         };
 
-        // Operator's auth — used as input to settle_match sell side
-        // Eliminates need for user to hand over AssetRecord off-chain
+        // Operator's auth — no order_nonce, matched by user+asset_id at settle time
         let deposit_auth: DepositAuth = DepositAuth {
-            owner:       operator_address,
-            user:        caller,
-            order_nonce,
-            asset_id:    input.asset_id,
+            owner:    operator_address,
+            user:     caller,
+            asset_id: input.asset_id,
             amount,
         };
 
@@ -327,6 +325,24 @@ program zkdarkpool_v5.aleo {
 
 
     // --------------------------------------------------------
+    // cancel_and_refund_token
+    // Buyer cancels their buy order — no escrowed asset to refund
+    // (USDCx is only transferred at settle time, never escrowed)
+    // Just marks the order nonce as consumed so it cannot be settled
+    // --------------------------------------------------------
+    fn cancel_buy_order(order: OrderCommitment) -> Final {
+        assert_eq(order.owner, self.caller);
+        assert(order.direction == true);  // must be a buy order
+        let nonce: field = order.nonce;
+        return final {
+            let consumed: bool = Mapping::get_or_use(order_consumed, nonce, false);
+            assert(!consumed);
+            Mapping::set(order_consumed, nonce, true);
+        };
+    }
+
+
+    // --------------------------------------------------------
     // settle_match  ← KEY CHANGE
     // Operator passes OrderAuth + DepositAuth instead of
     // user's OrderCommitment + AssetRecord
@@ -363,8 +379,7 @@ program zkdarkpool_v5.aleo {
         assert(sell_auth.direction == false);
 
         // Deposit auth must match sell order nonce
-        assert_eq(deposit_auth.order_nonce, sell_auth.order_nonce);
-        assert_eq(deposit_auth.user,        sell_auth.user);
+        assert_eq(deposit_auth.user,     sell_auth.user);
 
         // Price constraints — operator cannot violate limit prices
         assert(clearing_price <= buy_auth.limit_price);
@@ -382,7 +397,9 @@ program zkdarkpool_v5.aleo {
         assert_eq(buyer_token.owner, buy_auth.user);
 
         // Cost and fee calculation
-        let gross_cost: u64 = fill_size * clearing_price;
+        // Scale: fill_size and clearing_price both have 6 decimals
+        // gross_cost in USDCx micro-units = fill_size * clearing_price / 1_000_000
+        let gross_cost: u64 = (fill_size * clearing_price) / 1_000_000u64;
         let fee:        u64 = (gross_cost * FEE_BPS) / BPS_DENOM;
 
         assert(buyer_token.amount >= gross_cost as u128);
@@ -508,8 +525,7 @@ program zkdarkpool_v5.aleo {
         assert_eq(buy_auth.asset_id,  deposit_auth.asset_id);
         assert(buy_auth.direction  == true);
         assert(sell_auth.direction == false);
-        assert_eq(deposit_auth.order_nonce, sell_auth.order_nonce);
-        assert_eq(deposit_auth.user,        sell_auth.user);
+        assert_eq(deposit_auth.user,     sell_auth.user);
         assert(clearing_price <= buy_auth.limit_price);
         assert(clearing_price >= sell_auth.limit_price);
         assert(clearing_price > 0u64);
@@ -520,7 +536,8 @@ program zkdarkpool_v5.aleo {
         assert(fill_size <= deposit_auth.amount);
         assert_eq(buyer_token.owner, buy_auth.user);
 
-        let gross_cost: u64 = fill_size * clearing_price;
+        // Scale: fill_size and clearing_price both have 6 decimals
+        let gross_cost: u64 = (fill_size * clearing_price) / 1_000_000u64;
         let fee:        u64 = (gross_cost * FEE_BPS) / BPS_DENOM;
 
         assert(buyer_token.amount >= gross_cost as u128);
@@ -592,11 +609,10 @@ program zkdarkpool_v5.aleo {
 
         // Residual deposit auth — remaining escrowed amount
         let residual_deposit_auth: DepositAuth = DepositAuth {
-            owner:       operator_address,
-            user:        sell_auth.user,
-            order_nonce: new_sell_nonce,
-            asset_id:    deposit_auth.asset_id,
-            amount:      deposit_auth.amount - fill_size,
+            owner:    operator_address,
+            user:     sell_auth.user,
+            asset_id: deposit_auth.asset_id,
+            amount:   deposit_auth.amount - fill_size,
         };
 
         let buyer_asset: AssetRecord = AssetRecord {

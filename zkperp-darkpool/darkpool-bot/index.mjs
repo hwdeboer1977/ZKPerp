@@ -61,7 +61,14 @@ async function runMatching(block) {
   isSettling = true
   try {
     for (const match of matches) {
-      const result = await settleMatch(match)
+      // 10 min timeout — WASM workers can hang silently on OOM
+      const result = await Promise.race([
+        settleMatch(match),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Settlement timeout after 10min')), 600_000))
+      ]).catch(e => {
+        console.error(`[bot] Settlement failed/timed out: ${e.message}`)
+        return { status: 'failed' }
+      })
       if (result?.status === 'confirmed') {
         totalSettled++
         console.log(`[bot] ✓ Settlement confirmed. Total: ${totalSettled}`)

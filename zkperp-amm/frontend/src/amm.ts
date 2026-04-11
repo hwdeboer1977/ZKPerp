@@ -262,7 +262,6 @@ export function buildBurnInputs(
 ): string[] {
   return [
     pos.plaintext,
-    ZERO_PROOF,
     `${pool.feeGrowth0}u128`,
     `${pool.feeGrowth1}u128`,
     `${amount0Out}u64`,

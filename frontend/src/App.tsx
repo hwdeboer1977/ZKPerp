@@ -14,6 +14,7 @@ import { TradePage } from '@/pages/TradePage';
 import { LiquidityPage } from '@/pages/LiquidityPage';
 import { SystemStatusPage } from '@/pages/SystemStatusPage';
 import { DarkpoolPage } from '@/pages/DarkpoolPage';
+import { AMMPage } from '@/pages/AMMPage';
 import { AdminPage } from '@/pages/AdminPage';
 import { useOnChainData } from '@/hooks/useOnChainData';
 import { AppLayout } from '@/components/AppLayout';
@@ -23,9 +24,6 @@ import type { PairId } from '@/config/pairs';
 import { PrivateDataProvider } from '@/contexts/PrivateDataContext';
 import { PortfolioPage } from '@/pages/PortfolioPage';
 import { CompliancePage } from '@/pages/CompliancePage';
-
-// ── TradeRoute ────────────────────────────────────────────────────────────────
-// Reads :pair, fetches that pair's oracle price, passes typed prop to TradePage.
 
 function TradeRoute() {
   const { pair } = useParams<{ pair: string }>();
@@ -48,9 +46,6 @@ function TradeRoute() {
   );
 }
 
-// ── LiquidityRoute ────────────────────────────────────────────────────────────
-// Reads :pair, fetches that pair's pool state, passes typed prop to LiquidityPage.
-
 function LiquidityRoute() {
   const { pair } = useParams<{ pair: string }>();
 
@@ -72,17 +67,14 @@ function LiquidityRoute() {
   );
 }
 
-// ── AppContent ────────────────────────────────────────────────────────────────
-// Liquidate and Admin still use BTC pool state — wire them up the same way later.
-
 function AppContent() {
   const { poolState, priceData, loading: dataLoading, refresh } = useOnChainData('btc');
   const [manualPrice] = useState<bigint | null>(null);
 
-  const currentPrice = priceData?.price ?? manualPrice ?? BigInt(10000000000000);
+  const currentPrice  = priceData?.price ?? manualPrice ?? BigInt(10000000000000);
   const poolLiquidity = poolState?.total_liquidity ?? 0n;
-  const longOI = poolState?.long_open_interest ?? 0n;
-  const shortOI = poolState?.short_open_interest ?? 0n;
+  const longOI        = poolState?.long_open_interest ?? 0n;
+  const shortOI       = poolState?.short_open_interest ?? 0n;
 
   const location = useLocation();
   if (location.pathname === '/') return <LandingPage />;
@@ -93,27 +85,24 @@ function AppContent() {
       <Header />
       <Navigation />
       <Routes>
-        {/* Trade — redirect bare /trade, dynamic pair route */}
-        <Route path="/trade" element={<Navigate to="/trade/btc" replace />} />
-        <Route path="/trade/:pair" element={<TradeRoute />} />
+        <Route path="/trade"        element={<Navigate to="/trade/btc" replace />} />
+        <Route path="/trade/:pair"  element={<TradeRoute />} />
 
-        {/* Liquidity — redirect bare /liquidity, dynamic pair route */}
-        <Route path="/liquidity" element={<Navigate to="/liquidity/btc" replace />} />
-        <Route path="/liquidity/:pair" element={<LiquidityRoute />} />
+        <Route path="/liquidity"        element={<Navigate to="/liquidity/btc" replace />} />
+        <Route path="/liquidity/:pair"  element={<LiquidityRoute />} />
 
+        <Route path="/amm"      element={<AMMPage />} />
         <Route path="/darkpool" element={<DarkpoolPage />} />
-        <Route
-          path="/status"
-          element={
-            <SystemStatusPage
-              currentPrice={currentPrice}
-              poolLiquidity={poolLiquidity}
-              longOI={longOI}
-              shortOI={shortOI}
-            />
-          }
-        />
-        {/* Whitepaper — full page, no app chrome */}
+
+        <Route path="/status" element={
+          <SystemStatusPage
+            currentPrice={currentPrice}
+            poolLiquidity={poolLiquidity}
+            longOI={longOI}
+            shortOI={shortOI}
+          />
+        } />
+
         <Route path="/whitepaper" element={
           <iframe
             src="/whitepaper.html"
@@ -122,9 +111,8 @@ function AppContent() {
           />
         } />
 
-        {/* Admin — unlisted from nav, still accessible at /admin */}
-        <Route path="/admin" element={<AdminPage />} />
-        <Route path="/portfolio" element={<PortfolioPage />} />
+        <Route path="/admin"      element={<AdminPage />} />
+        <Route path="/portfolio"  element={<PortfolioPage />} />
         <Route path="/compliance" element={<CompliancePage />} />
       </Routes>
 
@@ -150,7 +138,7 @@ function AppContent() {
           </div>
           <div className="mt-4 pt-4 border-t border-zkperp-border">
             <p className="text-center text-xs text-gray-600">
-              Aleo Testnet Beta • Contracts: zkperp_core_v26.aleo · zkperp_core_v26.aleo · zkperp_eth_v21.aleo · zkperp_sol_v21.aleo
+              Aleo Testnet Beta • Contracts: zkperp_core_v26.aleo · zkperp_eth_v21.aleo · zkperp_sol_v21.aleo
             </p>
           </div>
         </div>
@@ -168,7 +156,6 @@ function App() {
         autoConnect={false}
         network={Network.TESTNET}
         decryptPermission={DecryptPermission.UponRequest}
-        // All three pair programs registered so Shield Wallet can decrypt their records
         programs={['zkperp_core_v26.aleo', 'zkperp_compliance_v7.aleo', 'zkperp_eth_v21.aleo', 'zkperp_sol_v21.aleo', 'test_usdcx_stablecoin.aleo', 'credits.aleo']}
         onError={(error) => console.error(error.message)}
       >

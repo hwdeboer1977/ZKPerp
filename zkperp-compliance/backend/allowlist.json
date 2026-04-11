@@ -2,7 +2,8 @@
   "addresses": [
     "aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0",
     "aleo122uq924daywh5h5r3feuk2hjsa6j6w47kp79zeudhnmq5dqf8grsqgx28a",
-    "aleo1eqet6nt8g746332dsydm0xazsfnafe3ff5asmkzezdz2tyuxtszqx9rljz"
+    "aleo1eqet6nt8g746332dsydm0xazsfnafe3ff5asmkzezdz2tyuxtszqx9rljz",
+    "aleo13ykf36688w7gmgt7qllletll5pw0gww0qxwh2m9ps5lk7azlpy9s59tw4n"
   ],
   "registrations": {
     "aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0": {
@@ -14,8 +15,12 @@
       "tx_id": "at18005vg3f9h57jh3uajhffn3fc6ng53m9t37zrg8wwm7rvfcvnupqpsrac9"
     },
     "aleo1eqet6nt8g746332dsydm0xazsfnafe3ff5asmkzezdz2tyuxtszqx9rljz": {
-      "registered_at": "2026-04-10T14:03:11.372Z",
-      "tx_id": "at10gnwwt2m90j00wed3wevju6n3z90datys4qsgrz4cja73pm55upsxvylze"
+      "registered_at": "2026-04-10T14:13:21.184Z",
+      "tx_id": "at16z5g9autl99p4cwhf0rvyz3sue8z6jxatzvg3mtm0z4r870dmv9qmxuk0n"
+    },
+    "aleo13ykf36688w7gmgt7qllletll5pw0gww0qxwh2m9ps5lk7azlpy9s59tw4n": {
+      "registered_at": "2026-04-11T05:06:08.255Z",
+      "tx_id": "at1p7p39wygrgh759vmdwrd3asyhd6uvqtdzqlp822qtge9d0xqwgzsf95xxl"
     }
   }
 }

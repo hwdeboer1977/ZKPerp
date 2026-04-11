@@ -68,7 +68,7 @@ export function PortfolioPage() {
             <div className="absolute inset-0 flex items-center justify-center rounded-xl">
               <div className="text-center">
                 <div className="text-4xl mb-2">🔒</div>
-                <p className="text-sm font-semibold text-white mb-1">Coming in Wave 5</p>
+                <p className="text-sm font-semibold text-white mb-1">Coming soon!</p>
                 <p className="text-xs text-gray-400">Portfolio analytics from your decrypted records</p>
               </div>
             </div>

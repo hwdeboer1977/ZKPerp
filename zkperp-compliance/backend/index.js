@@ -28,15 +28,16 @@ function saveAllowlist(data) {
 
 let currentTree = null;
 
-async function rebuildTree(addresses, existingLeafHashes = {}) {
-  // Try cache first — instant if addresses unchanged
+// ─── Registration lock — only one registration at a time ──────────────────────
+let registrationLock = false;
+
+function rebuildTree(addresses, existingLeafHashes = {}) {
   const cached = MerkleTree.fromCache(addresses);
   if (cached) {
     currentTree = cached;
     return currentTree;
   }
-  // Build from scratch — only for new/changed allowlist
-  currentTree = await MerkleTree.build(addresses, existingLeafHashes);
+  currentTree = MerkleTree.build(addresses, existingLeafHashes);
   return currentTree;
 }
 
@@ -49,10 +50,8 @@ async function startup() {
     return;
   }
 
-  // Rebuild tree (from cache if possible)
   rebuildTree(data.addresses);
 
-  // Sync on-chain root if needed
   const onChainRoot = await getCurrentRootOnChain();
   if (onChainRoot !== currentTree.root) {
     console.log(`[startup] Root mismatch — syncing on-chain...`);
@@ -74,7 +73,12 @@ app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
 
 app.get('/health', (req, res) => {
   const data = loadAllowlist();
-  res.json({ status: 'ok', allowlist_count: data.addresses.length, tree_root: currentTree?.root ?? null });
+  res.json({
+    status: 'ok',
+    allowlist_count: data.addresses.length,
+    tree_root: currentTree?.root ?? null,
+    registration_locked: registrationLock,
+  });
 });
 
 app.post('/api/compliance/register', async (req, res) => {
@@ -88,7 +92,7 @@ app.post('/api/compliance/register', async (req, res) => {
     const data = loadAllowlist();
 
     if (data.addresses.includes(address)) {
-      // Already registered — return from cache
+      // Already registered — ensure tree is built and return current root
       rebuildTree(data.addresses);
       return res.json({
         status: 'already_registered',
@@ -98,22 +102,48 @@ app.post('/api/compliance/register', async (req, res) => {
       });
     }
 
-    // New address — add and rebuild
-    data.addresses.push(address);
-    data.registrations[address] = { registered_at: new Date().toISOString(), tx_id: null };
-    saveAllowlist(data);
+    // New address — acquire lock
+    if (registrationLock) {
+      return res.status(429).json({
+        error: 'Another registration is in progress. Please retry in 2 minutes.',
+      });
+    }
+    registrationLock = true;
 
-    // Pass existing leaf hashes to avoid recomputing them
-    const existingLeafHashes = currentTree?.leafHashes || {};
-    rebuildTree(data.addresses, existingLeafHashes);
-    const leafIndex = data.addresses.indexOf(address);
+    try {
+      // Add address and rebuild tree
+      data.addresses.push(address);
+      data.registrations[address] = { registered_at: new Date().toISOString(), tx_id: null };
+      saveAllowlist(data);
 
-    const txId = await updateRootOnChain(currentTree.root);
-    data.registrations[address].tx_id = txId;
-    saveAllowlist(data);
-    await waitForConfirmation(txId);
+      const existingLeafHashes = currentTree?.leafHashes || {};
+      rebuildTree(data.addresses, existingLeafHashes);
+      const leafIndex = data.addresses.indexOf(address);
 
-    res.json({ status: 'registered', root: currentTree.root, leaf_index: leafIndex, tx_id: txId });
+      // Submit update_root and wait for on-chain confirmation
+      const txId = await updateRootOnChain(currentTree.root);
+      data.registrations[address].tx_id = txId;
+      saveAllowlist(data);
+      await waitForConfirmation(txId);
+
+      // Verify on-chain root matches before returning
+      const onChainRoot = await getCurrentRootOnChain();
+      if (onChainRoot !== currentTree.root) {
+        throw new Error(`Root mismatch after confirmation: on-chain=${onChainRoot} local=${currentTree.root}`);
+      }
+
+      console.log(`[register] Root confirmed on-chain ✓ ${currentTree.root.slice(0, 20)}...`);
+
+      res.json({
+        status: 'registered',
+        root: currentTree.root,
+        leaf_index: leafIndex,
+        tx_id: txId,
+      });
+    } finally {
+      registrationLock = false;
+    }
+
   } catch (err) {
     console.error('[register]', err);
     res.status(500).json({ error: err.message });

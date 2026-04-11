@@ -12,11 +12,16 @@ export function DarkpoolPage() {
         </p>
       </div>
 
-      {/* Coming Soon badge */}
-      <div className="flex justify-center mb-12">
-        <span className="px-4 py-2 rounded-full text-sm font-semibold bg-zkperp-accent/10 border border-zkperp-accent/30 text-zkperp-accent">
-          🚧 Coming Soon in Wave 5!
-        </span>
+      {/* CTA button */}
+      <div className="flex justify-center mb-10">
+        <a
+          href="https://zk-perp-darkpool.vercel.app/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 px-8 py-4 rounded-xl bg-gradient-to-r from-cyan-400 to-violet-500 text-slate-950 font-bold text-sm uppercase tracking-widest shadow-[0_0_30px_rgba(34,211,238,0.3)] hover:shadow-[0_0_40px_rgba(34,211,238,0.5)] hover:scale-105 transition-all"
+        >
+          🌑 Launch ZK Darkpool
+        </a>
       </div>
 
       {/* Feature cards */}
@@ -73,7 +78,7 @@ export function DarkpoolPage() {
       </div>
 
       {/* Testnet reference */}
-      <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-6">
+      <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-6 mb-6">
         <h3 className="font-semibold text-white mb-2">Proof of Concept — Aleo Testnet</h3>
         <p className="text-sm text-gray-400 mb-3">
           A working proof of concept (<code className="text-zkperp-accent text-xs px-1 bg-zkperp-dark rounded">zkdarkpool_v2.aleo</code>) is already deployed on Aleo testnet with live batch auction settlement confirmed. The full UI integration is in progress.
@@ -85,6 +90,18 @@ export function DarkpoolPage() {
           className="inline-flex items-center gap-2 text-sm text-zkperp-accent hover:text-white transition-colors"
         >
           View on GitHub →
+        </a>
+      </div>
+
+      {/* Bottom CTA */}
+      <div className="flex justify-center">
+        <a
+          href="https://zk-perp-darkpool.vercel.app/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 px-8 py-4 rounded-xl bg-gradient-to-r from-cyan-400 to-violet-500 text-slate-950 font-bold text-sm uppercase tracking-widest shadow-[0_0_30px_rgba(34,211,238,0.3)] hover:shadow-[0_0_40px_rgba(34,211,238,0.5)] hover:scale-105 transition-all"
+        >
+          🌑 Launch ZK Darkpool
         </a>
       </div>
     </div>

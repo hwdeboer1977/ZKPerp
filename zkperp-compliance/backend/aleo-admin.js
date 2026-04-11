@@ -2,13 +2,39 @@ import {
   Account, ProgramManager, AleoKeyProvider, encryptProvingRequest
 } from '@provablehq/sdk';
 
-const NETWORK_URL      = process.env.ALEO_NETWORK_URL || 'https://api.explorer.provable.com/v1';
+const NETWORK_URL      = process.env.ALEO_NETWORK_URL || 'https://api.explorer.provable.com/v2';
 const PROGRAM_ID       = process.env.COMPLIANCE_PROGRAM_ID || 'zkperp_compliance_v7.aleo';
 const EXPLORER_URL     = `${NETWORK_URL}/testnet`;
 const PROVABLE_API_KEY = process.env.PROVABLE_API_KEY;
 const PROVABLE_CONSUMER_ID = process.env.PROVABLE_CONSUMER_ID;
 const PROVER_BASE      = process.env.PROVABLE_PROVING_URL?.replace(/\/prove\/?$/, '')
   || 'https://api.provable.com/prove/testnet';
+
+// ─── Retry helper ─────────────────────────────────────────────────────────────
+
+async function withRetry(fn, maxAttempts = 5, delayMs = 10000) {
+  let lastErr;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const isRetryable = err.message.includes('522') ||
+                          err.message.includes('502') ||
+                          err.message.includes('503') ||
+                          err.message.includes('504') ||
+                          err.message.includes('ECONNRESET') ||
+                          err.message.includes('fetch failed');
+      if (!isRetryable || attempt === maxAttempts) throw err;
+      console.warn(`[aleo-admin] Attempt ${attempt}/${maxAttempts} failed: ${err.message} — retrying in ${delayMs/1000}s...`);
+      // Force JWT refresh on next attempt
+      _jwt = null;
+      _jwtExpiry = 0;
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+  }
+  throw lastErr;
+}
 
 // ─── JWT ──────────────────────────────────────────────────────────────────────
 
@@ -74,7 +100,8 @@ async function executeOnChain(functionName, inputs) {
 
   if (PROVABLE_API_KEY && PROVABLE_CONSUMER_ID) {
     console.log(`[aleo-admin] Building proving request for ${functionName}...`);
-    const jwt = await getJWT();
+
+    // Build proving request once (outside retry — it's deterministic)
     const provingRequest = await pm.provingRequest({
       programName: PROGRAM_ID,
       functionName,
@@ -83,10 +110,15 @@ async function executeOnChain(functionName, inputs) {
       privateFee: false,
       broadcast: true,
     });
-    console.log(`[aleo-admin] Submitting via delegated proving...`);
-    const txId = await submitDelegated(provingRequest, jwt);
-    console.log(`[aleo-admin] tx: ${txId}`);
-    return txId;
+
+    // Retry JWT + submission on 5xx/network errors
+    return await withRetry(async () => {
+      const jwt = await getJWT();
+      console.log(`[aleo-admin] Submitting via delegated proving...`);
+      const txId = await submitDelegated(provingRequest, jwt);
+      console.log(`[aleo-admin] tx: ${txId}`);
+      return txId;
+    }, 5, 15000);
   }
 
   // Fallback: local proving
@@ -118,7 +150,7 @@ export async function unrevokeUserOnChain(address) {
   return await executeOnChain('unrevoke_user', [address]);
 }
 
-export async function waitForConfirmation(txId, timeoutMs = 120000) {
+export async function waitForConfirmation(txId, timeoutMs = 180000) {
   const start = Date.now();
   console.log(`[aleo-admin] Waiting for tx ${txId}...`);
   while (Date.now() - start < timeoutMs) {

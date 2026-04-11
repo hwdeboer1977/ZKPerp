@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { WalletMultiButton } from '@provablehq/aleo-wallet-adaptor-react-ui'
 import { getMerkleProof } from './merkleProof'
+import { useTransaction } from './useTransaction'
 import {
   fetchPoolState, computeQuote, computeMintQuote,
   buildSwapBuyInputs, buildSwapSellInputs, buildMintInputs, buildBurnInputs,
@@ -67,19 +68,19 @@ function Header() {
 }
 
 function Navigation() {
-  const ext = 'px-5 py-4 text-sm font-medium transition-all border-b-2 text-slate-400 border-transparent hover:text-white hover:border-slate-600'
+  const ext    = 'px-5 py-4 text-sm font-medium transition-all border-b-2 text-slate-400 border-transparent hover:text-white hover:border-slate-600'
   const active = 'px-5 py-4 text-sm font-medium transition-all border-b-2 text-cyan-300 border-cyan-400'
   return (
     <nav className="border-b border-cyan-400/10 bg-white/[0.02] backdrop-blur-xl">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex gap-1">
-          <a href="https://zk-perp.vercel.app/trade/btc" target="_blank" rel="noopener noreferrer" className={ext}><span className="mr-1.5">📈</span>Trade</a>
+          <a href="https://zk-perp.vercel.app/trade/btc"     target="_blank" rel="noopener noreferrer" className={ext}><span className="mr-1.5">📈</span>Trade</a>
           <a href="https://zk-perp.vercel.app/liquidity/btc" target="_blank" rel="noopener noreferrer" className={ext}><span className="mr-1.5">💧</span>Liquidity</a>
           <span className={active}><span className="mr-1.5">🔄</span>AMM</span>
-          <a href="https://zk-perp-darkpool.vercel.app/" target="_blank" rel="noopener noreferrer" className={ext}><span className="mr-1.5">🌑</span>ZK Darkpool</a>
-          <a href="https://zk-perp.vercel.app/status" target="_blank" rel="noopener noreferrer" className={ext}><span className="mr-1.5">📡</span>System Status</a>
-          <a href="https://zk-perp.vercel.app/portfolio" target="_blank" rel="noopener noreferrer" className={ext}><span className="mr-1.5">📊</span>Portfolio</a>
-          <a href="https://zk-perp.vercel.app/compliance" target="_blank" rel="noopener noreferrer" className={ext}><span className="mr-1.5">🛡️</span>Compliance</a>
+          <a href="https://zk-perp-darkpool.vercel.app/"      target="_blank" rel="noopener noreferrer" className={ext}><span className="mr-1.5">🌑</span>ZK Darkpool</a>
+          <a href="https://zk-perp.vercel.app/status"         target="_blank" rel="noopener noreferrer" className={ext}><span className="mr-1.5">📡</span>System Status</a>
+          <a href="https://zk-perp.vercel.app/portfolio"      target="_blank" rel="noopener noreferrer" className={ext}><span className="mr-1.5">📊</span>Portfolio</a>
+          <a href="https://zk-perp.vercel.app/compliance"     target="_blank" rel="noopener noreferrer" className={ext}><span className="mr-1.5">🛡️</span>Compliance</a>
         </div>
       </div>
     </nav>
@@ -91,9 +92,81 @@ function normalize(plaintext: string): string {
 }
 
 interface USDCxRecord { amount: bigint; plaintext: string; label: string }
-type Tab      = 'swap' | 'liquidity' | 'burn'
-type TxStatus = 'idle' | 'submitting' | 'done' | 'error'
+type Tab = 'swap' | 'liquidity' | 'burn'
 
+// ── Transaction status panel ──────────────────────────────────
+// Uses useTransaction hook states: submitting → pending → accepted/rejected/error
+function TxPanel({ tx }: { tx: ReturnType<typeof useTransaction> }) {
+  if (tx.status === 'idle') return null
+
+  if (tx.status === 'submitting') return (
+    <div className="mt-4 p-4 bg-white/[0.03] border border-cyan-400/10 rounded-xl text-xs text-slate-400 animate-pulse">
+      ⟳ Waiting for Shield approval…
+    </div>
+  )
+
+  if (tx.status === 'pending') return (
+    <div className="mt-4 p-4 bg-white/[0.03] border border-cyan-400/20 rounded-xl text-xs">
+      <div className="flex items-center gap-2 text-cyan-300 font-bold mb-2">
+        <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+        </svg>
+        Waiting for on-chain confirmation…
+      </div>
+      {tx.tempTxId && (
+        <div className="text-slate-500 text-xs font-mono break-all">{tx.tempTxId}</div>
+      )}
+    </div>
+  )
+
+  if (tx.status === 'accepted') return (
+    <div className="mt-4 p-4 bg-white/[0.03] border border-emerald-400/30 rounded-xl text-xs">
+      <div className="text-emerald-400 font-bold mb-1">✓ Confirmed on-chain</div>
+      <div className="text-slate-400 break-all mb-2">{tx.onChainTxId ?? tx.tempTxId}</div>
+      <a href={`https://explorer.provable.com/transaction/${tx.onChainTxId ?? tx.tempTxId}`}
+        target="_blank" rel="noreferrer" className="text-violet-400 underline">
+        View on explorer →
+      </a>
+    </div>
+  )
+
+  if (tx.status === 'rejected' || tx.status === 'failed') return (
+    <div className="mt-4 p-4 bg-white/[0.03] border border-red-400/20 rounded-xl text-xs">
+      <div className="text-red-400 font-bold mb-1">✗ Transaction {tx.status}</div>
+      <div className="text-slate-400">{tx.error}</div>
+      {(tx.onChainTxId ?? tx.tempTxId) && (
+        <a href={`https://explorer.provable.com/transaction/${tx.onChainTxId ?? tx.tempTxId}`}
+          target="_blank" rel="noreferrer" className="text-violet-400 underline mt-1 block">
+          View on explorer →
+        </a>
+      )}
+    </div>
+  )
+
+  // error state
+  return (
+    <div className="mt-4 p-4 bg-white/[0.03] border border-red-400/20 rounded-xl text-xs">
+      <div className="text-red-400 font-bold mb-1">✗ Error</div>
+      <div className="text-slate-400">{tx.error}</div>
+    </div>
+  )
+}
+
+function inputRow(label: string, value: string, onChange: (v: string) => void, token: string, readOnly = false) {
+  return (
+    <div>
+      <label className="text-slate-500 text-xs uppercase tracking-widest block mb-1">{label}</label>
+      <div className="flex bg-black/30 border border-cyan-400/15 rounded-xl focus-within:border-cyan-400/50 transition-colors overflow-hidden">
+        <input type="number" value={value} onChange={e => onChange(e.target.value)} readOnly={readOnly} placeholder="0.00"
+          className="flex-1 bg-transparent text-white text-xl font-light px-4 py-3 outline-none" />
+        <span className="px-4 flex items-center text-slate-500 text-xs font-bold border-l border-cyan-400/10">{token}</span>
+      </div>
+    </div>
+  )
+}
+
+// ── Hooks ─────────────────────────────────────────────────────
 function useUSDCxRecords() {
   const { requestRecords, decrypt } = useWallet()
   const [records, setRecords] = useState<USDCxRecord[]>([])
@@ -137,48 +210,17 @@ function useLPPositions() {
   return { positions, loading, load }
 }
 
-function TxPanel({ status, txId, error }: { status: TxStatus; txId: string; error: string }) {
-  if (status === 'idle') return null
-  if (status === 'submitting') return <div className="mt-4 p-4 bg-white/[0.03] border border-cyan-400/10 rounded-xl text-xs text-slate-400 animate-pulse">⟳ Waiting for Shield approval…</div>
-  if (status === 'done') return (
-    <div className="mt-4 p-4 bg-white/[0.03] border border-cyan-400/20 rounded-xl text-xs">
-      <div className="text-cyan-300 font-bold mb-1">✓ Submitted</div>
-      <div className="text-slate-400 break-all mb-2">{txId}</div>
-      <a href={`https://explorer.provable.com/transaction/${txId}`} target="_blank" rel="noreferrer" className="text-violet-400 underline">View on explorer →</a>
-    </div>
-  )
-  return (
-    <div className="mt-4 p-4 bg-white/[0.03] border border-red-400/20 rounded-xl text-xs">
-      <div className="text-red-400 font-bold mb-1">✗ Error</div>
-      <div className="text-slate-400">{error}</div>
-    </div>
-  )
-}
-
-function inputRow(label: string, value: string, onChange: (v: string) => void, token: string, readOnly = false) {
-  return (
-    <div>
-      <label className="text-slate-500 text-xs uppercase tracking-widest block mb-1">{label}</label>
-      <div className="flex bg-black/30 border border-cyan-400/15 rounded-xl focus-within:border-cyan-400/50 transition-colors overflow-hidden">
-        <input type="number" value={value} onChange={e => onChange(e.target.value)} readOnly={readOnly} placeholder="0.00"
-          className="flex-1 bg-transparent text-white text-xl font-light px-4 py-3 outline-none" />
-        <span className="px-4 flex items-center text-slate-500 text-xs font-bold border-l border-cyan-400/10">{token}</span>
-      </div>
-    </div>
-  )
-}
-
+// ── Swap tab ──────────────────────────────────────────────────
 function SwapTab({ pool }: { pool: PoolState | null }) {
-  const { connected, executeTransaction } = useWallet() as any
+  const { connected } = useWallet()
+  const tx = useTransaction()
   const { records, loading: recLoading, load: loadRecs } = useUSDCxRecords()
   const [direction, setDirection] = useState<'buy'|'sell'>('buy')
   const [amountIn, setAmountIn] = useState('')
   const [quote, setQuote] = useState<SwapQuote | null>(null)
   const [selected, setSelected] = useState('')
-  const [status, setStatus] = useState<TxStatus>('idle')
-  const [txId, setTxId] = useState('')
-  const [txError, setTxError] = useState('')
   const isBuy = direction === 'buy'
+  const busy = tx.status === 'submitting' || tx.status === 'pending'
 
   useEffect(() => { if (records.length > 0 && !selected) setSelected(records[0].plaintext) }, [records])
   useEffect(() => {
@@ -188,13 +230,9 @@ function SwapTab({ pool }: { pool: PoolState | null }) {
 
   const swap = async () => {
     if (!quote) return
-    setStatus('submitting'); setTxError('')
-    try {
-      const mp = await getMerkleProof(USDCX_ID, '')
-      const inputs = isBuy ? buildSwapBuyInputs(quote, normalize(selected), mp) : buildSwapSellInputs(quote)
-      const result = await executeTransaction({ program: PROGRAM_ID, function: isBuy ? 'swap_buy' : 'swap_sell', inputs, fee: 5_000_000, privateFee: false })
-      setTxId(result?.transactionId || 'submitted'); setStatus('done')
-    } catch (e: any) { setTxError(e.message); setStatus('error') }
+    const mp = await getMerkleProof(USDCX_ID, '')
+    const inputs = isBuy ? buildSwapBuyInputs(quote, normalize(selected), mp) : buildSwapSellInputs(quote)
+    await tx.execute({ program: PROGRAM_ID, function: isBuy ? 'swap_buy' : 'swap_sell', inputs, fee: 5_000_000, privateFee: false })
   }
 
   const outAmt = quote ? (isBuy ? formatAleo(quote.amountOut) : formatUsdc(quote.amountOut)) : ''
@@ -203,7 +241,7 @@ function SwapTab({ pool }: { pool: PoolState | null }) {
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-2">
         {(['buy','sell'] as const).map(d => (
-          <button key={d} onClick={() => { setDirection(d); setAmountIn(''); setQuote(null) }}
+          <button key={d} onClick={() => { setDirection(d); setAmountIn(''); setQuote(null); tx.reset() }}
             className={`py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${direction===d ? (d==='buy' ? 'bg-cyan-400/10 text-cyan-300 border border-cyan-400/50' : 'bg-red-400/10 text-red-400 border border-red-400/50') : 'bg-white/[0.03] border border-cyan-400/10 text-slate-400 hover:text-white'}`}>
             {d === 'buy' ? '▲ Buy ALEO' : '▼ Sell ALEO'}
           </button>
@@ -228,26 +266,26 @@ function SwapTab({ pool }: { pool: PoolState | null }) {
           }
         </div>
       )}
-      <button onClick={swap} disabled={!quote || !connected || (isBuy && !selected) || status==='submitting'}
+      <button onClick={swap} disabled={!quote || !connected || (isBuy && !selected) || busy}
         className={`w-full py-4 rounded-xl text-xs font-bold uppercase tracking-widest transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg ${isBuy ? 'bg-gradient-to-r from-cyan-400 to-cyan-500 text-slate-950 hover:from-cyan-300' : 'bg-gradient-to-r from-red-500 to-red-600 text-white hover:from-red-400'}`}>
-        {status==='submitting' ? '⟳ Confirming…' : isBuy ? 'Buy ALEO' : 'Sell ALEO'}
+        {tx.status === 'submitting' ? '⟳ Approving…' : tx.status === 'pending' ? '⟳ Confirming on-chain…' : isBuy ? 'Buy ALEO' : 'Sell ALEO'}
       </button>
-      <TxPanel status={status} txId={txId} error={txError} />
+      <TxPanel tx={tx} />
     </div>
   )
 }
 
+// ── Liquidity tab ─────────────────────────────────────────────
 function LiquidityTab({ pool }: { pool: PoolState | null }) {
-  const { connected, executeTransaction } = useWallet() as any
+  const { connected } = useWallet()
+  const tx = useTransaction()
   const { records, loading: recLoading, load: loadRecs } = useUSDCxRecords()
   const [priceLo, setPriceLo] = useState('')
   const [priceHi, setPriceHi] = useState('')
   const [liqInput, setLiqInput] = useState('')
   const [selected, setSelected] = useState('')
   const [quote, setQuote] = useState<MintQuote | null>(null)
-  const [status, setStatus] = useState<TxStatus>('idle')
-  const [txId, setTxId] = useState('')
-  const [txError, setTxError] = useState('')
+  const busy = tx.status === 'submitting' || tx.status === 'pending'
 
   useEffect(() => { if (records.length > 0 && !selected) setSelected(records[0].plaintext) }, [records])
   const currentPrice = pool ? sqrtToPrice(pool.sqrtPriceX64) : null
@@ -272,13 +310,9 @@ function LiquidityTab({ pool }: { pool: PoolState | null }) {
 
   const mint = async () => {
     if (!quote || !selected) return
-    setStatus('submitting'); setTxError('')
-    try {
-      const mp = await getMerkleProof(USDCX_ID, '')
-      const inputs = buildMintInputs(quote, normalize(selected), pool!, mp)
-      const result = await executeTransaction({ program: PROGRAM_ID, function: 'mint_position', inputs, fee: 5_000_000, privateFee: false })
-      setTxId(result?.transactionId || 'submitted'); setStatus('done')
-    } catch (e: any) { setTxError(e.message); setStatus('error') }
+    const mp = await getMerkleProof(USDCX_ID, '')
+    const inputs = buildMintInputs(quote, normalize(selected), pool!, mp)
+    await tx.execute({ program: PROGRAM_ID, function: 'mint_position', inputs, fee: 5_000_000, privateFee: false })
   }
 
   return (
@@ -314,31 +348,27 @@ function LiquidityTab({ pool }: { pool: PoolState | null }) {
           : <select value={selected} onChange={e => setSelected(e.target.value)} className="w-full bg-black/30 border border-cyan-400/15 text-white text-xs rounded-xl px-3 py-2 font-mono"><option value="">— select —</option>{records.map((r,i) => <option key={i} value={r.plaintext}>{r.label}</option>)}</select>
         }
       </div>
-      <button onClick={mint} disabled={!quote||!selected||!connected||status==='submitting'||!pool}
+      <button onClick={mint} disabled={!quote||!selected||!connected||busy||!pool}
         className="w-full py-4 rounded-xl text-xs font-bold uppercase tracking-widest bg-gradient-to-r from-violet-500 to-violet-600 text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed hover:from-violet-400 shadow-lg">
-        {status==='submitting' ? '⟳ Confirming…' : 'Add Liquidity'}
+        {tx.status === 'submitting' ? '⟳ Approving…' : tx.status === 'pending' ? '⟳ Confirming on-chain…' : 'Add Liquidity'}
       </button>
-      <TxPanel status={status} txId={txId} error={txError} />
+      <TxPanel tx={tx} />
     </div>
   )
 }
 
+// ── Burn tab ──────────────────────────────────────────────────
 function BurnTab({ pool }: { pool: PoolState | null }) {
-  const { connected, executeTransaction } = useWallet() as any
+  const { connected } = useWallet()
+  const tx = useTransaction()
   const { positions, loading: posLoading, load: loadPos } = useLPPositions()
   const [selected, setSelected] = useState<LPPosition | null>(null)
-  const [status, setStatus] = useState<TxStatus>('idle')
-  const [txId, setTxId] = useState('')
-  const [txError, setTxError] = useState('')
+  const busy = tx.status === 'submitting' || tx.status === 'pending'
 
   const burn = async () => {
     if (!selected || !pool) return
-    setStatus('submitting'); setTxError('')
-    try {
-      const inputs = buildBurnInputs({ ...selected, plaintext: normalize(selected.plaintext) }, pool, 0n, 0n)
-      const result = await executeTransaction({ program: PROGRAM_ID, function: 'burn_position', inputs, fee: 5_000_000, privateFee: false })
-      setTxId(result?.transactionId || 'submitted'); setStatus('done')
-    } catch (e: any) { setTxError(e.message); setStatus('error') }
+    const inputs = buildBurnInputs({ ...selected, plaintext: normalize(selected.plaintext) }, pool, 0n, 0n)
+    await tx.execute({ program: PROGRAM_ID, function: 'burn_position', inputs, fee: 5_000_000, privateFee: false })
   }
 
   return (
@@ -357,15 +387,16 @@ function BurnTab({ pool }: { pool: PoolState | null }) {
           ))}
         </div>
       )}
-      <button onClick={burn} disabled={!selected||!connected||!pool||status==='submitting'}
+      <button onClick={burn} disabled={!selected||!connected||!pool||busy}
         className="w-full py-4 rounded-xl text-xs font-bold uppercase tracking-widest bg-gradient-to-r from-red-500/80 to-red-600/80 text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed hover:from-red-500 shadow-lg">
-        {status==='submitting' ? '⟳ Confirming…' : 'Remove Liquidity'}
+        {tx.status === 'submitting' ? '⟳ Approving…' : tx.status === 'pending' ? '⟳ Confirming on-chain…' : 'Remove Liquidity'}
       </button>
-      <TxPanel status={status} txId={txId} error={txError} />
+      <TxPanel tx={tx} />
     </div>
   )
 }
 
+// ── App ───────────────────────────────────────────────────────
 export default function App() {
   const [pool, setPool] = useState<PoolState | null>(null)
   const [poolLoading, setPL] = useState(false)
@@ -389,11 +420,10 @@ export default function App() {
             <p className="text-slate-400 text-sm mt-1">USDCx / ALEO · Uniswap v3-style concentrated liquidity · 0.3% fee</p>
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Pool stats */}
             <div className="lg:col-span-1 flex flex-col gap-4">
               <div className="bg-white/[0.04] border border-cyan-400/10 rounded-2xl p-5 backdrop-blur-xl">
                 <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4">Pool Stats</h3>
-                <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-0">
                   {[{ label: 'Price', value: price ? `${price.toFixed(5)} ALEO` : '—', hi: true }, { label: 'Tick', value: pool ? pool.currentTick.toString() : '—' }, { label: 'Liquidity', value: pool ? (pool.liquidity > 0n ? 'Active' : 'Empty') : '—' }, { label: 'Fee tier', value: '0.30%' }, { label: 'Pair', value: 'USDCx / ALEO' }].map(({ label, value, hi }) => (
                     <div key={label} className="flex justify-between items-center py-2 border-b border-cyan-400/5 last:border-0">
                       <span className="text-slate-500 text-xs uppercase tracking-widest">{label}</span>
@@ -411,7 +441,6 @@ export default function App() {
                 <a href="https://zk-perp.vercel.app" target="_blank" rel="noopener noreferrer" className="mt-3 block text-xs text-cyan-400/70 hover:text-cyan-300 transition-colors">← Return to ZKPerp Core</a>
               </div>
             </div>
-            {/* Trade card */}
             <div className="lg:col-span-2">
               <div className="bg-white/[0.04] border border-cyan-400/10 rounded-2xl overflow-hidden backdrop-blur-xl">
                 <div className="grid grid-cols-3 border-b border-cyan-400/10">

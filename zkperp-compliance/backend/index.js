@@ -17,9 +17,16 @@ const PORT = process.env.PORT || 3001;
 
 function loadAllowlist() {
   if (!fs.existsSync(ALLOWLIST_PATH)) {
-    fs.writeFileSync(ALLOWLIST_PATH, JSON.stringify({ addresses: [], registrations: {} }, null, 2));
+    fs.writeFileSync(ALLOWLIST_PATH, JSON.stringify({
+      addresses: [],
+      registrations: {},
+      compliance_epochs: {},  // address => { issued_under: field, issued_at: ISO }
+    }, null, 2));
   }
-  return JSON.parse(fs.readFileSync(ALLOWLIST_PATH, 'utf8'));
+  const data = JSON.parse(fs.readFileSync(ALLOWLIST_PATH, 'utf8'));
+  // Migrate old files that don't have compliance_epochs yet
+  if (!data.compliance_epochs) data.compliance_epochs = {};
+  return data;
 }
 
 function saveAllowlist(data) {
@@ -27,9 +34,6 @@ function saveAllowlist(data) {
 }
 
 let currentTree = null;
-
-// ─── Registration lock — only one registration at a time ──────────────────────
-let registrationLock = false;
 
 function rebuildTree(addresses, existingLeafHashes = {}) {
   const cached = MerkleTree.fromCache(addresses);
@@ -39,6 +43,30 @@ function rebuildTree(addresses, existingLeafHashes = {}) {
   }
   currentTree = MerkleTree.build(addresses, existingLeafHashes);
   return currentTree;
+}
+
+// ─── Called after every successful update_root on-chain ───────────────────────
+// Marks all addresses whose compliance_epochs.issued_under no longer matches
+// the new root as needing re-issuance. Does NOT invalidate their record on-chain
+// (the Leo contract does that automatically via assert_eq). This is purely a
+// server-side flag so /reissue-check can answer instantly without a chain query.
+
+function markStaleEpochs(data, newRoot) {
+  let staleCount = 0;
+  for (const address of data.addresses) {
+    const epoch = data.compliance_epochs[address];
+    if (!epoch || epoch.issued_under !== newRoot) {
+      data.compliance_epochs[address] = {
+        issued_under: null,   // null = not yet issued under current root
+        issued_at: epoch?.issued_at ?? null,
+        needs_reissuance: true,
+      };
+      staleCount++;
+    }
+  }
+  if (staleCount > 0) {
+    console.log(`[epoch] Marked ${staleCount} address(es) as needing re-issuance under root ${newRoot.slice(0, 20)}...`);
+  }
 }
 
 // ─── Startup ──────────────────────────────────────────────────────────────────
@@ -58,12 +86,28 @@ async function startup() {
     try {
       const txId = await updateRootOnChain(currentTree.root);
       await waitForConfirmation(txId);
+      markStaleEpochs(data, currentTree.root);
+      saveAllowlist(data);
       console.log(`[startup] Root synced ✓`);
     } catch (e) {
       console.warn(`[startup] Root sync failed: ${e.message}`);
     }
   } else {
     console.log(`[startup] Root matches on-chain ✓`);
+    // Repair any missing epoch entries without rotating the root
+    let repaired = false;
+    for (const address of data.addresses) {
+      const epoch = data.compliance_epochs[address];
+      if (!epoch) {
+        data.compliance_epochs[address] = {
+          issued_under: null,
+          issued_at: null,
+          needs_reissuance: true,
+        };
+        repaired = true;
+      }
+    }
+    if (repaired) saveAllowlist(data);
   }
 }
 
@@ -73,13 +117,10 @@ app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
 
 app.get('/health', (req, res) => {
   const data = loadAllowlist();
-  res.json({
-    status: 'ok',
-    allowlist_count: data.addresses.length,
-    tree_root: currentTree?.root ?? null,
-    registration_locked: registrationLock,
-  });
+  res.json({ status: 'ok', allowlist_count: data.addresses.length, tree_root: currentTree?.root ?? null });
 });
+
+// ─── Register ─────────────────────────────────────────────────────────────────
 
 app.post('/api/compliance/register', async (req, res) => {
   try {
@@ -92,63 +133,50 @@ app.post('/api/compliance/register', async (req, res) => {
     const data = loadAllowlist();
 
     if (data.addresses.includes(address)) {
-      // Already registered — ensure tree is built and return current root
       rebuildTree(data.addresses);
       return res.json({
         status: 'already_registered',
         root: currentTree.root,
         leaf_index: data.addresses.indexOf(address),
         tx_id: data.registrations[address]?.tx_id ?? null,
+        needs_reissuance: data.compliance_epochs[address]?.needs_reissuance ?? true,
       });
     }
 
-    // New address — acquire lock
-    if (registrationLock) {
-      return res.status(429).json({
-        error: 'Another registration is in progress. Please retry in 2 minutes.',
-      });
-    }
-    registrationLock = true;
+    // New address — add and rebuild
+    data.addresses.push(address);
+    data.registrations[address] = { registered_at: new Date().toISOString(), tx_id: null };
+    // New address always needs issuance
+    data.compliance_epochs[address] = { issued_under: null, issued_at: null, needs_reissuance: true };
+    saveAllowlist(data);
 
-    try {
-      // Add address and rebuild tree
-      data.addresses.push(address);
-      data.registrations[address] = { registered_at: new Date().toISOString(), tx_id: null };
-      saveAllowlist(data);
+    const existingLeafHashes = currentTree?.leafHashes || {};
+    rebuildTree(data.addresses, existingLeafHashes);
+    const leafIndex = data.addresses.indexOf(address);
 
-      const existingLeafHashes = currentTree?.leafHashes || {};
-      rebuildTree(data.addresses, existingLeafHashes);
-      const leafIndex = data.addresses.indexOf(address);
+    // Root rotated — mark all existing holders as stale
+    markStaleEpochs(data, currentTree.root);
 
-      // Submit update_root and wait for on-chain confirmation
-      const txId = await updateRootOnChain(currentTree.root);
-      data.registrations[address].tx_id = txId;
-      saveAllowlist(data);
-      await waitForConfirmation(txId);
+    const txId = await updateRootOnChain(currentTree.root);
+    data.registrations[address].tx_id = txId;
+    saveAllowlist(data);
+    await waitForConfirmation(txId);
 
-      // Verify on-chain root matches before returning
-      const onChainRoot = await getCurrentRootOnChain();
-      if (onChainRoot !== currentTree.root) {
-        throw new Error(`Root mismatch after confirmation: on-chain=${onChainRoot} local=${currentTree.root}`);
-      }
-
-      console.log(`[register] Root confirmed on-chain ✓ ${currentTree.root.slice(0, 20)}...`);
-
-      res.json({
-        status: 'registered',
-        root: currentTree.root,
-        leaf_index: leafIndex,
-        tx_id: txId,
-      });
-    } finally {
-      registrationLock = false;
-    }
-
+    res.json({
+      status: 'registered',
+      root: currentTree.root,
+      leaf_index: leafIndex,
+      tx_id: txId,
+      // Tell the frontend this address (and all others) should re-issue compliance
+      needs_reissuance: true,
+    });
   } catch (err) {
     console.error('[register]', err);
     res.status(500).json({ error: err.message });
   }
 });
+
+// ─── Proof ────────────────────────────────────────────────────────────────────
 
 app.get('/api/compliance/proof/:address', (req, res) => {
   try {
@@ -171,6 +199,74 @@ app.get('/api/compliance/proof/:address', (req, res) => {
   }
 });
 
+// ─── Reissue check — call this before every trade ────────────────────────────
+// Returns needs_reissuance: true if the address's compliance record was issued
+// under an old root and must be re-issued before trading.
+// The frontend/orchestrator should call issue_compliance again and then call
+// /api/compliance/confirm-issuance to update the server-side epoch record.
+
+app.get('/api/compliance/reissue-check/:address', async (req, res) => {
+  try {
+    const { address } = req.params;
+    const data = loadAllowlist();
+
+    if (!data.addresses.includes(address))
+      return res.status(404).json({ error: 'Address not in allowlist' });
+
+    const epoch = data.compliance_epochs[address];
+    const currentRoot = currentTree?.root ?? null;
+    const needsReissuance = !epoch || epoch.needs_reissuance || epoch.issued_under !== currentRoot;
+
+    res.json({
+      address,
+      current_root: currentRoot,
+      issued_under: epoch?.issued_under ?? null,
+      needs_reissuance: needsReissuance,
+      // If true: call issue_compliance on-chain with the proof, then POST /confirm-issuance
+      proof_endpoint: needsReissuance ? `/api/compliance/proof/${address}` : null,
+    });
+  } catch (err) {
+    console.error('[reissue-check]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Confirm issuance — call after issue_compliance tx confirms on-chain ──────
+// Body: { address, tx_id }
+// Updates compliance_epochs so reissue-check returns needs_reissuance: false.
+
+app.post('/api/compliance/confirm-issuance', async (req, res) => {
+  try {
+    const { address, tx_id } = req.body;
+    if (!address || !address.startsWith('aleo1'))
+      return res.status(400).json({ error: 'Invalid address' });
+
+    const data = loadAllowlist();
+    if (!data.addresses.includes(address))
+      return res.status(404).json({ error: 'Address not in allowlist' });
+
+    const currentRoot = currentTree?.root ?? null;
+    if (!currentRoot)
+      return res.status(503).json({ error: 'Tree not initialized' });
+
+    data.compliance_epochs[address] = {
+      issued_under: currentRoot,
+      issued_at: new Date().toISOString(),
+      needs_reissuance: false,
+      tx_id: tx_id ?? null,
+    };
+    saveAllowlist(data);
+
+    console.log(`[epoch] ${address.slice(0, 16)}... confirmed issuance under root ${currentRoot.slice(0, 20)}...`);
+    res.json({ status: 'ok', issued_under: currentRoot });
+  } catch (err) {
+    console.error('[confirm-issuance]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Status ───────────────────────────────────────────────────────────────────
+
 app.get('/api/compliance/status/:address', async (req, res) => {
   try {
     const { address } = req.params;
@@ -178,11 +274,16 @@ app.get('/api/compliance/status/:address', async (req, res) => {
     const isRegistered = data.addresses.includes(address);
     const isRevoked = await isRevokedOnChain(address);
     const onChainRoot = await getCurrentRootOnChain();
+    const epoch = data.compliance_epochs[address];
+    const needsReissuance = !epoch || epoch.needs_reissuance || epoch.issued_under !== currentTree?.root;
+
     res.json({
       address,
       registered: isRegistered,
       revoked: isRevoked,
-      compliant: isRegistered && !isRevoked,
+      compliant: isRegistered && !isRevoked && !needsReissuance,
+      needs_reissuance: needsReissuance,
+      issued_under: epoch?.issued_under ?? null,
       current_root: currentTree?.root ?? null,
       on_chain_root: onChainRoot,
       roots_match: currentTree?.root === onChainRoot,
@@ -194,6 +295,8 @@ app.get('/api/compliance/status/:address', async (req, res) => {
   }
 });
 
+// ─── Audit ────────────────────────────────────────────────────────────────────
+
 app.get('/api/compliance/audit/:address', async (req, res) => {
   try {
     const { address } = req.params;
@@ -203,9 +306,12 @@ app.get('/api/compliance/audit/:address', async (req, res) => {
     const isRevoked = await isRevokedOnChain(address);
     const onChainRoot = await getCurrentRootOnChain();
     const reg = data.registrations[address];
+    const epoch = data.compliance_epochs[address];
     res.json({
       proof_valid: !isRevoked,
       root_epoch: onChainRoot,
+      issued_under: epoch?.issued_under ?? null,
+      needs_reissuance: !epoch || epoch.needs_reissuance || epoch.issued_under !== onChainRoot,
       registered_at: reg?.registered_at ?? null,
       revoked: isRevoked,
       trade_details: '— hidden —',
@@ -216,6 +322,8 @@ app.get('/api/compliance/audit/:address', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ─── Revoke / Unrevoke ────────────────────────────────────────────────────────
 
 app.post('/api/compliance/revoke', async (req, res) => {
   try {
@@ -244,6 +352,8 @@ app.post('/api/compliance/unrevoke', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ─── Allowlist ────────────────────────────────────────────────────────────────
 
 app.get('/api/compliance/allowlist', (req, res) => {
   const data = loadAllowlist();

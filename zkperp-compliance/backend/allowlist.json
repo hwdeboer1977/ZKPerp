@@ -22,5 +22,27 @@
       "registered_at": "2026-04-11T05:06:08.255Z",
       "tx_id": "at1p7p39wygrgh759vmdwrd3asyhd6uvqtdzqlp822qtge9d0xqwgzsf95xxl"
     }
+  },
+  "compliance_epochs": {
+    "aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0": {
+      "issued_under": null,
+      "issued_at": null,
+      "needs_reissuance": true
+    },
+    "aleo122uq924daywh5h5r3feuk2hjsa6j6w47kp79zeudhnmq5dqf8grsqgx28a": {
+      "issued_under": null,
+      "issued_at": null,
+      "needs_reissuance": true
+    },
+    "aleo1eqet6nt8g746332dsydm0xazsfnafe3ff5asmkzezdz2tyuxtszqx9rljz": {
+      "issued_under": null,
+      "issued_at": null,
+      "needs_reissuance": true
+    },
+    "aleo13ykf36688w7gmgt7qllletll5pw0gww0qxwh2m9ps5lk7azlpy9s59tw4n": {
+      "issued_under": null,
+      "issued_at": null,
+      "needs_reissuance": true
+    }
   }
 }

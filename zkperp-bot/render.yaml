@@ -19,13 +19,13 @@ services:
       - key: FRONTEND_ORIGIN
         value: https://zk-perp.vercel.app
       - key: PROGRAM_ID
-        value: zkperp_core_v26.aleo
+        value: zkperp_core_v27.aleo
       - key: PROGRAM_ID_BTC
-        value: zkperp_core_v26.aleo
+        value: zkperp_core_v27.aleo
       - key: PROGRAM_ID_ETH
-        value: zkperp_core_eth_v26.aleo
+        value: zkperp_core_eth_v27.aleo
       - key: PROGRAM_ID_SOL
-        value: zkperp_core_sol_v26.aleo
+        value: zkperp_core_sol_v27.aleo
       - key: NETWORK
         value: testnet
       - key: NETWORK_ID

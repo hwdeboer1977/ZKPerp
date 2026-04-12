@@ -1,4 +1,4 @@
-# zkperp_oracle_v2.aleo
+# zkperp_oracle_v3.aleo
 
 On-chain 2-of-3 price quorum oracle for ZKPerp. Three independent oracle nodes each hold their own Aleo private key and submit prices independently. Quorum is enforced by the Leo program — no coordinator process, no single point of failure.
 
@@ -10,7 +10,7 @@ On-chain 2-of-3 price quorum oracle for ZKPerp. Three independent oracle nodes e
 Chainlink Feed (BTC/ETH/SOL)
         │
         ├── Relayer A (own Aleo key) ──┐
-        ├── Relayer B (own Aleo key) ──┤──▶ zkperp_oracle_v2.aleo/submit_price
+        ├── Relayer B (own Aleo key) ──┤──▶ zkperp_oracle_v3.aleo/submit_price
         └── Relayer C (own Aleo key) ──┘
                                             │
                                     2-of-3 agree on price
@@ -102,7 +102,7 @@ EVM_RPC_URL=https://mainnet.infura.io/v3/...
 EVM_RPC_URL_ARB=https://arb-mainnet.infura.io/v3/...
 
 # Oracle program name
-ORACLE_PROGRAM=zkperp_oracle_v2.aleo
+ORACLE_PROGRAM=zkperp_oracle_v3.aleo
 
 # Polling interval (ms, default 15000)
 POLL_INTERVAL_MS=15000

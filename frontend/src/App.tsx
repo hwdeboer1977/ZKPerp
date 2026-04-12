@@ -138,7 +138,7 @@ function AppContent() {
           </div>
           <div className="mt-4 pt-4 border-t border-zkperp-border">
             <p className="text-center text-xs text-gray-600">
-              Aleo Testnet Beta • Contracts: zkperp_core_v26.aleo · zkperp_core_eth_v26.aleo · zkperp_core_sol_v26.aleo
+              Aleo Testnet Beta • Contracts: zkperp_core_v27.aleo · zkperp_core_eth_v27.aleo · zkperp_core_sol_v27.aleo
             </p>
           </div>
         </div>
@@ -156,7 +156,7 @@ function App() {
         autoConnect={false}
         network={Network.TESTNET}
         decryptPermission={DecryptPermission.UponRequest}
-        programs={['zkperp_core_v26.aleo', 'zkperp_compliance_v7.aleo', 'zkperp_core_eth_v26.aleo', 'zkperp_core_sol_v26.aleo', 'test_usdcx_stablecoin.aleo', 'credits.aleo']}
+        programs={['zkperp_core_v27.aleo', 'zkperp_compliance_v7.aleo', 'zkperp_core_eth_v27.aleo', 'zkperp_core_sol_v27.aleo', 'test_usdcx_stablecoin.aleo', 'credits.aleo']}
         onError={(error) => console.error(error.message)}
       >
         <WalletModalProvider>

@@ -6,7 +6,7 @@ export type PairId = 'btc' | 'eth' | 'sol';
 
 // Oracle program — shared across all pairs
 export const ORACLE_PROGRAM_ID = 
-  import.meta.env.VITE_ORACLE_PROGRAM_ID ?? 'zkperp_oracle_v2.aleo';
+  import.meta.env.VITE_ORACLE_PROGRAM_ID ?? 'zkperp_oracle_v3.aleo';
 
 export interface PairConfig {
   id: PairId;
@@ -24,7 +24,7 @@ export const PAIRS: Record<PairId, PairConfig> = {
     id: 'btc',
     label: 'BTC/USDC',
     baseAsset: 'BTC',
-    programId: import.meta.env.VITE_PROGRAM_ID_BTC ?? 'zkperp_core_v26.aleo',
+    programId: import.meta.env.VITE_PROGRAM_ID_BTC ?? 'zkperp_core_v27.aleo',
     oracleMappingKey: '1field',   // was '0field'
     poolMappingKey: '0field',
     defaultPrice: BigInt(6_742_000_000_000),
@@ -34,7 +34,7 @@ export const PAIRS: Record<PairId, PairConfig> = {
     id: 'eth',
     label: 'ETH/USDC',
     baseAsset: 'ETH',
-    programId: import.meta.env.VITE_PROGRAM_ID_ETH ?? 'zkperp_core_eth_v26.aleo',
+    programId: import.meta.env.VITE_PROGRAM_ID_ETH ?? 'zkperp_core_eth_v27.aleo',
     oracleMappingKey: '2field',
     poolMappingKey: '0field',
     defaultPrice: BigInt(352_400_000_000),
@@ -44,7 +44,7 @@ export const PAIRS: Record<PairId, PairConfig> = {
     id: 'sol',
     label: 'SOL/USDC',
     baseAsset: 'SOL',
-    programId: import.meta.env.VITE_PROGRAM_ID_SOL ?? 'zkperp_core_sol_v26.aleo',
+    programId: import.meta.env.VITE_PROGRAM_ID_SOL ?? 'zkperp_core_sol_v27.aleo',
     oracleMappingKey: '3field',
     poolMappingKey: '0field',
     defaultPrice: BigInt(14_280_000_000),

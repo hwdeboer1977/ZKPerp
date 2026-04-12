@@ -2,20 +2,20 @@
 //
 // Separate program from core to keep the 32-call-per-transaction limit manageable.
 // Traders place limit orders here; the orchestrator bot executes them when price
-// crosses the trigger. Price reads come from zkperp_oracle_v2.aleo.
+// crosses the trigger. Price reads come from zkperp_oracle_v3.aleo.
 //
 // Flow:
 //   1. Trader calls place_limit_order — records intent, reserves PositionSlot
 //   2. Bot monitors oracle price; when triggered, calls execute_limit_order
 //   3. execute_limit_order opens the position in the target core program
-//      (zkperp_core_v26 / zkperp_eth_v26 / zkperp_sol_v26)
+//      (zkperp_core_v27 / zkperp_eth_v26 / zkperp_sol_v26)
 //   4. Trader can cancel_limit_order before execution
 //
 // Compliance required on place and cancel. Execution is orchestrator-only.
 
 import test_usdcx_stablecoin.aleo;
 import zkperp_compliance_v7.aleo;
-import zkperp_oracle_v2.aleo;
+import zkperp_oracle_v3.aleo;
 
 struct LimitOrderIdInput {
     trader: address,
@@ -153,8 +153,8 @@ program zkperp_limit_v26.aleo {
             let expected_orch: address = Mapping::get(roles, 1u8);
             assert_eq(orchestrator, expected_orch);
             // ── Oracle staleness check ──
-            let price_data: zkperp_oracle_v2.aleo::PriceData =
-                Mapping::get(zkperp_oracle_v2.aleo::oracle_prices, asset_id);
+            let price_data: zkperp_oracle_v3.aleo::PriceData =
+                Mapping::get(zkperp_oracle_v3.aleo::oracle_prices, asset_id);
             assert(block.height - price_data.timestamp <= MAX_PRICE_AGE_BLOCKS);
             // ── End oracle check ──
             Mapping::set(pending_limit_orders, order_id, true);
@@ -188,8 +188,8 @@ program zkperp_limit_v26.aleo {
         return (usdcx_compliance, collateral_token, final {
             transfer_final.run();
             // ── Oracle price trigger check ──
-            let price_data: zkperp_oracle_v2.aleo::PriceData =
-                Mapping::get(zkperp_oracle_v2.aleo::oracle_prices, auth.asset_id);
+            let price_data: zkperp_oracle_v3.aleo::PriceData =
+                Mapping::get(zkperp_oracle_v3.aleo::oracle_prices, auth.asset_id);
             assert(block.height - price_data.timestamp <= MAX_PRICE_AGE_BLOCKS);
             // Long limit: execute when price <= trigger (buying the dip)
             // Short limit: execute when price >= trigger (selling the top)

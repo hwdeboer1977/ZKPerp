@@ -88,7 +88,7 @@ ZKPerp's trust model is strictly stronger than GMX on privacy, and equivalent on
 
 ## Fix 3 — Oracle On-Chain Quorum ✅ Fully Resolved
 
-The judge noted that the 2-of-3 quorum was well-designed off-chain but appeared to collapse to a single trusted address on-chain. This has been fully resolved in `zkperp_oracle_v2.aleo`.
+The judge noted that the 2-of-3 quorum was well-designed off-chain but appeared to collapse to a single trusted address on-chain. This has been fully resolved in `zkperp_oracle_v3.aleo`.
 
 Each of the three relayers holds its own independent Aleo private key. Every `submit_price` call is a separate Aleo transaction — Ed25519 signature verification happens at the protocol level before the Leo program executes, so `self.caller` inside the program is a cryptographically verified identity, not a trust assertion.
 
@@ -96,7 +96,7 @@ The on-chain quorum logic:
 
 ```
 Relayer A (own Aleo key) ──┐
-Relayer B (own Aleo key) ──┤──▶ zkperp_oracle_v2.aleo/submit_price
+Relayer B (own Aleo key) ──┤──▶ zkperp_oracle_v3.aleo/submit_price
 Relayer C (own Aleo key) ──┘
                                 │
                         2-of-3 agree on price
@@ -130,8 +130,8 @@ The button label has been corrected. The operation decrypts private `PositionSlo
 
 ## Fix 5 — Oracle Demo Video
 
-A demo video showing the oracle relayers submitting prices and achieving quorum on-chain is included. The oracle infrastructure (`zkperp_oracle_v2.aleo` + three-relayer stack on Render) is live on testnet and observable via the Provable Explorer:
+A demo video showing the oracle relayers submitting prices and achieving quorum on-chain is included. The oracle infrastructure (`zkperp_oracle_v3.aleo` + three-relayer stack on Render) is live on testnet and observable via the Provable Explorer:
 
-`https://testnet.explorer.provable.com/program/zkperp_oracle_v2.aleo`
+`https://testnet.explorer.provable.com/program/zkperp_oracle_v3.aleo`
 
 ---

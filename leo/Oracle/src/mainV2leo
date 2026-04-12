@@ -11,7 +11,7 @@
 //   roles[2u8] = oracle node C (Aleo address)
 //   roles[3u8] = admin (can update roles)
 
-program zkperp_oracle_v2.aleo {
+program zkperp_oracle_v3.aleo {
 
     @custom
     constructor() {

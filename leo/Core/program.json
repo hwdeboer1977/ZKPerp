@@ -1,5 +1,5 @@
 {
-  "program": "zkperp_core_v26.aleo",
+  "program": "zkperp_core_v27.aleo",
   "version": "0.1.0",
   "description": "",
   "license": "MIT",
@@ -20,7 +20,7 @@
             "edition": null
         },
         {
-            "name": "zkperp_oracle_v2.aleo",
+            "name": "zkperp_oracle_v3.aleo",
             "location": "network",
             "network": "testnet",
             "path": null,

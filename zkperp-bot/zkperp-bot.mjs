@@ -4,9 +4,9 @@
  * ZKPerp Liquidation + Order Execution Bot v14
  * ====================================
  *
- * Oracle price updates are now handled by zkperp_oracle_v2.aleo directly.
+ * Oracle price updates are now handled by zkperp_oracle_v3.aleo directly.
  * This bot no longer calls update_price or receives POST /oracle/update.
- * Price is read from zkperp_oracle_v2.aleo::oracle_prices on every liquidation tick.
+ * Price is read from zkperp_oracle_v3.aleo::oracle_prices on every liquidation tick.
  *
  * All transaction proving is delegated to Provable's TEE-backed Delegated Proving Service.
  *
@@ -21,7 +21,7 @@
  *   VIEW_KEY               - Orchestrator view key (for record scanning)
  *   PROVABLE_CONSUMER_ID   - Provable API consumer ID
  *   PROVABLE_API_KEY       - Provable API key
- *   ORACLE_PROGRAM_ID      - Oracle program (default: zkperp_oracle_v2.aleo)
+ *   ORACLE_PROGRAM_ID      - Oracle program (default: zkperp_oracle_v3.aleo)
  *   ASSET_ID               - BTC_USD | ETH_USD | SOL_USD
  *   API_PORT               - HTTP port (default: 3001)
  *   FRONTEND_ORIGIN        - CORS origin (default: http://localhost:5173)
@@ -46,12 +46,12 @@ const CONFIG = {
   apiKey:     process.env.PROVABLE_API_KEY     || '',
 
   // Single program + asset — deploy one bot per market
-  // BTC bot: PROGRAM_ID=zkperp_core_v26.aleo ASSET_ID=BTC_USD
+  // BTC bot: PROGRAM_ID=zkperp_core_v27.aleo ASSET_ID=BTC_USD
   // ETH bot: PROGRAM_ID=zkperp_eth_v26.aleo  ASSET_ID=ETH_USD
   // SOL bot: PROGRAM_ID=zkperp_sol_v26.aleo  ASSET_ID=SOL_USD
   programId:       process.env.PROGRAM_ID,
   assetId:         process.env.ASSET_ID,
-  oracleProgramId: process.env.ORACLE_PROGRAM_ID || 'zkperp_oracle_v2.aleo',
+  oracleProgramId: process.env.ORACLE_PROGRAM_ID || 'zkperp_oracle_v3.aleo',
   network:         process.env.NETWORK    || 'testnet',
   networkId:       process.env.NETWORK_ID || '1',
 
@@ -74,7 +74,7 @@ const CONFIG = {
   liquidationRewardBps:    5000n,   // 0.5%
 };
 
-// Oracle asset key mapping — matches zkperp_oracle_v2.aleo markets.json
+// Oracle asset key mapping — matches zkperp_oracle_v3.aleo markets.json
 const ORACLE_ASSET_KEYS = {
   'BTC_USD': '1field',
   'ETH_USD': '2field',
@@ -205,7 +205,7 @@ async function fetchJsonPost(url, body) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ORACLE PRICE — reads from zkperp_oracle_v2.aleo
+// ORACLE PRICE — reads from zkperp_oracle_v3.aleo
 // ═══════════════════════════════════════════════════════════════
 
 async function getCurrentOraclePriceFromChain() {
@@ -1065,7 +1065,7 @@ async function liquidationTick() {
   isProcessing = true;
 
   try {
-    // Read current price from zkperp_oracle_v2.aleo
+    // Read current price from zkperp_oracle_v3.aleo
     const onChainPrice = await getCurrentOraclePriceFromChain();
     if (onChainPrice) {
       currentOraclePrice = onChainPrice;
@@ -1311,7 +1311,7 @@ async function main() {
   console.log('');
   console.log('╔════════════════════════════════════════════════════════════╗');
   console.log('║  ZKPerp Liquidation + Order Bot v14                        ║');
-  console.log('║  Oracle: zkperp_oracle_v2.aleo (2-of-3 Chainlink quorum)  ║');
+  console.log('║  Oracle: zkperp_oracle_v3.aleo (2-of-3 Chainlink quorum)  ║');
   console.log('╚════════════════════════════════════════════════════════════╝');
   console.log('');
   log('BOT', `Program:         ${CONFIG.programId}`);

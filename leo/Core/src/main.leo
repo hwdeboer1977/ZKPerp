@@ -1,6 +1,6 @@
-// ZKPerp Core v26 — oracle reads from zkperp_oracle_v2.aleo
+// ZKPerp Core v26 — oracle reads from zkperp_oracle_v3.aleo
 //
-// Price reads are now cross-program calls to zkperp_oracle_v2.aleo::oracle_prices.
+// Price reads are now cross-program calls to zkperp_oracle_v3.aleo::oracle_prices.
 // Prices are only committed there after 2-of-3 independent oracle nodes agree.
 // update_price and core's own oracle_prices mapping have been removed.
 // A staleness guard (150 blocks ≈ 5 min) is enforced on every price read.
@@ -13,7 +13,7 @@
 
 import test_usdcx_stablecoin.aleo;
 import zkperp_compliance_v7.aleo;
-import zkperp_oracle_v2.aleo;
+import zkperp_oracle_v3.aleo;
 
 struct PoolState {
     total_liquidity: u64,
@@ -43,7 +43,7 @@ struct PositionCommit {
     position_id: field,
 }
 
-program zkperp_core_v26.aleo {
+program zkperp_core_v27.aleo {
 
     @custom
     constructor() {
@@ -147,12 +147,12 @@ program zkperp_core_v26.aleo {
     // ORACLE PRICE READ HELPER
     // ══════════════════════════════════════════════════════════════
     //
-    // All price reads go through zkperp_oracle_v2.aleo::oracle_prices.
+    // All price reads go through zkperp_oracle_v3.aleo::oracle_prices.
     // Prices are committed there only after 2-of-3 oracle nodes agree.
     // Pattern used in every finalize that needs a price:
     //
-    //   let price_data: zkperp_oracle_v2.aleo::PriceData =
-    //       Mapping::get(zkperp_oracle_v2.aleo::oracle_prices, asset_id);
+    //   let price_data: zkperp_oracle_v3.aleo::PriceData =
+    //       Mapping::get(zkperp_oracle_v3.aleo::oracle_prices, asset_id);
     //   assert_eq(exit_price, price_data.price);
     //   assert(block.height - price_data.timestamp <= MAX_PRICE_AGE_BLOCKS);
 
@@ -368,8 +368,8 @@ program zkperp_core_v26.aleo {
             assert(block.height <= cr_expires_at);
             // ── End compliance ──
             // ── Oracle price check (entry) ──
-            let price_data: zkperp_oracle_v2.aleo::PriceData =
-                Mapping::get(zkperp_oracle_v2.aleo::oracle_prices, asset_id);
+            let price_data: zkperp_oracle_v3.aleo::PriceData =
+                Mapping::get(zkperp_oracle_v3.aleo::oracle_prices, asset_id);
             let price_age: u32 = block.height - price_data.timestamp;
             assert(price_age <= MAX_PRICE_AGE_BLOCKS);
             let slippage: u64 = entry_price > price_data.price
@@ -448,8 +448,8 @@ program zkperp_core_v26.aleo {
             let stored_commit: field = Mapping::get(position_commits, position_id);
             assert_eq(recomputed_commit, stored_commit);
             // ── Oracle price check ──
-            let price_data: zkperp_oracle_v2.aleo::PriceData =
-                Mapping::get(zkperp_oracle_v2.aleo::oracle_prices, asset_id);
+            let price_data: zkperp_oracle_v3.aleo::PriceData =
+                Mapping::get(zkperp_oracle_v3.aleo::oracle_prices, asset_id);
             assert_eq(exit_price, price_data.price);
             assert(block.height - price_data.timestamp <= MAX_PRICE_AGE_BLOCKS);
             // ── End oracle check ──
@@ -605,8 +605,8 @@ program zkperp_core_v26.aleo {
             let stored_commit: field = Mapping::get(position_commits, position_id);
             assert_eq(recomputed_commit, stored_commit);
             // ── Oracle price check ──
-            let price_data: zkperp_oracle_v2.aleo::PriceData =
-                Mapping::get(zkperp_oracle_v2.aleo::oracle_prices, asset_id);
+            let price_data: zkperp_oracle_v3.aleo::PriceData =
+                Mapping::get(zkperp_oracle_v3.aleo::oracle_prices, asset_id);
             assert_eq(exit_price, price_data.price);
             assert(block.height - price_data.timestamp <= MAX_PRICE_AGE_BLOCKS);
             // ── End oracle check ──
@@ -742,8 +742,8 @@ program zkperp_core_v26.aleo {
             let stored_commit: field = Mapping::get(position_commits, position_id);
             assert_eq(recomputed_commit, stored_commit);
             // ── Oracle price check ──
-            let price_data: zkperp_oracle_v2.aleo::PriceData =
-                Mapping::get(zkperp_oracle_v2.aleo::oracle_prices, asset_id);
+            let price_data: zkperp_oracle_v3.aleo::PriceData =
+                Mapping::get(zkperp_oracle_v3.aleo::oracle_prices, asset_id);
             assert_eq(exit_price, price_data.price);
             assert(block.height - price_data.timestamp <= MAX_PRICE_AGE_BLOCKS);
             // ── End oracle check ──

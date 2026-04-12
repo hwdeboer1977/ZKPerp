@@ -1,7 +1,7 @@
 {
   "name": "zkperp-oracle",
   "version": "2.0.0",
-  "description": "ZKPerp 2-of-3 oracle relay — submits Chainlink prices to zkperp_oracle_v2.aleo",
+  "description": "ZKPerp 2-of-3 oracle relay — submits Chainlink prices to zkperp_oracle_v3.aleo",
   "type": "module",
   "scripts": {
     "start": "node manager.js",

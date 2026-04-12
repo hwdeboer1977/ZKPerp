@@ -190,7 +190,7 @@ export class ProvableClient {
     const { RecordCiphertext, ViewKey } = await this._loadSdk();
     const vk  = ViewKey.from_string(viewKey);
     const ct  = RecordCiphertext.fromString(ciphertext);
-    const pt  = ct.Unshield(vk);
+    const pt  = ct.decrypt(vk);
     return pt.toString();
   }
 

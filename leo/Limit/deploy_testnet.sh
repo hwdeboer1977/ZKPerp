@@ -99,10 +99,10 @@ leo execute initialize_slots aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7e
 
 
 # ============================================================
-# 7. CHECK POSITION (decrypt record with view key)
+# 7. CHECK POSITION (Unshield record with view key)
 # ============================================================
 
-# snarkos developer decrypt \
+# snarkos developer Unshield \
 #   --view-key AViewKey1is8iPit9ftsVVkxPe5AAXWbSXbTWCkPRVZZ7v1PAjBFE \
 #   --ciphertext "<CIPHERTEXT>"
 

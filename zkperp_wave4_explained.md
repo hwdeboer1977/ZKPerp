@@ -138,7 +138,7 @@ The Provable scanner now watches all three market programs (`zkperp_btc_v21`, `z
 
 | Page | Description |
 |---|---|
-| Portfolio | Private trading summary reconstructed client-side from decrypted records. Stats (PnL, volume, win rate) blurred until Wave 5. Includes Performance Proof generator placeholder. |
+| Portfolio | Private trading summary reconstructed client-side from Unshielded records. Stats (PnL, volume, win rate) blurred until Wave 5. Includes Performance Proof generator placeholder. |
 | Compliance | Explains the ComplianceRecord ZK receipt issued by `test_usdcx_stablecoin.aleo` on every deposit. Includes Merkle allowlist flow, selective disclosure explainer, and Wave 5 audit proof generator placeholder. |
 | System Status — Oracle tab | Updated to accurately describe the live 2-of-3 Chainlink quorum setup with Relayer-A/B/C flow diagram. |
 
@@ -148,12 +148,12 @@ The Provable scanner now watches all three market programs (`zkperp_btc_v21`, `z
 - **TP/SL UX** — Take Profit and Stop Loss inputs now have labelled headers (🎯 Take Profit / 🛡️ Stop Loss) with action descriptions. Buttons are more prominent with stronger colour.
 - **Limit order slot warning** — A dynamic warning explains that placing a limit order locks the directional slot immediately and prevents concurrent positions in the same direction.
 - **Compliance Ready info card** — Added to the bottom info card row explaining ComplianceRecord generation on every deposit.
-- **Unshield panel** — Multi-line button copy now renders correctly. Added TP/SL & limit orders hint to the unshield button.
+- **Unshield panel** — Multi-line button copy now renders correctly. Added TP/SL & limit orders hint to the Unshield button.
 - **Liquidity page** — Available to Withdraw now correctly subtracts OI + 10% safety buffer. Locked breakdown shows OI and buffer separately.
 
 ### Unshield Architecture
 
-The `OrderReceipt` decryption is now part of `PrivateDataContext` — the same shared instance is used by both `PositionDisplay` (for TP/SL cancellation) and `PendingOrdersDisplay` (for the pending orders list). This eliminates the dual-instance bug where cancelling a TP would not remove it from the Pending Orders panel.
+The `OrderReceipt` Unshieldion is now part of `PrivateDataContext` — the same shared instance is used by both `PositionDisplay` (for TP/SL cancellation) and `PendingOrdersDisplay` (for the pending orders list). This eliminates the dual-instance bug where cancelling a TP would not remove it from the Pending Orders panel.
 
 ---
 
@@ -184,11 +184,11 @@ ZKPerp demonstrates that privacy and compliance are not opposites. Traders hold 
 |---|---|
 | Trusted PnL aggregation | Orchestrator submits `net_unrealized_pnl` without ZK proof of correctness. Wave 5: ZK aggregation proof over `LiquidationAuth` records. |
 | Pool TVL visible | `total_liquidity` mapping is public. Individual deposit amounts are private but TVL is observable. Wave 5: orchestrator-held pool token pattern. |
-| Trade history | No on-chain history — positions are private records that disappear when spent. Wave 5: client-side history reconstructed from decrypted records. |
+| Trade history | No on-chain history — positions are private records that disappear when spent. Wave 5: client-side history reconstructed from Unshielded records. |
 | Leaderboard / stats | No per-trader stats. Wave 5: opt-in leaderboard using public pool mappings only. |
 | Performance proofs | Placeholder UI only. Wave 5: ZK proof of trading returns without revealing positions. |
 | OI netting | Long and short OI locked independently (100% reserve factor each). Wave 5: may relax to max(long, short) + spread buffer. |
-| Compliance dashboard | Wave 5: decrypt and display ComplianceRecords from wallet, exportable audit proofs. |
+| Compliance dashboard | Wave 5: Unshield and display ComplianceRecords from wallet, exportable audit proofs. |
 
 ### Wave 5 Priority Items
 
@@ -204,11 +204,11 @@ The deeper issue is that ZKPerp is hitting the boundaries of the Leo language it
 
 **3. Compliance Dashboard**
 
-`ComplianceRecord`s have been generated silently on every deposit since the USDCx integration. Wave 5 makes them actionable: the dashboard decrypts them from the connected wallet and lets traders generate a cryptographically verifiable audit proof covering a selected date range — without revealing individual trade details. Selective disclosure: the trader controls exactly what is shown and to whom.
+`ComplianceRecord`s have been generated silently on every deposit since the USDCx integration. Wave 5 makes them actionable: the dashboard Unshields them from the connected wallet and lets traders generate a cryptographically verifiable audit proof covering a selected date range — without revealing individual trade details. Selective disclosure: the trader controls exactly what is shown and to whom.
 
 **4. Portfolio Analytics**
 
-The Portfolio page currently exists as a placeholder. Wave 5 completes it: full PnL history reconstructed client-side from decrypted records across all three markets, plus a performance proof — a ZK proof of trading returns verifiable by a third party without revealing which positions were held or at what prices.
+The Portfolio page currently exists as a placeholder. Wave 5 completes it: full PnL history reconstructed client-side from Unshielded records across all three markets, plus a performance proof — a ZK proof of trading returns verifiable by a third party without revealing which positions were held or at what prices.
 
 ---
 

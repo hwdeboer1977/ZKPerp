@@ -7,8 +7,8 @@ import { OPERATOR_PK, OPERATOR_VK, PROGRAM_ID, API, START_BLOCK } from './config
 
 let lastScannedBlock = START_BLOCK
 
-// Use private key for full decryption capability
-// View key alone cannot decrypt Leo 4.0 records in this SDK version
+// Use private key for full Unshieldion capability
+// View key alone cannot Unshield Leo 4.0 records in this SDK version
 let _account = null
 function getAccount() {
   if (!_account) {
@@ -22,17 +22,17 @@ function getAccount() {
   return _account
 }
 
-function tryDecrypt(ciphertext) {
+function tryUnshield(ciphertext) {
   try {
     const acct = getAccount()
-    const results = acct.decryptRecords([ciphertext])
+    const results = acct.UnshieldRecords([ciphertext])
     if (!results || results.length === 0) return null
     return typeof results[0] === 'string' ? results[0] : JSON.stringify(results[0])
   } catch (e) {
     // "did not match" = not our record, silently skip
     const msg = String(e)
-    if (!msg.includes('did not match') && !msg.includes('Decryption failed')) {
-      console.log(`[scanner]   decrypt error:`, msg.slice(0, 100))
+    if (!msg.includes('did not match') && !msg.includes('Unshieldion failed')) {
+      console.log(`[scanner]   Unshield error:`, msg.slice(0, 100))
     }
     return null
   }
@@ -62,7 +62,7 @@ function parseOrderRef(plaintext, txId, blockHeight) {
   } catch { return null }
 }
 
-// Detect if a decrypted record is an OrderAuth (v5) vs OperatorOrderRef (v4)
+// Detect if a Unshielded record is an OrderAuth (v5) vs OperatorOrderRef (v4)
 function isOrderAuth(pt) {
   return pt?.includes('limit_price') && pt?.includes('order_nonce') && pt?.includes('user:')
 }
@@ -107,9 +107,9 @@ function extractFromBlock(block, orders) {
         const ct = output?.value
         if (!ct?.startsWith('record1')) continue
 
-        const pt = tryDecrypt(ct)
+        const pt = tryUnshield(ct)
         if (!pt) {
-          console.log(`[scanner]   record found but not decryptable by operator view key (not ours)`)
+          console.log(`[scanner]   record found but not Unshieldable by operator view key (not ours)`)
           continue
         }
 
@@ -139,7 +139,7 @@ function extractFromBlock(block, orders) {
         // v5: OrderAuth has limit_price — use it directly for order book
         // v4: OperatorOrderRef has only nonce + direction — no price/size
         if (!pt.includes('order_nonce')) {
-          console.log(`[scanner]   decrypted but not an order ref (fields: ${pt.slice(0,80)}...)`)
+          console.log(`[scanner]   Unshielded but not an order ref (fields: ${pt.slice(0,80)}...)`)
           continue
         }
 
@@ -155,7 +155,7 @@ function extractFromBlock(block, orders) {
 }
 
 // ── Fetch real _nonce for OrderCommitment from chain ──────────
-// The OrderCommitment is encrypted to the user so we can't decrypt it,
+// The OrderCommitment is encrypted to the user so we can't Unshield it,
 // but we can read its public _nonce from the transaction outputs
 async function fetchOrderCommitmentNonce(txId, orderNonce) {
   try {
@@ -178,8 +178,8 @@ async function fetchOrderCommitmentNonce(txId, orderNonce) {
   } catch { return null }
 }
 
-// ── Fetch tx and decrypt all record outputs ────────────────────
-export async function fetchAndDecryptTx(txId) {
+// ── Fetch tx and Unshield all record outputs ────────────────────
+export async function fetchAndUnshieldTx(txId) {
   try {
     const res = await fetch(`${API}/transaction/${txId}`)
     if (!res.ok) return []
@@ -191,13 +191,13 @@ export async function fetchAndDecryptTx(txId) {
         if (output?.type !== 'record') continue
         const ct = output?.value
         if (!ct?.startsWith('record1')) continue
-        const pt = tryDecrypt(ct)
+        const pt = tryUnshield(ct)
         if (pt) results.push({ plaintext: pt, function: t.function ?? '' })
       }
     }
     return results
   } catch (e) {
-    console.warn('[scanner] fetchAndDecryptTx error:', e.message)
+    console.warn('[scanner] fetchAndUnshieldTx error:', e.message)
     return []
   }
 }

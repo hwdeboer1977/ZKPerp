@@ -53,7 +53,7 @@ export function useUnshield({
   const statusLabel = (() => {
     if (phase === 'unshielding') return '🔓 Unshielding... (approve in Shield)';
     if (phase === 'error')       return '⚠ Unshield failed — try again';
-    return '🛡️ Unshield All Private Info\n\nApprove in wallet\n&\nUnlock Private USDCx\nslots, and positions!';
+    return '🛡️ Decrypt all private info\n\nApprove in wallet\n&\nUnlock Private USDCx\nslots, and positions!';
   })();
 
   return { unshieldAll, phase, isBusy, allDecrypted, statusLabel, error, reset };

@@ -454,7 +454,7 @@ app.post('/burn', async (req) => {
   const { position_record, usdcx_proof } = req.body;
   await syncPoolState();
 
-  // Parse position from decrypted record string
+  // Parse position from Unshielded record string
   const tickLower = parseInt(position_record.match(/tick_lower:\s*(-?\d+)i32/)?.[1] || '0');
   const tickUpper = parseInt(position_record.match(/tick_upper:\s*(-?\d+)i32/)?.[1] || '0');
   const liq = BigInt(position_record.match(/liquidity:\s*(\d+)u128/)?.[1] || '0');

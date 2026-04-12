@@ -384,7 +384,7 @@
       <!-- Layer 2a: Shield Wallet -->
       <rect x="40" y="158" width="200" height="64" rx="10" fill="#e1f5ee" stroke="#0f6e56" stroke-width="0.75"/>
       <text x="140" y="182" text-anchor="middle" font-size="13" font-weight="600" fill="#085041">Shield Wallet</text>
-      <text x="140" y="200" text-anchor="middle" font-size="10" fill="#0f6e56">decrypt · sign · private records</text>
+      <text x="140" y="200" text-anchor="middle" font-size="10" fill="#0f6e56">Unshield · sign · private records</text>
 
       <!-- Layer 2b: Explorer API -->
       <rect x="440" y="158" width="200" height="64" rx="10" fill="#e1f5ee" stroke="#0f6e56" stroke-width="0.75"/>
@@ -495,10 +495,10 @@ let result: u64 = a - capped_b;</pre>
   <div class="page-wrap">
     <div class="section-header"><span class="section-num">3</span><h2>Slot Record Model</h2></div>
 
-    <p>Aleo's UTXO record model creates a unique UX problem: every blockchain operation that produces output creates a new record in the wallet. Without mitigation, a trader who makes N round-trip trades accumulates 2N records — one <code>PositionSlot</code> and one <code>LiquidationAuth</code> per trade. The wallet has no reliable way to know which records are spent without querying the chain, so on every session load it must request decryption of all N records, triggering N Shield Wallet approval popups. At 10 trades this is annoying; at 50 trades it is completely unusable.</p>
+    <p>Aleo's UTXO record model creates a unique UX problem: every blockchain operation that produces output creates a new record in the wallet. Without mitigation, a trader who makes N round-trip trades accumulates 2N records — one <code>PositionSlot</code> and one <code>LiquidationAuth</code> per trade. The wallet has no reliable way to know which records are spent without querying the chain, so on every session load it must request Unshieldion of all N records, triggering N Shield Wallet approval popups. At 10 trades this is annoying; at 50 trades it is completely unusable.</p>
 
     <h3>Root Cause: UTXO Accumulation</h3>
-    <p>Aleo records are consumed and reissued — they cannot be modified in place. Every <code>open_position</code> creates two new records (PositionSlot + LiquidationAuth). Every <code>close_position</code> consumes the PositionSlot but returns nothing, leaving the wallet to infer from the <code>closed_positions</code> mapping that the record is spent. The wallet's record scanner sees a growing list of ciphertexts and must decrypt all of them to find the live ones.</p>
+    <p>Aleo records are consumed and reissued — they cannot be modified in place. Every <code>open_position</code> creates two new records (PositionSlot + LiquidationAuth). Every <code>close_position</code> consumes the PositionSlot but returns nothing, leaving the wallet to infer from the <code>closed_positions</code> mapping that the record is spent. The wallet's record scanner sees a growing list of ciphertexts and must Unshield all of them to find the live ones.</p>
 
     <h3>Solution: Persistent Fixed-Count Slots (v12+)</h3>
     <p>ZKPerp v12 introduced the slot model: each trader initialises exactly <strong>three records</strong> once, which persist for the lifetime of their account. The record count never grows.</p>
@@ -571,18 +571,18 @@ let result: u64 = a - capped_b;</pre>
     <p>A slot can only hold one position at a time. The Leo contract asserts <code>!slot.is_open</code> inside <code>open_position</code> and <code>place_limit_order</code> — if the slot is already open, the transaction reverts. A long slot (slot_id 0) cannot hold two simultaneous long positions. This is a deliberate design constraint that trades multi-position complexity for the UX guarantee of fixed record count.</p>
 
     <h3>Spent Record Detection</h3>
-    <p>Before v12, the frontend used <code>localStorage</code> to track which records were spent — fragile and browser-dependent. v12 replaced this with the <code>closed_positions</code> on-chain mapping: a <code>field => bool</code> that is set when a position is closed or liquidated. The frontend now pre-filters records by querying this mapping before requesting wallet decryption, reducing popups to only genuinely active records.</p>
+    <p>Before v12, the frontend used <code>localStorage</code> to track which records were spent — fragile and browser-dependent. v12 replaced this with the <code>closed_positions</code> on-chain mapping: a <code>field => bool</code> that is set when a position is closed or liquidated. The frontend now pre-filters records by querying this mapping before requesting wallet Unshieldion, reducing popups to only genuinely active records.</p>
 
     <div class="callout green">
       <span class="callout-label">UX Result</span>
-      <p>After 1,000 trades, the wallet holds 3 records. Every session requires clicking <strong>Unshield All Private Info</strong> once — one Shield Wallet approval — to decrypt all 3 slots simultaneously. The UX is identical on day one and year five.</p>
+      <p>After 1,000 trades, the wallet holds 3 records. Every session requires clicking <strong>Decrypt all private info</strong> once — one Shield Wallet approval — to Unshield all 3 slots simultaneously. The UX is identical on day one and year five.</p>
     </div>
 
     <h3>Onboarding Flow</h3>
     <ol class="body-list">
       <li>New trader visits Trade page → sees <strong>Initialize Account</strong> modal</li>
       <li>Single wallet approval → <code>initialize_slots()</code> mints 3 slot records on-chain</li>
-      <li>On next visit: click <strong>🛡 Unshield All Private Info</strong> → one approval decrypts all slots</li>
+      <li>On next visit: click <strong>🛡 Decrypt all private info</strong> → one approval Unshields all slots</li>
       <li>USDCx balance, positions, and LP amount are now visible in the UI</li>
       <li>Trading and LP operations pass the slot plaintext as the first argument to each transition</li>
       <li>Every subsequent session: same 3 records, same single approval</li>
@@ -703,7 +703,7 @@ await updateNetPnl(net_pnl)  // calls update_net_pnl(net_pnl: i64) on Leo contra
     <p>Liquidation is the hardest unsolved problem in any privacy-preserving perpetual DEX. The fundamental conflict: positions are private records readable only by their owner, yet a liquidator must read the position to assess its health and must pass the record into the Leo transition to consume it. Solving this without compromising trader privacy requires a carefully designed dual-record architecture.</p>
 
     <h3>Why View Keys Are Not Enough</h3>
-    <p>An Aleo view key lets the holder decrypt and <em>read</em> records — but not <em>spend</em> them. Passing a record into a Leo transition requires consuming it on-chain, which requires the record owner's private key. Even if the orchestrator could read the trader's position via view key, it could not pass that record into <code>liquidate()</code> — the transaction would be invalid because the orchestrator does not own the record.</p>
+    <p>An Aleo view key lets the holder Unshield and <em>read</em> records — but not <em>spend</em> them. Passing a record into a Leo transition requires consuming it on-chain, which requires the record owner's private key. Even if the orchestrator could read the trader's position via view key, it could not pass that record into <code>liquidate()</code> — the transaction would be invalid because the orchestrator does not own the record.</p>
 
     <div class="table-wrap">
       <table>
@@ -1104,7 +1104,7 @@ d.aleo</code> in the bot environment</li>
     <ul class="body-list">
       <li><strong>Zero price impact for large orders</strong> — all orders at the clearing price receive the same execution, regardless of size or submission time within the window</li>
       <li><strong>Time priority eliminated</strong> — submitting 1 second before window close is as good as submitting 59 seconds before. This removes the incentive for latency arms races.</li>
-      <li><strong>No information leakage pre-settlement</strong> — only the buyer and seller know their own order details. The matcher decrypts only its own records (as the orchestrator), not other participants'.</li>
+      <li><strong>No information leakage pre-settlement</strong> — only the buyer and seller know their own order details. The matcher Unshields only its own records (as the orchestrator), not other participants'.</li>
       <li><strong>Permissionless settlement</strong> — anyone who can construct a valid proof of a matched pair can call <code>settle_match()</code>, not just the operator</li>
     </ul>
 
@@ -1348,7 +1348,7 @@ async function finalize_open_position(transfer_future: Future, ...) {
       <li>Execute a TP/SL when trigger not met — oracle condition verified in finalize layer</li>
       <li>Execute an order for a closed/liquidated position — <code>active_position_ids</code> check prevents this</li>
       <li>Steal locked margin from limit orders — margin held by the Leo program address, not the orchestrator key</li>
-      <li>Read the trader's <code>PositionSlot</code> — the orchestrator does not own this record; it cannot decrypt it</li>
+      <li>Read the trader's <code>PositionSlot</code> — the orchestrator does not own this record; it cannot Unshield it</li>
     </ul>
 
     <h3>Privacy Guarantees</h3>

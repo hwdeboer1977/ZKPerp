@@ -168,18 +168,18 @@ function inputRow(label: string, value: string, onChange: (v: string) => void, t
 
 // ── Hooks ─────────────────────────────────────────────────────
 function useUSDCxRecords() {
-  const { requestRecords, decrypt } = useWallet()
+  const { requestRecords, Unshield } = useWallet()
   const [records, setRecords] = useState<USDCxRecord[]>([])
   const [loading, setLoading] = useState(false)
   const load = useCallback(async () => {
-    if (!requestRecords || !decrypt) return
+    if (!requestRecords || !Unshield) return
     setLoading(true)
     try {
       const raw = await requestRecords(USDCX_ID, true) as any[]
       const tokens = raw.filter((r: any) => r.recordName === 'Token' && !r.spent)
       const parsed = await Promise.all(tokens.map(async (r: any) => {
         try {
-          const pt = await decrypt(r.recordCiphertext)
+          const pt = await Unshield(r.recordCiphertext)
           const m = pt.match(/amount:\s*(\d+)u128/)
           const amt = BigInt(m?.[1] ?? '0')
           return { amount: amt, plaintext: pt, label: `${(Number(amt)/1e6).toFixed(2)} USDCx` }
@@ -187,26 +187,26 @@ function useUSDCxRecords() {
       }))
       setRecords(parsed.filter((r): r is USDCxRecord => r !== null).sort((a,b) => b.amount > a.amount ? 1 : -1))
     } finally { setLoading(false) }
-  }, [requestRecords, decrypt])
+  }, [requestRecords, Unshield])
   return { records, loading, load }
 }
 
 function useLPPositions() {
-  const { requestRecords, decrypt } = useWallet()
+  const { requestRecords, Unshield } = useWallet()
   const [positions, setPositions] = useState<LPPosition[]>([])
   const [loading, setLoading] = useState(false)
   const load = useCallback(async () => {
-    if (!requestRecords || !decrypt) return
+    if (!requestRecords || !Unshield) return
     setLoading(true)
     try {
       const raw = await requestRecords(PROGRAM_ID, true) as any[]
       const lps = raw.filter((r: any) => r.recordName === 'LPPosition' && !r.spent)
       const parsed = await Promise.all(lps.map(async (r: any) => {
-        try { const pt = await decrypt(r.recordCiphertext); return parseLPPosition(pt) } catch { return null }
+        try { const pt = await Unshield(r.recordCiphertext); return parseLPPosition(pt) } catch { return null }
       }))
       setPositions(parsed.filter((r): r is LPPosition => r !== null))
     } finally { setLoading(false) }
-  }, [requestRecords, decrypt])
+  }, [requestRecords, Unshield])
   return { positions, loading, load }
 }
 

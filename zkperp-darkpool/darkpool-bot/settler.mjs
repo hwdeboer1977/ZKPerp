@@ -3,7 +3,7 @@
 // ============================================================
 //
 // v5 flow: operator owns OrderAuth + DepositAuth on-chain.
-// Scanner decrypts them, operator fills records.json, bot prints command.
+// Scanner Unshields them, operator fills records.json, bot prints command.
 //
 // records.json format:
 // {
@@ -336,6 +336,6 @@ export async function settleMatchWithRecords() {
   return { status: 'not_implemented' }
 }
 
-export async function decryptOrderRecords() {
+export async function UnshieldOrderRecords() {
   return { buyerToken: null, buyerCreds: null, sellerAsset: null }
 }

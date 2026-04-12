@@ -550,7 +550,7 @@ const MAX_RECORDS_PER_SCAN = Number(process.env.MAX_RECORDS_PER_SCAN || 50);
 async function scanViaProvableScanner() {
   log('SCAN', 'Fetching records from Provable Scanner...');
   try {
-    const allRecords = await provableClient.getOwnedRecords({ decrypt: true, unspent: true });
+    const allRecords = await provableClient.getOwnedRecords({ Unshield: true, unspent: true });
     const allList = Array.isArray(allRecords) ? allRecords : (allRecords?.records || []);
     const liquidationRecords = allList
       .filter(r => ALL_PROGRAM_IDS.has(r.program_name) && r.record_name === 'LiquidationAuth')
@@ -567,9 +567,9 @@ async function scanViaProvableScanner() {
       let ptStr = record.record_plaintext || record.plaintext || '';
       if (!ptStr && record.record_ciphertext) {
         try {
-          ptStr = await provableClient.decryptRecord(record.record_ciphertext, CONFIG.viewKey);
+          ptStr = await provableClient.UnshieldRecord(record.record_ciphertext, CONFIG.viewKey);
         } catch (e) {
-          logError('SCAN', `ExecTPSLAuth decrypt failed: ${e.message}`);
+          logError('SCAN', `ExecTPSLAuth Unshield failed: ${e.message}`);
           continue;
         }
       }
@@ -605,8 +605,8 @@ async function scanViaProvableScanner() {
     for (const record of limitAuthRecords) {
       let ptStr = record.record_plaintext || record.plaintext || '';
       if (!ptStr && record.record_ciphertext) {
-        try { ptStr = await provableClient.decryptRecord(record.record_ciphertext, CONFIG.viewKey); }
-        catch (e) { logError('SCAN', `ExecLimitAuth decrypt failed: ${e.message}`); continue; }
+        try { ptStr = await provableClient.UnshieldRecord(record.record_ciphertext, CONFIG.viewKey); }
+        catch (e) { logError('SCAN', `ExecLimitAuth Unshield failed: ${e.message}`); continue; }
       }
       if (!ptStr) continue;
       const auth = parseExecLimitAuthFromPlaintext(ptStr);
@@ -639,9 +639,9 @@ async function scanViaProvableScanner() {
       let ptStr = record.record_plaintext || record.plaintext || '';
       if (!ptStr && record.record_ciphertext) {
         try {
-          ptStr = await provableClient.decryptRecord(record.record_ciphertext, CONFIG.viewKey);
+          ptStr = await provableClient.UnshieldRecord(record.record_ciphertext, CONFIG.viewKey);
         } catch (e) {
-          logError('SCAN', `PendingOrder decrypt failed: ${e.message}`);
+          logError('SCAN', `PendingOrder Unshield failed: ${e.message}`);
           continue;
         }
       }
@@ -672,10 +672,10 @@ async function scanViaProvableScanner() {
       let ptStr = record.record_plaintext || record.plaintext || '';
       if (!ptStr && record.record_ciphertext) {
         try {
-          ptStr = await provableClient.decryptRecord(record.record_ciphertext, CONFIG.viewKey);
-          if (ptStr) log('SCAN', `Block ${record.block_height}: decrypted in-process (scanner lag)`);
+          ptStr = await provableClient.UnshieldRecord(record.record_ciphertext, CONFIG.viewKey);
+          if (ptStr) log('SCAN', `Block ${record.block_height}: Unshielded in-process (scanner lag)`);
         } catch (e) {
-          logError('SCAN', `Block ${record.block_height}: in-process decrypt failed: ${e.message} — skipping`);
+          logError('SCAN', `Block ${record.block_height}: in-process Unshield failed: ${e.message} — skipping`);
           continue;
         }
       }
@@ -765,7 +765,7 @@ async function recoverPendingOrders() {
   }
   log('RECOVER', 'Scanning for ExecTPSLAuth + PendingOrder records owned by orchestrator...');
   try {
-    const allRecords = await provableClient.getOwnedRecords({ decrypt: true, unspent: true });
+    const allRecords = await provableClient.getOwnedRecords({ Unshield: true, unspent: true });
     const allList = Array.isArray(allRecords) ? allRecords : (allRecords?.records || []);
 
     const authRecords      = allList.filter(r => ALL_PROGRAM_IDS.has(r.program_name) && r.record_name === 'ExecTPSLAuth');
@@ -778,8 +778,8 @@ async function recoverPendingOrders() {
     for (const record of authRecords) {
       let ptStr = record.record_plaintext || record.plaintext || '';
       if (!ptStr && record.record_ciphertext) {
-        try { ptStr = await provableClient.decryptRecord(record.record_ciphertext, CONFIG.viewKey); }
-        catch (e) { logError('RECOVER', `ExecTPSLAuth decrypt failed: ${e.message}`); continue; }
+        try { ptStr = await provableClient.UnshieldRecord(record.record_ciphertext, CONFIG.viewKey); }
+        catch (e) { logError('RECOVER', `ExecTPSLAuth Unshield failed: ${e.message}`); continue; }
       }
       if (!ptStr) continue;
       const auth = parseExecTPSLAuthFromPlaintext(ptStr);
@@ -806,8 +806,8 @@ async function recoverPendingOrders() {
     for (const record of orderRecords) {
       let ptStr = record.record_plaintext || record.plaintext || '';
       if (!ptStr && record.record_ciphertext) {
-        try { ptStr = await provableClient.decryptRecord(record.record_ciphertext, CONFIG.viewKey); }
-        catch (e) { logError('RECOVER', `PendingOrder decrypt failed: ${e.message}`); continue; }
+        try { ptStr = await provableClient.UnshieldRecord(record.record_ciphertext, CONFIG.viewKey); }
+        catch (e) { logError('RECOVER', `PendingOrder Unshield failed: ${e.message}`); continue; }
       }
       if (!ptStr) continue;
       const order = parsePendingOrderFromPlaintext(ptStr);
@@ -832,8 +832,8 @@ async function recoverPendingOrders() {
     for (const record of limitAuthRecords) {
       let ptStr = record.record_plaintext || record.plaintext || '';
       if (!ptStr && record.record_ciphertext) {
-        try { ptStr = await provableClient.decryptRecord(record.record_ciphertext, CONFIG.viewKey); }
-        catch (e) { logError('RECOVER', `ExecLimitAuth decrypt failed: ${e.message}`); continue; }
+        try { ptStr = await provableClient.UnshieldRecord(record.record_ciphertext, CONFIG.viewKey); }
+        catch (e) { logError('RECOVER', `ExecLimitAuth Unshield failed: ${e.message}`); continue; }
       }
       if (!ptStr) continue;
       const auth = parseExecLimitAuthFromPlaintext(ptStr);

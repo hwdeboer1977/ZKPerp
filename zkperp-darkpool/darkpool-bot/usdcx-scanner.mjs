@@ -26,9 +26,9 @@ const account = PRIVATE_KEY
   ? new Account({ privateKey: PRIVATE_KEY })
   : new Account({ viewKey: VIEW_KEY })
 
-function localDecrypt(ct) {
+function localUnshield(ct) {
   if (!ct?.startsWith('record1')) return null
-  try { return account.decryptRecords([ct])?.[0] ?? null } catch { return null }
+  try { return account.UnshieldRecords([ct])?.[0] ?? null } catch { return null }
 }
 
 function normalize(pt) {
@@ -65,7 +65,7 @@ async function getRecords(jwt, uuid) {
     headers: { 'Authorization': `Bearer ${jwt}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       uuid,
-      decrypt: true,
+      Unshield: true,
       unspent: true,
       filter: { programs: [USDCX_ID], results_per_page: 50 },
       response_filter: {
@@ -140,7 +140,7 @@ export async function refreshUSDCxRecords() {
 
     for (const r of list) {
       let pt = (r.plaintext && !r.plaintext.startsWith('record1')) ? r.plaintext : null
-      if (!pt && r.record_ciphertext) pt = localDecrypt(r.record_ciphertext)
+      if (!pt && r.record_ciphertext) pt = localUnshield(r.record_ciphertext)
       if (!pt) continue
 
       const norm = normalize(pt)

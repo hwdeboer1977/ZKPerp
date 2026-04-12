@@ -117,7 +117,7 @@ export class ProvableClient {
 
     const body = {
       uuid:    this.uuid,
-      decrypt: options.decrypt !== false,
+      Unshield: options.Unshield !== false,
       unspent: options.unspent !== false,
     };
 
@@ -176,21 +176,21 @@ export class ProvableClient {
   // ─────────────────────────────────────────────────────────────
 
   /**
-   * decryptRecord()
+   * UnshieldRecord()
    *
-   * Decrypts a record ciphertext in-process using the @provablehq/sdk WASM bindings.
+   * Unshields a record ciphertext in-process using the @provablehq/sdk WASM bindings.
    * Takes ~1-5ms, no subprocess, no network call.
    * Used as a fallback when the Provable scanner hasn't indexed record_plaintext yet.
    *
    * @param {string} ciphertext  - Record ciphertext string (record1...)
    * @param {string} viewKey     - Aleo view key (AViewKey1...)
-   * @returns {Promise<string>}  - Decrypted plaintext record as a string
+   * @returns {Promise<string>}  - Unshielded plaintext record as a string
    */
-  async decryptRecord(ciphertext, viewKey) {
+  async UnshieldRecord(ciphertext, viewKey) {
     const { RecordCiphertext, ViewKey } = await this._loadSdk();
     const vk  = ViewKey.from_string(viewKey);
     const ct  = RecordCiphertext.fromString(ciphertext);
-    const pt  = ct.decrypt(vk);
+    const pt  = ct.Unshield(vk);
     return pt.toString();
   }
 

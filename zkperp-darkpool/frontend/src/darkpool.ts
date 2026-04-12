@@ -83,7 +83,7 @@ export async function fetchFeeVault(): Promise<bigint> {
 
 // ── ECIES encryption for operator ──────────────────────────────
 // Encrypts a record plaintext to the operator using AES-GCM + ECDH
-// The operator decrypts with their private key server-side
+// The operator Unshields with their private key server-side
 export async function encryptForOperator(
   plaintext: string,
   operatorPubKeyHex: string,
@@ -247,7 +247,7 @@ export async function fetchPendingDeposits(userAddress: string): Promise<
 export async function scanForDepositOutput(
   orderNonce: string,
   requestRecords: any,
-  decrypt: any,
+  Unshield: any,
   maxAttempts = 8,
   delayMs = 5000,
 ): Promise<string | null> {
@@ -258,7 +258,7 @@ export async function scanForDepositOutput(
       const escrows = raw.filter((r: any) => r.recordName === 'AssetEscrowReceipt' && !r.spent)
       for (const rec of escrows) {
         try {
-          const pt = await decrypt(rec.recordCiphertext)
+          const pt = await Unshield(rec.recordCiphertext)
           // Check if this escrow matches our order nonce
           const nonceField = orderNonce.endsWith('field') ? orderNonce : `${orderNonce}field`
           if (pt.includes(nonceField) || pt.includes(orderNonce)) {
@@ -272,7 +272,7 @@ export async function scanForDepositOutput(
       const assets = raw.filter((r: any) => r.recordName === 'AssetRecord' && !r.spent)
       for (const rec of assets) {
         try {
-          const pt = await decrypt(rec.recordCiphertext)
+          const pt = await Unshield(rec.recordCiphertext)
           return pt // Return first unspent AssetRecord with amount > 0
         } catch { continue }
       }

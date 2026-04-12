@@ -124,74 +124,74 @@ function InputRow({ label, value, onChange, token, readOnly, placeholder }: { la
 
 // ── Hooks ─────────────────────────────────────────────────────
 function useUSDCxTokens() {
-  const { requestRecords, decrypt } = useWallet() as any
+  const { requestRecords, Unshield } = useWallet() as any
   const [tokens, setTokens]   = useState<USDCxToken[]>([])
   const [loading, setLoading] = useState(false)
   const load = useCallback(async () => {
-    if (!requestRecords || !decrypt) return
+    if (!requestRecords || !Unshield) return
     setLoading(true)
     try {
       const raw = await requestRecords(USDCX_ID, true) as any[]
       const parsed = await Promise.all(raw.filter((r: any) => r.recordName === 'Token' && !r.spent).map(async (r: any) => {
-        try { return parseUSDCxToken(await decrypt(r.recordCiphertext)) } catch { return null }
+        try { return parseUSDCxToken(await Unshield(r.recordCiphertext)) } catch { return null }
       }))
       setTokens(parsed.filter((t): t is USDCxToken => t !== null).sort((a, b) => (b.amount > a.amount ? 1 : -1)))
     } finally { setLoading(false) }
-  }, [requestRecords, decrypt])
+  }, [requestRecords, Unshield])
   return { tokens, loading, load }
 }
 
 function useCredentials() {
-  const { requestRecords, decrypt } = useWallet() as any
+  const { requestRecords, Unshield } = useWallet() as any
   const [creds, setCreds]     = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const load = useCallback(async () => {
-    if (!requestRecords || !decrypt) return
+    if (!requestRecords || !Unshield) return
     setLoading(true)
     try {
       const raw = await requestRecords(USDCX_ID, true) as any[]
       const pts = await Promise.all(raw.filter((r: any) => r.recordName === 'Credentials' && !r.spent).map(async (r: any) => {
-        try { return await decrypt(r.recordCiphertext) } catch { return null }
+        try { return await Unshield(r.recordCiphertext) } catch { return null }
       }))
       setCreds(pts.filter((p): p is string => p !== null))
     } finally { setLoading(false) }
-  }, [requestRecords, decrypt])
+  }, [requestRecords, Unshield])
   return { creds, loading, load }
 }
 
 function useAssetRecords() {
-  const { requestRecords, decrypt } = useWallet() as any
+  const { requestRecords, Unshield } = useWallet() as any
   const [records, setRecords] = useState<AssetRecord[]>([])
   const [loading, setLoading] = useState(false)
   const load = useCallback(async () => {
-    if (!requestRecords || !decrypt) return
+    if (!requestRecords || !Unshield) return
     setLoading(true)
     try {
       const raw = await requestRecords(PROGRAM_ID, true) as any[]
       const parsed = await Promise.all(raw.filter((r: any) => r.recordName === 'AssetRecord' && !r.spent).map(async (r: any) => {
-        try { return parseAssetRecord(await decrypt(r.recordCiphertext)) } catch { return null }
+        try { return parseAssetRecord(await Unshield(r.recordCiphertext)) } catch { return null }
       }))
       setRecords(parsed.filter((r): r is AssetRecord => r !== null))
     } finally { setLoading(false) }
-  }, [requestRecords, decrypt])
+  }, [requestRecords, Unshield])
   return { records, loading, load }
 }
 
 function useFillReceipts() {
-  const { requestRecords, decrypt } = useWallet() as any
+  const { requestRecords, Unshield } = useWallet() as any
   const [receipts, setReceipts] = useState<FillReceipt[]>([])
   const [loading, setLoading]   = useState(false)
   const load = useCallback(async () => {
-    if (!requestRecords || !decrypt) return
+    if (!requestRecords || !Unshield) return
     setLoading(true)
     try {
       const raw = await requestRecords(PROGRAM_ID, true) as any[]
       const parsed = await Promise.all(raw.filter((r: any) => r.recordName === 'FillReceipt' && !r.spent).map(async (r: any) => {
-        try { return parseFillReceipt(await decrypt(r.recordCiphertext)) } catch { return null }
+        try { return parseFillReceipt(await Unshield(r.recordCiphertext)) } catch { return null }
       }))
       setReceipts(parsed.filter((r): r is FillReceipt => r !== null))
     } finally { setLoading(false) }
-  }, [requestRecords, decrypt])
+  }, [requestRecords, Unshield])
   return { receipts, loading, load }
 }
 
@@ -323,7 +323,7 @@ function OrderTab() {
 // ── Cancel Tab ────────────────────────────────────────────────
 function CancelTab() {
   const wallet = useWallet() as any
-  const { connected, requestRecords, decrypt, execute } = wallet
+  const { connected, requestRecords, Unshield, execute } = wallet
   const userAddress: string = wallet.address ?? wallet.publicKey ?? ''
   const tx = useTransaction()
   const assetTx = useTransaction()
@@ -336,7 +336,7 @@ function CancelTab() {
   const outlineBtn  = "w-full py-2.5 text-xs font-mono border border-cyan-400/30 text-cyan-400 rounded-xl hover:bg-cyan-400/10 disabled:opacity-40 transition-colors"
 
   const loadOrders = async () => {
-    if (!requestRecords || !decrypt) return
+    if (!requestRecords || !Unshield) return
     setLoading(true)
     try {
       const raw = await requestRecords(PROGRAM_ID, true) as any[]
@@ -346,7 +346,7 @@ function CancelTab() {
       for (const r of raw) {
         if (r.spent) continue
         try {
-          const pt = await decrypt(r.recordCiphertext)
+          const pt = await Unshield(r.recordCiphertext)
           if (r.recordName === 'OrderCommitment') {
             const dir   = pt.includes('direction:true') ? 'BUY' : 'SELL'
             const asset = parseInt(pt.match(/asset_id:(\d+)u8/)?.[1] ?? '0')

@@ -575,14 +575,14 @@ let result: u64 = a - capped_b;</pre>
 
     <div class="callout green">
       <span class="callout-label">UX Result</span>
-      <p>After 1,000 trades, the wallet holds 3 records. Every session requires clicking <strong>Unshield All Private Info</strong> once — one Shield Wallet approval — to decrypt all 3 slots simultaneously. The UX is identical on day one and year five.</p>
+      <p>After 1,000 trades, the wallet holds 3 records. Every session requires clicking <strong>Decrypt all private info</strong> once — one Shield Wallet approval — to decrypt all 3 slots simultaneously. The UX is identical on day one and year five.</p>
     </div>
 
     <h3>Onboarding Flow</h3>
     <ol class="body-list">
       <li>New trader visits Trade page → sees <strong>Initialize Account</strong> modal</li>
       <li>Single wallet approval → <code>initialize_slots()</code> mints 3 slot records on-chain</li>
-      <li>On next visit: click <strong>🛡 Unshield All Private Info</strong> → one approval decrypts all slots</li>
+      <li>On next visit: click <strong>🛡 Decrypt all private info</strong> → one approval decrypts all slots</li>
       <li>USDCx balance, positions, and LP amount are now visible in the UI</li>
       <li>Trading and LP operations pass the slot plaintext as the first argument to each transition</li>
       <li>Every subsequent session: same 3 records, same single approval</li>

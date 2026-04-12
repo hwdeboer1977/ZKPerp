@@ -50,10 +50,10 @@ ZKPerp is a decentralized perpetual futures exchange built natively on the Aleo 
 │   React + Vite + TypeScript · Shield Wallet · Provable SDK           │
 │   Trade · Liquidity · ZK Darkpool · Portfolio · Compliance            │
 └──────────────────────────────┬───────────────────────────────────────┘
-                               │ requestRecords / execute / decrypt
+                               │ requestRecords / execute / Unshield
                                ▼
                        ┌───────────────┐
-                       │ Shield Wallet │  Signs txs · Decrypts private records
+                       │ Shield Wallet │  Signs txs · Unshields private records
                        └───────┬───────┘
                                │
                                ▼
@@ -198,7 +198,7 @@ React + Vite + TypeScript frontend deployed on Vercel. Integrates with the Shiel
 - **System Status** — Oracle price freshness, pool utilization, bot health
 
 **Key hooks:**
-- `useSlots` — decrypts `PositionSlot` and `LPSlot` records from the Shield wallet
+- `useSlots` — Unshields `PositionSlot` and `LPSlot` records from the Shield wallet
 - `useUSDCx` — loads private USDCx Token records and computes total balance
 - `useCompliance` — fetches compliance record, validates against on-chain root
 - `useOnChainData` — reads public mappings (pool state, oracle prices, OI)
@@ -381,7 +381,7 @@ npm install && npm run dev
 |---|---|
 | `PROGRAM_ID` | `zkdarkpool_v5.aleo` |
 | `OPERATOR_PRIVATE_KEY` | Operator Aleo private key |
-| `OPERATOR_VIEW_KEY` | Operator view key for record decryption |
+| `OPERATOR_VIEW_KEY` | Operator view key for record Unshieldion |
 | `BATCH_BLOCKS` | Auction interval (default 500 blocks) |
 | `START_BLOCK` | Block height of contract deployment |
 

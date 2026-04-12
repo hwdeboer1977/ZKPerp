@@ -97,7 +97,7 @@ export function UnshieldPanel({ slots }: Props) {
               </span>
             ) : (
               <span className="flex flex-col items-center gap-1">
-                <span>🛡️ Unshield All Private Info</span>
+                <span>🛡️ Decrypt all private info</span>
                 <span className="text-sm font-normal text-zkperp-accent/70">Private USDCx, slots and LP become visible</span>
                 <span className="text-xs font-normal text-gray-500 mt-0.5">Also reveals TP/SL &amp; limit orders</span>
               </span>

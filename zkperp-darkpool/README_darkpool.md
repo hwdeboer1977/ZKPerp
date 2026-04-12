@@ -99,7 +99,7 @@ The operator receives everything on-chain at order placement time. No JSON files
 
 A Node.js service that:
 
-1. **Scans** new blocks for `OrderAuth` and `DepositAuth` records (decrypted using the operator view key)
+1. **Scans** new blocks for `OrderAuth` and `DepositAuth` records (Unshielded using the operator view key)
 2. **Maintains** an in-memory order book, indexed by asset and direction
 3. **Matches** orders every batch window using a uniform clearing price auction
 4. **Settles** matched pairs automatically via delegated proving (Provable DPS) with local `leo execute` fallback
@@ -199,7 +199,7 @@ Every BATCH_BLOCKS blocks:
 | Fee paid | Everyone | Finalize argument (public) |
 | Order nonces (consumed) | Everyone | Finalize — double-fill prevention |
 
-The operator sees direction and asset from `OperatorOrderRef` but **not** size or price. The full `OrderAuth` is encrypted to the operator's address and only decryptable with the operator view key.
+The operator sees direction and asset from `OperatorOrderRef` but **not** size or price. The full `OrderAuth` is encrypted to the operator's address and only Unshieldable with the operator view key.
 
 ---
 

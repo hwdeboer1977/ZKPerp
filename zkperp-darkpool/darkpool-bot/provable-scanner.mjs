@@ -24,9 +24,9 @@ const account = PRIVATE_KEY
   ? new Account({ privateKey: PRIVATE_KEY })
   : new Account({ viewKey: VIEW_KEY })
 
-function localDecrypt(ct) {
+function localUnshield(ct) {
   if (!ct?.startsWith('record1')) return null
-  try { return account.decryptRecords([ct])?.[0] ?? null } catch { return null }
+  try { return account.UnshieldRecords([ct])?.[0] ?? null } catch { return null }
 }
 
 async function getJwt() {
@@ -64,7 +64,7 @@ async function getStatus(jwt, uuid) {
 async function getRecords(jwt, uuid) {
   const body = {
     uuid,
-    decrypt: true,
+    Unshield: true,
     unspent: true,   // ← UNSPENT ONLY
     filter: {
       programs: [PROGRAM_ID],
@@ -159,7 +159,7 @@ async function main() {
 
   for (const [i, r] of list.entries()) {
     let pt = (r.plaintext && !r.plaintext.startsWith('record1')) ? r.plaintext : null
-    if (!pt && r.record_ciphertext) pt = localDecrypt(r.record_ciphertext)
+    if (!pt && r.record_ciphertext) pt = localUnshield(r.record_ciphertext)
 
     const type = detectType(pt ?? '', r.function_name)
     const norm = normalize(pt)
@@ -169,7 +169,7 @@ async function main() {
     console.log(`tx: ${r.transaction_id}`)
     console.log(`${'='.repeat(60)}`)
     if (pt) console.log(pt)
-    else console.log('(could not decrypt)')
+    else console.log('(could not Unshield)')
     console.log()
 
     parsed.push({ index: i, type, block: r.block_height, tx: r.transaction_id, plaintext: norm })

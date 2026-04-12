@@ -11,7 +11,7 @@ npm start
 
 ## What it does
 
-1. **Scanner** — polls Provable API every 15s for new `submit_order` transitions, decrypts `OperatorOrderRef` records using operator view key
+1. **Scanner** — polls Provable API every 15s for new `submit_order` transitions, Unshields `OperatorOrderRef` records using operator view key
 2. **Order book** — groups orders by asset_id + direction, prunes expired/consumed orders each batch
 3. **Matcher** — runs uniform clearing price algorithm at the end of each batch window (~30 blocks)
 4. **Settler** — builds and submits `settle_match` transactions
@@ -20,7 +20,7 @@ npm start
 
 `settle_match` requires the **buyer's USDCx Token record** as an input. The operator can see the order exists (via `OperatorOrderRef`) but cannot access the buyer's private Token record.
 
-**Production solution:** Buyers submit their Token record ciphertext + Credentials record ciphertext to the operator via a secure off-chain channel (encrypted API endpoint) when placing an order. The operator decrypts with the buyer's view key permission.
+**Production solution:** Buyers submit their Token record ciphertext + Credentials record ciphertext to the operator via a secure off-chain channel (encrypted API endpoint) when placing an order. The operator Unshields with the buyer's view key permission.
 
 **Testnet workaround:** The bot prints the exact `leo execute` command needed for manual settlement. Run it in your `ZK_Darkpool` folder with your actual record plaintexts.
 
@@ -61,7 +61,7 @@ leo execute settle_match \
 
 ```
 index.mjs          orchestrator — runs the tick loop
-├── scanner.mjs    decrypts OperatorOrderRef records from chain
+├── scanner.mjs    Unshields OperatorOrderRef records from chain
 ├── orderbook.mjs  in-memory book + uniform clearing price algo
 ├── settler.mjs    builds settle_match inputs, submits via SDK
 ├── api.mjs        all Provable REST API calls

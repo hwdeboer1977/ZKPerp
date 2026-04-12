@@ -93,10 +93,10 @@ cd ~/ZKPerp/leo/zkperp
 
 
 # ============================================================
-# 7. CHECK POSITION (decrypt record with view key)
+# 7. CHECK POSITION (Unshield record with view key)
 # ============================================================
 
-# snarkos developer decrypt \
+# snarkos developer Unshield \
 #   --view-key AViewKey1is8iPit9ftsVVkxPe5AAXWbSXbTWCkPRVZZ7v1PAjBFE \
 #   --ciphertext "<CIPHERTEXT>"
 

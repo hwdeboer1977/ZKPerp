@@ -15,8 +15,8 @@ for (const [i, ct] of records.entries()) {
     const owned = a.ownsRecordCiphertext(ct)
     console.log('ownsRecordCiphertext:', owned)
     if (owned) {
-      const r = a.decryptRecords([ct])
-      console.log('decrypted:', r)
+      const r = a.UnshieldRecords([ct])
+      console.log('Unshielded:', r)
     }
   } catch(e) { console.log('error:', String(e).slice(0,120)) }
 }

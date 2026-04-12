@@ -243,10 +243,10 @@
 │                 Frontend — React / TypeScript / Vercel           │
 │  Trade · Liquidity · ZK Darkpool · Portfolio · Compliance        │
 └─────────────────────────┬────────────────────────────────────────┘
-                          │ requestRecords / execute / decrypt
+                          │ requestRecords / execute / Unshield
                           ▼
                   ┌───────────────┐
-                  │ Shield Wallet │  Signs txs · Decrypts private records
+                  │ Shield Wallet │  Signs txs · Unshields private records
                   └──────┬────────┘
                          │
                          ▼
@@ -344,11 +344,11 @@ import zkperp_oracle_v2.aleo;</pre>
 
     <div class="callout green">
       <div class="callout-title">UX Result</div>
-      <p>After 1,000 trades, the wallet holds exactly 3 records — the same as day one. Every session requires one Shield Wallet approval to decrypt all slots simultaneously.</p>
+      <p>After 1,000 trades, the wallet holds exactly 3 records — the same as day one. Every session requires one Shield Wallet approval to Unshield all slots simultaneously.</p>
     </div>
 
     <h3>Spent Record Detection</h3>
-    <p>The <code>active_position_ids</code> on-chain mapping stores a <code>field => field</code> for every live position ID. The frontend pre-filters records by querying this mapping before requesting wallet decryption, reducing popups to only genuinely active records.</p>
+    <p>The <code>active_position_ids</code> on-chain mapping stores a <code>field => field</code> for every live position ID. The frontend pre-filters records by querying this mapping before requesting wallet Unshieldion, reducing popups to only genuinely active records.</p>
   </div>
 </div>
 
@@ -385,7 +385,7 @@ available = total_liquidity
 
     <div class="callout amber">
       <div class="callout-title">Documented Tradeoff — OI Trust Assumption</div>
-      <p>Because position parameters are private witnesses inside the ZK proof, they cannot be passed to <code>finalize</code> without becoming public on-chain. The orchestrator computes OI from decrypted LiquidationAuth records (via view key) and submits via <code>update_pool_state</code>. A malicious orchestrator can manipulate OI — affecting LP withdrawal limits — but <strong>cannot steal trader funds</strong>, which are protected by the commitment scheme (§7). See §13 for the full architectural analysis.</p>
+      <p>Because position parameters are private witnesses inside the ZK proof, they cannot be passed to <code>finalize</code> without becoming public on-chain. The orchestrator computes OI from Unshielded LiquidationAuth records (via view key) and submits via <code>update_pool_state</code>. A malicious orchestrator can manipulate OI — affecting LP withdrawal limits — but <strong>cannot steal trader funds</strong>, which are protected by the commitment scheme (§7). See §13 for the full architectural analysis.</p>
     </div>
   </div>
 </div>

@@ -20,15 +20,15 @@ const API_KEY       = process.env.PROVABLE_API_KEY ?? ''
 const VIEW_KEY      = process.env.HL_VIEW_KEY ?? ''
 const PRIVATE_KEY   = process.env.HL_PRIVATE_KEY ?? ''
 
-// Use private key for decryption if available, fall back to view key
+// Use private key for Unshieldion if available, fall back to view key
 const account = PRIVATE_KEY
   ? new Account({ privateKey: PRIVATE_KEY })
   : new Account({ viewKey: VIEW_KEY })
 
-function localDecrypt(ciphertext) {
+function localUnshield(ciphertext) {
   if (!ciphertext?.startsWith('record1')) return null
   try {
-    const r = account.decryptRecords([ciphertext])
+    const r = account.UnshieldRecords([ciphertext])
     return r?.[0] ?? null
   } catch { return null }
 }
@@ -61,7 +61,7 @@ async function register(jwt, viewKey = VIEW_KEY, startBlock = 0) {
 async function getOwnedRecords(jwt, uuid, options = {}) {
   const body = {
     uuid,
-    decrypt:  options.decrypt  ?? true,
+    Unshield:  options.Unshield  ?? true,
     unspent:  options.unspent  ?? true,
     response_filter: {
       block_height:      true,
@@ -107,7 +107,7 @@ async function getStatus(jwt, uuid) {
   return res.json()
 }
 
-// ── Parse decrypted record plaintext ──────────────────────────
+// ── Parse Unshielded record plaintext ──────────────────────────
 function detectType(plaintext) {
   if (!plaintext) return 'Unknown'
   if (plaintext.includes('clearing_price'))                          return 'FillReceipt'
@@ -147,7 +147,7 @@ async function main() {
   console.log('\nFetching all unspent records...')
   const records = await getOwnedRecords(jwt, uuid, {
     unspent:  true,
-    decrypt:  true,
+    Unshield:  true,
     programs: [process.env.PROGRAM_ID_TEST ?? 'zkdarkpool_v3.aleo'],
   })
 
@@ -155,10 +155,10 @@ async function main() {
   console.log(`\nFound ${list.length} record(s):\n`)
 
   for (const [i, r] of list.entries()) {
-    // Try server-decrypted plaintext first, then local decrypt from ciphertext
+    // Try server-Unshielded plaintext first, then local Unshield from ciphertext
     let pt = (r.plaintext && !r.plaintext.startsWith('record1')) ? r.plaintext : null
-    if (!pt && r.record_ciphertext) pt = localDecrypt(r.record_ciphertext)
-    if (!pt && r.plaintext?.startsWith('record1')) pt = localDecrypt(r.plaintext)
+    if (!pt && r.record_ciphertext) pt = localUnshield(r.record_ciphertext)
+    if (!pt && r.plaintext?.startsWith('record1')) pt = localUnshield(r.plaintext)
 
     const type = detectType(pt ?? '')
     console.log(`${'='.repeat(60)}`)
@@ -166,7 +166,7 @@ async function main() {
     console.log(`tx: ${r.transaction_id}`)
     console.log(`${'='.repeat(60)}`)
     if (pt) console.log(pt)
-    else console.log('(could not decrypt)')
+    else console.log('(could not Unshield)')
     console.log()
   }
 }

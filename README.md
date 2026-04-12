@@ -14,7 +14,7 @@
 ZKPerp is a decentralized perpetual futures exchange built natively on the Aleo blockchain. Position sizes, entry prices, leverage, and PnL are cryptographically private by default — hidden from all other market participants, including the protocol itself. Zero-knowledge proofs enforce every business rule on-chain without revealing trade details.
 
 **Live:** [zk-perp.vercel.app](https://zk-perp.vercel.app)  
-**Whitepaper:** [zkperp-whitepaper-v4.html](https://hwdeboer1977.github.io/ZKPerp/zkperp-whitepaper-v4.html)  
+**Whitepaper:** [zkperp-whitepaper-v5.html](https://hwdeboer1977.github.io/ZKPerp/zkperp-whitepaper-v5.html)  
 **Explorer:** [testnet.explorer.provable.com](https://testnet.explorer.provable.com)  
 **GitHub:** [github.com/hwdeboer1977/ZKPerp](https://github.com/hwdeboer1977/ZKPerp)
 
@@ -604,7 +604,7 @@ These constraints were discovered through production deployments and are documen
 ## Links
 
 - **Frontend:** [zk-perp.vercel.app](https://zk-perp.vercel.app)
-- **Whitepaper:** [zkperp-whitepaper-v4.html](https://hwdeboer1977.github.io/ZKPerp/zkperp-whitepaper-v4.html)
+- **Whitepaper:** [zkperp-whitepaper-v5.html](https://hwdeboer1977.github.io/ZKPerp/zkperp-whitepaper-v5.html)
 - **GitHub:** [github.com/hwdeboer1977/ZKPerp](https://github.com/hwdeboer1977/ZKPerp)
 - **Explorer (BTC):** [testnet.explorer.provable.com/program/zkperp_core_v26.aleo](https://testnet.explorer.provable.com/program/zkperp_core_v26.aleo)
 - **Explorer (Oracle):** [testnet.explorer.provable.com/program/zkperp_oracle_v2.aleo](https://testnet.explorer.provable.com/program/zkperp_oracle_v2.aleo)

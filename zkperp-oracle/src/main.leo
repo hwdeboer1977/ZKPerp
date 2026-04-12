@@ -5,13 +5,16 @@
 // same price for an asset, oracle_prices is updated automatically.
 // No coordinator, no single point of failure.
 //
+// Fix v3: After quorum is reached, the proposal is cleared so relayers
+// can vote again in the next cycle even if the price hasn't changed.
+//
 // Roles:
 //   roles[0u8] = oracle node A (Aleo address)
 //   roles[1u8] = oracle node B (Aleo address)
 //   roles[2u8] = oracle node C (Aleo address)
 //   roles[3u8] = admin (can update roles)
 
-program zkperp_oracle_v2.aleo {
+program zkperp_oracle_v3.aleo {
 
     @custom
     constructor() {
@@ -83,9 +86,10 @@ program zkperp_oracle_v2.aleo {
                 price_proposals, asset_id, empty
             );
 
-            // ── 3. If existing proposal has a different price → new round, reset it
-            //       Must happen BEFORE already_voted check:
-            //       a voter from the old round can start a new round with a new price
+            // ── 3. Reset proposal if:
+            //       a) price changed (new Chainlink round), OR
+            //       b) previous round reached quorum (votes == 0u8 after clear)
+            //       This allows relayers to vote again each cycle even at same price.
             let same_price: bool = proposal.votes == 0u8
                                 || proposal.price == price;
 
@@ -95,7 +99,6 @@ program zkperp_oracle_v2.aleo {
             };
 
             // ── 4. Reject if this caller already voted in the CURRENT round
-            //       (uses current, not proposal, so reset proposals allow re-voting)
             let already_voted: bool = caller == current.voter_a
                                    || caller == current.voter_b
                                    || caller == current.voter_c;
@@ -111,18 +114,23 @@ program zkperp_oracle_v2.aleo {
             // ── 6. Quorum check — 2-of-3 required
             let quorum: bool = new_votes >= 2u8;
 
-            // ── 7. If quorum reached → write oracle price + clear proposal
-            //       If not → store updated proposal
+            // ── 7. If quorum reached → write oracle price AND clear proposal
+            //       so relayers can vote again next cycle even at same price.
+            //       If not → store updated proposal with new vote recorded.
+            let cleared: PriceProposal = PriceProposal {
+                price: 0u64, timestamp: 0u32, votes: 0u8,
+                voter_a: zero, voter_b: zero, voter_c: zero,
+            };
             let updated: PriceProposal = PriceProposal {
                 price: price, timestamp: timestamp,
                 votes: new_votes,
                 voter_a: v_a, voter_b: v_b, voter_c: v_c,
             };
 
-            Mapping::set(price_proposals, asset_id, updated);
+            // Clear on quorum so next cycle starts fresh
+            Mapping::set(price_proposals, asset_id, quorum ? cleared : updated);
 
             // Only update oracle_prices if quorum reached.
-            // Read existing price first to preserve it when no quorum.
             let existing_price: PriceData = Mapping::get_or_use(
                 oracle_prices, asset_id, PriceData { price: 0u64, timestamp: 0u32 }
             );

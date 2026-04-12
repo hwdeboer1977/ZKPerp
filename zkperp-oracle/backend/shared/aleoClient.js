@@ -9,9 +9,13 @@ const NETWORK_URL          = process.env.ALEO_ENDPOINT || 'https://api.explorer.
 const PROVABLE_API_KEY     = process.env.PROVABLE_API_KEY;
 const PROVABLE_CONSUMER_ID = process.env.PROVABLE_CONSUMER_ID;
 const PROVER_BASE          = 'https://api.provable.com/prove/testnet';
+const EXPLORER_API         = process.env.ALEO_EXPLORER_API || 'https://api.explorer.provable.com/v1';
+const ALEO_NETWORK         = process.env.ALEO_NETWORK || 'testnet';
 
-const RETRY_ATTEMPTS = 3;
-const RETRY_BASE_MS  = 5000; // 5s, 10s, 15s
+const RETRY_ATTEMPTS       = 3;
+const RETRY_BASE_MS        = 5000;
+const CONFIRM_POLL_MS      = 5000;   // poll every 5s
+const CONFIRM_TIMEOUT_MS   = 120000; // give up after 2 minutes
 
 const log  = (...args) => console.log('[AleoClient]', ...args);
 const warn = (...args) => console.warn('[AleoClient]', ...args);
@@ -31,6 +35,37 @@ async function withRetry(fn, label) {
       await new Promise(r => setTimeout(r, delay));
     }
   }
+}
+
+// ── Wait for tx confirmation ──────────────────────────────────────────────────
+// Polls the explorer until the tx is accepted or rejected.
+// Returns 'accepted' | 'rejected' | 'timeout'
+
+export async function waitForConfirmation(txId) {
+  const url = `${EXPLORER_API}/${ALEO_NETWORK}/transaction/${txId}`;
+  const start = Date.now();
+  log(`Waiting for confirmation: ${txId}`);
+  while (Date.now() - start < CONFIRM_TIMEOUT_MS) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        const status = data?.status ?? data?.type ?? null;
+        if (status === 'accepted' || status === 'Accepted') {
+          log(`✅ Confirmed: ${txId}`);
+          return 'accepted';
+        }
+        if (status === 'rejected' || status === 'Rejected') {
+          warn(`❌ Rejected: ${txId}`);
+          return 'rejected';
+        }
+        // Still pending — keep polling
+      }
+    } catch {}
+    await new Promise(r => setTimeout(r, CONFIRM_POLL_MS));
+  }
+  warn(`⏱ Timeout waiting for: ${txId}`);
+  return 'timeout';
 }
 
 // ── JWT ───────────────────────────────────────────────────────────────────────
@@ -61,7 +96,7 @@ async function submitDelegated(provingRequest, jwt) {
     headers: { 'Content-Type': 'application/json', Authorization: jwt },
   });
   if (!pubkeyRes.ok) {
-    _jwt = null; // force JWT refresh on next retry
+    _jwt = null;
     throw new Error(`Pubkey fetch failed: ${pubkeyRes.status}`);
   }
   const pubkey = await pubkeyRes.json();
@@ -103,8 +138,10 @@ export async function submitPriceOnChain({ privateKey, program, assetKey, price,
   const account = new Account({ privateKey });
   pm.setAccount(account);
 
+  let txId;
+
   if (PROVABLE_API_KEY && PROVABLE_CONSUMER_ID) {
-    return await withRetry(async () => {
+    txId = await withRetry(async () => {
       log(`Building proving request (delegated)...`);
       const jwt = await getJWT();
       const provingRequest = await pm.provingRequest({
@@ -115,23 +152,27 @@ export async function submitPriceOnChain({ privateKey, program, assetKey, price,
         privateFee:   false,
         broadcast:    true,
       });
-      const txId = await submitDelegated(provingRequest, jwt);
-      log(`✅ Broadcast: txId=${txId}`);
-      return txId;
+      const id = await submitDelegated(provingRequest, jwt);
+      log(`✅ Broadcast: txId=${id}`);
+      return id;
     }, `submit_price(${assetKey})`);
+  } else {
+    warn(`No PROVABLE_API_KEY set — falling back to local proving (slow)`);
+    txId = await withRetry(async () => {
+      const id = await pm.execute({
+        programName:  program,
+        functionName: 'submit_price',
+        inputs,
+        fee:          0.01,
+        privateFee:   false,
+      });
+      log(`✅ Broadcast: txId=${id}`);
+      return id;
+    }, `submit_price(${assetKey}) local`);
   }
 
-  // Fallback: local proving
-  warn(`No PROVABLE_API_KEY set — falling back to local proving (slow)`);
-  return await withRetry(async () => {
-    const txId = await pm.execute({
-      programName:  program,
-      functionName: 'submit_price',
-      inputs,
-      fee:          0.01,
-      privateFee:   false,
-    });
-    log(`✅ Broadcast: txId=${txId}`);
-    return txId;
-  }, `submit_price(${assetKey}) local`);
+  // Wait for on-chain confirmation before returning
+  // This ensures sequential relayers don't race in finalize
+  const status = await waitForConfirmation(txId);
+  return { txId, status };
 }

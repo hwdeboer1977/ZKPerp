@@ -49,7 +49,7 @@ export function PositionDisplay({
   const pairConfig = getPair(pair);
   const PROGRAM_ID = pairConfig.programId;
   const { connected, address } = useWallet();
-  const { complianceRecord } = useCompliance();
+  const { complianceRecord, ensureRecord } = useCompliance();
   const closeTx = useTransaction();
   const tpTx = useTransaction();
   const slTx = useTransaction();
@@ -282,11 +282,12 @@ export function PositionDisplay({
     setCancellingOrderKey(key);
 
     try {
+      const crCancel = complianceRecord ?? await ensureRecord();
       await cancelTx.execute({
         program: ORDERS_PROGRAM_ID,
         function: 'cancel_tp_sl',
         inputs: [
-        ...(complianceRecord ? [complianceRecord.plaintext] : []),
+        ...(crCancel ? [crCancel.plaintext] : []),
         compact(slot.plaintext),
         compact(finalReceipt.plaintext),
       ],
@@ -343,9 +344,10 @@ export function PositionDisplay({
       const orchestrator = (await orchestratorRes.json()).replace(/"/g, '');
       const nonce = generateNonce();
 
-      if (!complianceRecord) { console.error('No compliance record'); return; }
+      const cr = await ensureRecord();
+      if (!cr) { console.error('No compliance record'); return; }
       const inputs = [
-        complianceRecord.plaintext,        // cr: ZKPerpComplianceRecord
+        cr.plaintext,                      // cr: ZKPerpComplianceRecord
         slot.plaintext,                    // slot: PositionSlot
         `${triggerPrice}u64`,              // trigger_price: u64
         orchestrator,                      // orchestrator: address
@@ -389,9 +391,10 @@ export function PositionDisplay({
       const orchestrator = (await orchestratorRes.json()).replace(/"/g, '');
       const nonce = generateNonce();
 
-      if (!complianceRecord) { console.error('No compliance record'); return; }
+      const cr = await ensureRecord();
+      if (!cr) { console.error('No compliance record'); return; }
       const inputs = [
-        complianceRecord.plaintext,        // cr: ZKPerpComplianceRecord
+        cr.plaintext,                      // cr: ZKPerpComplianceRecord
         slot.plaintext,                    // slot: PositionSlot
         `${triggerPrice}u64`,              // trigger_price: u64
         orchestrator,                      // orchestrator: address
@@ -443,9 +446,10 @@ export function PositionDisplay({
       console.log('On-chain oracle price:', onChainPrice.toString());
       console.log('UI current price:', currentPrice.toString());
 
-      if (!complianceRecord) { console.error('No compliance record'); return; }
+      const cr = await ensureRecord();
+      if (!cr) { console.error('No compliance record'); return; }
       const inputs = [
-        complianceRecord.plaintext,    // cr: ZKPerpComplianceRecord
+        cr.plaintext,              // cr: ZKPerpComplianceRecord
         slot.plaintext,
         pairConfig.oracleMappingKey,   // asset_id: field (public)
         `${onChainPrice}u64`,          // exit_price: u64 (public) — fetched from chain

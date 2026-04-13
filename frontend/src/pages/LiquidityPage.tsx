@@ -48,7 +48,7 @@ export function LiquidityPage({ pair, poolLiquidity, totalLPTokens, longOI, shor
   const PROGRAM_ID = pairConfig.programId;  // shadows any imported constant
 
   const { address, connected } = useWallet();
-  const { complianceRecord } = useCompliance();
+  const { complianceRecord, ensureRecord } = useCompliance();
 
   const {
     lpTokens, totalLP, recordCount,
@@ -139,9 +139,10 @@ export function LiquidityPage({ pair, poolLiquidity, totalLPTokens, longOI, shor
         markSpent(slot.id);
         markUSDCxSpent(usdcToken.id);
 
-        if (!complianceRecord) { console.error('No ZKPerpComplianceRecord found'); return; }
+        const cr = await ensureRecord();
+        if (!cr) { console.error('No ZKPerpComplianceRecord found'); return; }
         const inputs = [
-          normalizeRecordPlaintext(complianceRecord.plaintext),
+          normalizeRecordPlaintext(cr.plaintext),
           normalizeRecordPlaintext(slot.plaintext),
           normalizeRecordPlaintext(usdcToken.plaintext),
           parsedDepositAmount.toString() + 'u64',
@@ -233,13 +234,14 @@ export function LiquidityPage({ pair, poolLiquidity, totalLPTokens, longOI, shor
         return;
       }
 
-      if (!complianceRecord) { console.error('No ZKPerpComplianceRecord found'); setWithdrawRecordId(null); return; }
+      const cr = await ensureRecord();
+      if (!cr) { console.error('No ZKPerpComplianceRecord found'); setWithdrawRecordId(null); return; }
       markSpent(lpToken.id);
       await withdrawTx.execute({
         program: PROGRAM_ID,   // ← pair-specific
         function: 'remove_liquidity',
         inputs: [
-          normalizeRecordPlaintext(complianceRecord.plaintext),
+          normalizeRecordPlaintext(cr.plaintext),
           normalizeRecordPlaintext(lpToken.plaintext),
           amountToBurn.toString() + 'u64',
           expectedUsdc.toString() + 'u128',
@@ -262,7 +264,7 @@ export function LiquidityPage({ pair, poolLiquidity, totalLPTokens, longOI, shor
   const bestToken = usdcTokens.find(t => t.amount >= parsedDepositAmount);
   const insufficientBalance = usdcDecrypted && usdcTokens.length > 0 && isValidAmount && !bestToken;
   const hasCompliance = !!complianceRecord;
-  const depositReady = decrypted && usdcDecrypted && usdcTokens.length > 0 && isValidAmount && !insufficientBalance && hasCompliance;
+  const depositReady = decrypted && usdcDecrypted && usdcTokens.length > 0 && isValidAmount && !insufficientBalance;
 
   const Spinner = ({ size = 5 }: { size?: number }) => (
     <svg className={`animate-spin h-${size} w-${size}`} viewBox="0 0 24 24">
@@ -535,7 +537,7 @@ export function LiquidityPage({ pair, poolLiquidity, totalLPTokens, longOI, shor
             />
 
             <button onClick={handleDeposit}
-              disabled={!connected || !depositReady || isDepositBusy}
+              disabled={!connected || (!!hasCompliance && !depositReady) || isDepositBusy}
               className="w-full py-3 rounded-lg font-semibold text-white transition-colors disabled:cursor-not-allowed bg-blue-500 hover:bg-blue-600 disabled:bg-blue-500/30">
               {!connected ? 'Connect Wallet'
                 : isDepositBusy
@@ -547,7 +549,7 @@ export function LiquidityPage({ pair, poolLiquidity, totalLPTokens, longOI, shor
                   : usdcTokens.length === 0 ? 'No USDCx Token Records'
                   : !isValidAmount ? 'Enter Amount to Deposit'
                   : insufficientBalance ? `Max $${formatUsdc(usdcTokens[0]?.amount ?? 0n)} per record`
-                  : !hasCompliance ? '🔒 Compliance record required'
+                  : !hasCompliance ? '🔒 Retrieve compliance record'
                   : `Add Liquidity to ${pairConfig.label}`}
             </button>
           </div>

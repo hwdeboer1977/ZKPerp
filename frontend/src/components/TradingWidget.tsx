@@ -159,7 +159,7 @@ export function TradingWidget({
   const PROGRAM_ID = pairConfig.programId;
 
   const { address, connected } = useWallet();
-  const { complianceRecord } = useCompliance();
+  const { complianceRecord, ensureRecord } = useCompliance();
   // burn_stale_slot called directly via useTransaction in LiquidatedBanner
   const openTx = useTransaction();
 
@@ -296,9 +296,10 @@ export function TradingWidget({
       const slippage = parseFloat(slippagePercent) / 100;
       const maxSlippage = BigInt(Math.floor(Number(currentPrice) * slippage));
 
-      if (!complianceRecord) { console.error('No ZKPerpComplianceRecord'); return; }
+      const cr = await ensureRecord();
+      if (!cr) { console.error('No ZKPerpComplianceRecord'); return; }
       const inputs = [
-        normalizeRecordPlaintext(complianceRecord.plaintext),
+        normalizeRecordPlaintext(cr.plaintext),
         normalizeRecordPlaintext(slot.plaintext),
         normalizeRecordPlaintext(usdcToken.plaintext),
         collateral.toString() + 'u128',
@@ -348,9 +349,10 @@ export function TradingWidget({
       const orchestrator = (await orchestratorRes.json()).replace(/"/g, '');
       const merkleProof = await getMerkleProof(USDCX_PROGRAM_ID, address);
 
-      if (!complianceRecord) { console.error('No ZKPerpComplianceRecord'); return; }
+      const cr = await ensureRecord();
+      if (!cr) { console.error('No ZKPerpComplianceRecord'); return; }
       const inputs = [
-        normalizeRecordPlaintext(complianceRecord.plaintext),
+        normalizeRecordPlaintext(cr.plaintext),
         normalizeRecordPlaintext(limitSlot.plaintext),
         normalizeRecordPlaintext(usdcToken.plaintext),
         collateral.toString() + 'u128',
@@ -627,7 +629,7 @@ export function TradingWidget({
               : !hasEmptySlot ? `No ${isLong ? 'Long' : 'Short'} slot available`
               : !usdcDecrypted ? '🛡️ Unshield to Trade'
               : !bestUsdcToken && collateral > 0n ? `Collateral exceeds record — max $${formatUsdc(usdcTokens[0]?.amount ?? 0n)}`
-              : !complianceRecord ? '🔒 Compliance record required'
+              : !complianceRecord ? '🔒 Retrieve compliance record'
               : !isValidLeverage && leverage > 0 ? 'Leverage exceeds 20x'
               : `${isLong ? 'Long' : 'Short'} ${pairConfig.baseAsset}`}
             </button>

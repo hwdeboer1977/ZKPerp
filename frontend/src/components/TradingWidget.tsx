@@ -200,14 +200,14 @@ export function TradingWidget({
   const usdcReady = usdcDecrypted && bestUsdcToken !== undefined;
 
   const canTrade = connected && isValidLeverage && isValidSize &&
-    collateral > 0n && hasEmptySlot && usdcReady && !hasStaleSlot && !!complianceRecord;
+    collateral > 0n && hasEmptySlot && usdcReady && !hasStaleSlot;
   const isBusy = openTx.status === 'submitting' || openTx.status === 'pending';
 
   // Limit order validation
   const triggerPrice = parsePrice(triggerPriceInput);
   const limitSlot = decrypted ? getEmptyPositionSlot(limitIsLong) : null;
   const canLimitOrder = connected && isValidLeverage && isValidSize && collateral > 0n
-    && limitSlot !== null && usdcReady && triggerPrice > 0n && !hasStaleSlot && !!complianceRecord;
+    && limitSlot !== null && usdcReady && triggerPrice > 0n && !hasStaleSlot;
   const isLimitBusy = limitTx.status === 'submitting' || limitTx.status === 'pending';
 
   // Reset form when switching pairs
@@ -607,7 +607,7 @@ export function TradingWidget({
             {/* Submit button */}
             <button
               onClick={handleSubmit}
-              disabled={decrypting || usdcLoading || isBusy || !canTrade}
+              disabled={decrypting || usdcLoading || isBusy || (!!complianceRecord && !canTrade)}
               className={`w-full py-4 rounded-lg font-semibold text-white transition-all disabled:cursor-not-allowed ${
                 !decrypted
                   ? 'bg-zkperp-accent hover:bg-zkperp-accent/80 disabled:bg-zkperp-accent/30'
@@ -821,7 +821,7 @@ export function TradingWidget({
               {/* Place limit order button */}
               <button
                 onClick={handleLimitOrder}
-                disabled={decrypting || usdcLoading || isLimitBusy || !canLimitOrder}
+                disabled={decrypting || usdcLoading || isLimitBusy || (!!complianceRecord && !canLimitOrder)}
                 className="w-full py-4 rounded-lg font-semibold text-white transition-all disabled:cursor-not-allowed bg-zkperp-accent hover:bg-zkperp-accent/80 disabled:bg-zkperp-accent/30"
               >
                 {decrypting ? <span className="flex items-center justify-center gap-2"><Spinner />Decrypting...</span>

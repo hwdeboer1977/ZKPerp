@@ -4,7 +4,6 @@ import { useWallet } from '@provablehq/aleo-wallet-adaptor-react';
 const COMPLIANCE_PROGRAM_ID = 'zkperp_compliance_v7.aleo';
 const RECORD_NAME = 'ZKPerpComplianceRecord';
 const ALEO_API = 'https://api.explorer.provable.com/v1/testnet';
-const SESSION_KEY = 'zkperp_compliance_record';
 
 export interface ComplianceRecordData {
   id: string;

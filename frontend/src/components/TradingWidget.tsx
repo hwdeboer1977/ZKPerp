@@ -649,6 +649,20 @@ export function TradingWidget({
         {/* ── Limit order form ── */}
         {orderMode === 'limit' && (
           <div className={hasStaleSlot ? 'opacity-40 pointer-events-none select-none' : ''}>
+            {/* ── Wave 5 maintenance notice ── */}
+            <div className="mx-6 mt-6 p-4 rounded-xl border border-yellow-500/40 bg-yellow-500/8">
+              <div className="flex items-start gap-3">
+                <span className="text-yellow-400 text-lg mt-0.5">🔧</span>
+                <div>
+                  <p className="text-yellow-300 font-semibold text-sm">Limit Orders — Under Maintenance</p>
+                  <p className="text-gray-400 text-xs mt-1 leading-relaxed">
+                    Fully operational in Wave 4. Due to Leo contract size limitations in Wave 5,
+                    limit orders have been separated into a dedicated contract and are temporarily
+                    unavailable while the integration is completed.
+                  </p>
+                </div>
+              </div>
+            </div>
             <div className="p-6 space-y-6">
 
               {/* Long / Short direction */}

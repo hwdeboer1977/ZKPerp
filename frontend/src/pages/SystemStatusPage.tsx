@@ -3,10 +3,12 @@ import { formatUsdc, formatPrice } from '@/utils/aleo';
 
 const EXPLORER = 'https://api.explorer.provable.com/v1/testnet';
 
+const ORACLE_PROGRAM = 'zkperp_oracle_v3.aleo';
+
 const PAIRS = [
-  { id: 'BTC/USDC', program: 'zkperp_core_v27.aleo',  emoji: '₿' },
-  { id: 'ETH/USDC', program: 'zkperp_core_eth_v27.aleo', emoji: 'Ξ' },
-  { id: 'SOL/USDC', program: 'zkperp_core_sol_v27.aleo', emoji: '◎' },
+  { id: 'BTC/USDC', program: 'zkperp_core_v27.aleo',     emoji: '₿', oracleKey: '1field' },
+  { id: 'ETH/USDC', program: 'zkperp_core_eth_v27.aleo', emoji: 'Ξ', oracleKey: '2field' },
+  { id: 'SOL/USDC', program: 'zkperp_core_sol_v27.aleo', emoji: '◎', oracleKey: '3field' },
 ];
 
 function parseMapping(responseText: string): string {
@@ -45,10 +47,10 @@ function PairStatusGrid({ btcPrice, btcLiquidity, btcLongOI, btcShortOI }: {
   }, [btcPrice, btcLiquidity, btcLongOI, btcShortOI]);
 
   useEffect(() => {
-    const fetchPair = async (pairId: string, program: string) => {
+    const fetchPair = async (pairId: string, program: string, oracleKey: string) => {
       try {
         const [priceRes, poolRes] = await Promise.all([
-          fetch(`${EXPLORER}/program/${program}/mapping/oracle_prices/0field`),
+          fetch(`${EXPLORER}/program/${ORACLE_PROGRAM}/mapping/oracle_prices/${oracleKey}`),
           fetch(`${EXPLORER}/program/${program}/mapping/pool_state/0field`),
         ]);
         const priceCleaned = parseMapping(await priceRes.text());
@@ -67,8 +69,7 @@ function PairStatusGrid({ btcPrice, btcLiquidity, btcLongOI, btcShortOI }: {
         setPairStates(prev => ({ ...prev, [pairId]: { ...prev[pairId], loading: false } }));
       }
     };
-    fetchPair('ETH/USDC', 'zkperp_core_eth_v27.aleo');
-    fetchPair('SOL/USDC', 'zkperp_core_sol_v27.aleo');
+    PAIRS.forEach(p => fetchPair(p.id, p.program, p.oracleKey));
   }, []);
 
   return (

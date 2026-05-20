@@ -61,7 +61,7 @@ ZKPerp is a decentralized perpetual futures exchange built natively on the Aleo 
 │                        Aleo Testnet                                  │
 │  zkperp_core_v27.aleo (BTC) · zkperp_eth_v21.aleo · zkperp_sol_v21  │
 │  zkperp_compliance_v7.aleo · zkperp_oracle_v3.aleo                   │
-│  zkdarkpool_v5.aleo · zkperp_amm_v1.aleo                             │
+│  zkdarkpool_v8.aleo · zkperp_amm_v3.aleo                             │
 │                                                                      │
 │  Private records: PositionSlot · LiquidationAuth · LPSlot            │
 │                   OrderReceipt · ExecTPSLAuth · ComplianceRecord      │
@@ -99,9 +99,9 @@ ZKPerp/
 │   │   └── src/main.leo              # 2-of-3 on-chain quorum oracle
 │   ├── zkperp_compliance_v7/
 │   │   └── src/main.leo              # KYC compliance gating
-│   ├── zkperp_amm_v1/
+│   ├── zkperp_amm_v3/
 │   │   └── src/main.leo              # Uniswap v3-style CL AMM (USDCx/ALEO)
-│   └── zkdarkpool_v5/
+│   └── zkdarkpool_v8/
 │       └── src/main.leo              # ZK dark pool batch auction
 │
 ├── frontend/                         # React + Vite + TypeScript frontend
@@ -142,7 +142,7 @@ ZKPerp/
 │
 ├── zkdarkpool/                       # ZK Dark Pool (batch auction DEX)
 │   ├── contracts/
-│   │   └── zkdarkpool_v5/
+│   │   └── zkdarkpool_v8/
 │   │       └── src/main.leo
 │   ├── bot/                          # Operator bot: scans orders, runs clearing auction
 │   ├── frontend/                     # React dark pool UI
@@ -174,8 +174,8 @@ ZKPerp/
 | `zkperp_sol_v21.aleo` | SOL/USDC perpetuals | Aleo Testnet | [view](https://testnet.explorer.provable.com/program/zkperp_sol_v21.aleo) |
 | `zkperp_oracle_v3.aleo` | 2-of-3 price oracle | Aleo Testnet | [view](https://testnet.explorer.provable.com/program/zkperp_oracle_v3.aleo) |
 | `zkperp_compliance_v7.aleo` | KYC compliance gating | Aleo Testnet | [view](https://testnet.explorer.provable.com/program/zkperp_compliance_v7.aleo) |
-| `zkdarkpool_v5.aleo` | ZK dark pool batch auction | Aleo Testnet | [view](https://testnet.explorer.provable.com/program/zkdarkpool_v5.aleo) |
-| `zkperp_amm_v1.aleo` | CL AMM (USDCx/ALEO) | Aleo Testnet | [view](https://testnet.explorer.provable.com/program/zkperp_amm_v1.aleo) |
+| `zkdarkpool_v8.aleo` | ZK dark pool batch auction | Aleo Testnet | [view](https://testnet.explorer.provable.com/program/zkdarkpool_v8.aleo) |
+| `zkperp_amm_v3.aleo` | CL AMM (USDCx/ALEO) | Aleo Testnet | [view](https://testnet.explorer.provable.com/program/zkperp_amm_v3.aleo) |
 
 ---
 
@@ -379,7 +379,7 @@ npm install && npm run dev
 
 | Env var | Description |
 |---|---|
-| `PROGRAM_ID` | `zkdarkpool_v5.aleo` |
+| `PROGRAM_ID` | `zkdarkpool_v8.aleo` |
 | `OPERATOR_PRIVATE_KEY` | Operator Aleo private key |
 | `OPERATOR_VIEW_KEY` | Operator view key for record Unshieldion |
 | `BATCH_BLOCKS` | Auction interval (default 500 blocks) |
@@ -608,7 +608,7 @@ These constraints were discovered through production deployments and are documen
 - **GitHub:** [github.com/hwdeboer1977/ZKPerp](https://github.com/hwdeboer1977/ZKPerp)
 - **Explorer (BTC):** [testnet.explorer.provable.com/program/zkperp_core_v27.aleo](https://testnet.explorer.provable.com/program/zkperp_core_v27.aleo)
 - **Explorer (Oracle):** [testnet.explorer.provable.com/program/zkperp_oracle_v3.aleo](https://testnet.explorer.provable.com/program/zkperp_oracle_v3.aleo)
-- **Explorer (Darkpool):** [testnet.explorer.provable.com/program/zkdarkpool_v5.aleo](https://testnet.explorer.provable.com/program/zkdarkpool_v5.aleo)
+- **Explorer (Darkpool):** [testnet.explorer.provable.com/program/zkdarkpool_v8.aleo](https://testnet.explorer.provable.com/program/zkdarkpool_v8.aleo)
 - **Shield Wallet:** [shieldwallet.xyz](https://www.shieldwallet.xyz/)
 - **Aleo Explorer:** [testnet.explorer.provable.com](https://testnet.explorer.provable.com)
 

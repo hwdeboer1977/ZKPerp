@@ -141,7 +141,7 @@ On first start: builds the Merkle tree (slow — one `leo run` per address). Eve
 | `ADMIN_PRIVATE_KEY` | ✓ | Aleo private key of the program deployer |
 | `ADMIN_ADDRESS` | ✓ | Aleo address of the admin |
 | `ALEO_NETWORK_URL` | ✓ | `https://api.explorer.provable.com/v1` |
-| `COMPLIANCE_PROGRAM_ID` | ✓ | `zkperp_compliance_v2.aleo` |
+| `COMPLIANCE_PROGRAM_ID` | ✓ | `zkperp_compliance_v7.aleo` |
 | `ADMIN_API_KEY` | ✓ | Secret for admin endpoints |
 | `PROVABLE_API_KEY` | ✓ | Provable API key for delegated proving |
 | `PROVABLE_CONSUMER_ID` | ✓ | Provable consumer ID |
@@ -183,7 +183,7 @@ On first start: builds the Merkle tree (slow — one `leo run` per address). Eve
 
 ## On-chain Program
 
-**`zkperp_compliance_v2.aleo`** — deployed on Aleo testnet.
+**`zkperp_compliance_v7.aleo`** — deployed on Aleo testnet.
 
 | Transition | Caller | Description |
 |---|---|---|

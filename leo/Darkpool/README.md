@@ -4,7 +4,7 @@
 
 A dark pool is a private exchange where large orders can be matched without revealing trade details to the market before execution. ZK Darkpool implements this using Aleo's zero-knowledge proof system — order contents are encrypted on-chain, settlement is provably fair, and counterparty identity is never revealed.
 
-Live on Aleo testnet: [`zkdarkpool_v5.aleo`](https://testnet.explorer.provable.com/program/zkdarkpool_v5.aleo)
+Live on Aleo testnet: [`zkdarkpool_v8.aleo`](https://testnet.explorer.provable.com/program/zkdarkpool_v8.aleo)
 
 ---
 
@@ -40,7 +40,7 @@ Trader B (seller) →  encrypted OrderAuth  →  Operator Bot
 
 ## Architecture
 
-### Smart Contract: `zkdarkpool_v5.aleo`
+### Smart Contract: `zkdarkpool_v8.aleo`
 
 The Leo contract enforces all settlement rules as zero-knowledge proofs. The operator cannot cheat — every `settle_match` execution is verified on-chain.
 
@@ -221,7 +221,7 @@ Censorship is mitigated by the expiry mechanism — if the operator refuses to s
 ## Deployment
 
 ### Contract
-- **Program ID:** `zkdarkpool_v5.aleo`
+- **Program ID:** `zkdarkpool_v8.aleo`
 - **Network:** Aleo Testnet
 - **Deploy block:** `15,681,876`
 - **Deployed:** April 10, 2026
@@ -229,7 +229,7 @@ Censorship is mitigated by the expiry mechanism — if the operator refuses to s
 ### Bot
 Runs as a Node.js process. Requires:
 ```env
-PROGRAM_ID=zkdarkpool_v5.aleo
+PROGRAM_ID=zkdarkpool_v8.aleo
 OPERATOR_PRIVATE_KEY=APrivateKey1...
 OPERATOR_VIEW_KEY=AViewKey1...
 OPERATOR_ADDRESS=aleo1...

@@ -1,4 +1,4 @@
-# zkperp_amm_v1 — Concentrated Liquidity AMM on Aleo
+# zkperp_amm_v3 — Concentrated Liquidity AMM on Aleo
 
 A Uniswap v3-style Concentrated Liquidity AMM built in Leo 4.0 for the Aleo blockchain.  
 Trading pair: **USDCx / ALEO** · Fee tier: **0.3%** · Network: **Testnet**
@@ -9,7 +9,7 @@ Trading pair: **USDCx / ALEO** · Fee tier: **0.3%** · Network: **Testnet**
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    zkperp_amm_v1.aleo                    │
+│                    zkperp_amm_v3.aleo                    │
 │                                                          │
 │  Transitions (ZK-proven, private inputs)                 │
 │  ┌─────────────────┐  ┌──────────────────┐              │

@@ -46,13 +46,13 @@ node zkperp-bot-manager.mjs
 | `PRIVATE_KEY` | ✅ | Orchestrator Aleo private key (`APrivateKey1...`) |
 | `PROVABLE_API_KEY` | ✅ | Provable API key for DPS proving and record scanning |
 | `PROVABLE_CONSUMER_ID` | ✅ | Provable consumer ID |
-| `PROGRAM_ID_BTC` | ✅ | `zkperp_btc_v21.aleo` |
+| `PROGRAM_ID_BTC` | ✅ | `zkperp_core_v27.aleo` |
 | `PROGRAM_ID_ETH` | ✅ | `zkperp_eth_v21.aleo` |
 | `PROGRAM_ID_SOL` | ✅ | `zkperp_sol_v21.aleo` |
 | `ORACLE_TOKEN` | ✅ | Shared secret — must match `ZKPERP_ORCHESTRATOR_TOKEN` in aleo-oracle |
 | `ZKPERP_ORCHESTRATOR_URL` | ✅ | Bot's own public URL (e.g. `https://zkperp-bot.onrender.com`) — used by oracle coordinator to POST prices |
 | `SCANNER_START_BLOCK` | ✅ | Block height when v21 contracts were deployed (`15356000`) |
-| `PROGRAM_ID` | optional | Legacy fallback (set to `zkperp_btc_v21.aleo`) |
+| `PROGRAM_ID` | optional | Legacy fallback (set to `zkperp_core_v27.aleo`) |
 | `API_PORT` | optional | HTTP server port (default: `3001`) |
 | `EXEC_USE_FEE_MASTER` | optional | Use fee master for proving (default: `false`) |
 | `DISABLE_ORACLE` | optional | Set `true` to skip oracle updates (useful for testing) |
@@ -155,5 +155,5 @@ Required env vars in Render dashboard — see Environment Variables table above.
 | `[SCAN] Provable Scanner failed: 401` | Two bot instances running simultaneously — old instance still holding scanner credentials. Wait for old instance to die or restart service. |
 | `[ORACLE] All price sources failed: HTTP 403` | Binance geo-blocks Frankfurt. Deploy aleo-oracle relay so Chainlink quorum is used instead of Binance fallback. |
 | `[POOL] Could not parse pool_state` | `pool_state` mapping not initialized — call `initialize_slots` first via the frontend. |
-| `update_net_pnl failed` | Check `PROGRAM_ID` env var — must be `zkperp_btc_v21.aleo`, not `zkperp_v21.aleo` (nonexistent). |
+| `update_net_pnl failed` | Check `PROGRAM_ID` env var — must be `zkperp_core_v27.aleo`, not `zkperp_v21.aleo` (nonexistent). |
 | Bot not receiving oracle prices | Check `ZKPERP_ORCHESTRATOR_URL` in aleo-oracle matches bot's public URL. Check `ORACLE_TOKEN` matches `ZKPERP_ORCHESTRATOR_TOKEN`. |

@@ -352,7 +352,7 @@ import zkperp_oracle_v3.aleo;</pre>
         <tr><th>Transition</th><th>Input (consumed)</th><th>Output (reissued)</th></tr>
         <tr><td><code>initialize_slots()</code></td><td>— no inputs —</td><td>PositionSlot(0) · PositionSlot(1) · LPSlot — all zeroed</td></tr>
         <tr><td><code>open_position()</code></td><td>PositionSlot (is_open: false)</td><td>PositionSlot (is_open: true) + LiquidationAuth → orchestrator</td></tr>
-        <tr><td><code>close_position()</code></td><td>PositionSlot (is_open: true) + LiquidationAuth</td><td>PositionSlot (is_open: false, zeroed)</td></tr>
+        <tr><td><code>close_position()</code></td><td>PositionSlot (is_open: true)</td><td>PositionSlot (is_open: false, zeroed)</td></tr>
         <tr><td><code>liquidate()</code></td><td>LiquidationAuth (orchestrator-owned)</td><td>PositionSlot (is_open: false, zeroed) → trader</td></tr>
       </table>
     </div>
@@ -366,6 +366,15 @@ import zkperp_oracle_v3.aleo;</pre>
     <div class="callout green">
       <div class="callout-title">UX Result</div>
       <p>For the trader: the active slot set is always three records (two PositionSlots, one LPSlot), regardless of trade history. Pending TP/SL orders add one OrderReceipt record each until executed or cancelled. Dead records from past liquidations accumulate as wallet dust but do not require user intervention. For the orchestrator: one LiquidationAuth record is held per open position across all traders — this scales with protocol activity, not with any individual user.</p>
+    </div>
+
+    <div class="callout amber">
+      <div class="callout-title">Orphaned Records — Harmless by Design</div>
+      <p>Two record types can become orphaned wallet dust as a side effect of asymmetric ownership:</p>
+      <ul style="margin-top:0.5rem;margin-bottom:0;">
+        <li><strong>Orchestrator's LiquidationAuth after voluntary close:</strong> when a trader calls <code>close_position</code>, only their <code>PositionSlot</code> is consumed — the orchestrator's <code>LiquidationAuth</code> for that position remains in the orchestrator's wallet. Any attempt to use it in <code>liquidate()</code> reverts at finalize because <code>active_position_ids[position_id]</code> has been cleared.</li>
+        <li><strong>Trader's OrderReceipt after TP/SL execution:</strong> <code>execute_take_profit</code> / <code>execute_stop_loss</code> only consume the orchestrator's <code>ExecTPSLAuth</code> — the trader's <code>OrderReceipt</code> remains as dust. It can be reclaimed via the standalone <code>burn_order_receipt</code> transition, which asserts <code>!pending_orders[order_id]</code> to guarantee the order really has been settled.</li>
+      </ul>
     </div>
 
     <h3>Spent Record Detection</h3>
@@ -638,6 +647,11 @@ let slippage: u64 = entry_price > price_data.price
     ? entry_price - price_data.price
     : price_data.price - entry_price;
 assert(slippage &lt;= max_slippage);</pre>
+
+    <div class="callout">
+      <div class="callout-title">Slippage Is User-Controlled</div>
+      <p><code>max_slippage</code> is a <strong>private trader input</strong>, not a protocol constant. It protects the trader from front-run-induced bad fills at the user's chosen tolerance. The protocol does not impose a system-wide slippage cap — a trader who passes <code>u64::MAX</code> effectively disables their own slippage check. Position safety against bad fills is the trader's responsibility; the protocol guarantees only that whatever bound the trader sets is enforced on-chain.</p>
+    </div>
 
     <div class="callout amber">
       <div class="callout-title">Critical: Timestamp is Block Height, Not Unix Time</div>
@@ -1025,7 +1039,8 @@ Live test: ~81 USDC bridged successfully in under 15 minutes</pre>
         <tr><td>No forged liquidation parameters</td><td>BHP256 commitment recomputed from <code>LiquidationAuth</code> fields + asserted against stored hash</td><td><code>finalize_liquidate</code></td></tr>
         <tr><td>No healthy position liquidated</td><td>Margin ratio computed in-circuit from verified params and verified oracle price; <code>margin_bps_scaled &lt; 100</code> asserted</td><td><code>finalize_liquidate</code></td></tr>
         <tr><td>No double-close or double-liquidation</td><td><code>active_position_ids[id]</code> checked and cleared atomically</td><td><code>finalize_close_position</code>, <code>finalize_liquidate</code></td></tr>
-        <tr><td>Exit / liquidation price must match oracle</td><td><code>assert_eq(supplied_price, oracle_prices[asset_id].price)</code> + freshness assertion</td><td>both finalize blocks</td></tr>
+        <tr><td>Exit / liquidation / TP / SL price must match oracle exactly</td><td><code>assert_eq(supplied_price, oracle_prices[asset_id].price)</code> + freshness assertion</td><td><code>finalize_close_position</code>, <code>finalize_liquidate</code>, <code>finalize_execute_take_profit</code>, <code>finalize_execute_stop_loss</code></td></tr>
+        <tr><td>Entry price bounded by trader-set slippage</td><td><code>assert(|entry_price - oracle_price| &lt;= max_slippage)</code> with <code>max_slippage</code> as private trader input</td><td><code>finalize_open_position</code></td></tr>
         <tr><td>No unauthorized oracle update</td><td>Role check: only registered nodes can submit; 2-of-3 required</td><td><code>finalize_submit_price</code></td></tr>
         <tr><td>No LP over-withdrawal</td><td>Full guard formula checked; tx reverts if breached</td><td><code>finalize_remove_liquidity</code></td></tr>
         <tr><td>No stale price trade</td><td><code>block.height - timestamp &lt;= 150</code></td><td><code>finalize_open_position</code>, <code>finalize_close_position</code>, <code>finalize_liquidate</code></td></tr>

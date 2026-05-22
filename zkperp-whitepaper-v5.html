@@ -327,10 +327,25 @@ import zkperp_oracle_v3.aleo;</pre>
       <span class="section-num">§3</span>
       <h2>Slot Record Model</h2>
     </div>
-    <p>Aleo's UTXO record model creates a UX problem for stateful protocols: positions are private records, and a liquidated position cannot be consumed by the trader — the orchestrator owns the LiquidationAuth, not the PositionSlot. Without mitigation, every liquidation would leave a permanent dead record in the trader's wallet. The slot model addresses this by ensuring the trader's wallet always holds a fresh, usable PositionSlot — refilled either by the trader on voluntary close or by the orchestrator on liquidation.</p>
+    <p>ZKPerp uses two distinct slot patterns, both built on Aleo's consume-and-reissue mechanic for refilling records in place. The patterns share an implementation technique but serve different purposes — one is a natural fit for accumulating balances, the other is a deliberate tradeoff that solves a specific UX problem.</p>
 
-    <h3>Solution: Persistent Refilled Slots</h3>
-    <p>Each trader initialises three slot records once. These slots are refilled in place — every state transition consumes the current slot record and reissues a new one with the same <code>slot_id</code>. The trader's active slot count stays constant at three for the lifetime of their account.</p>
+    <h3>LPSlot: Persistent Balance Accumulator</h3>
+    <p>Liquidity provision is fundamentally a single accumulating balance: deposits add, withdrawals subtract, and order doesn't matter. The LPSlot is the natural representation of this — one slot per trader, refilled in place on every state change.</p>
+
+    <div class="table-wrap">
+      <table>
+        <tr><th>Transition</th><th>Input (consumed)</th><th>Output (reissued)</th></tr>
+        <tr><td><code>add_liquidity()</code></td><td>LPSlot (existing amount)</td><td>LPSlot (existing + new_lp_tokens)</td></tr>
+        <tr><td><code>remove_liquidity()</code></td><td>LPSlot (existing amount)</td><td>LPSlot (existing − burn_amount)</td></tr>
+      </table>
+    </div>
+
+    <p>The pattern composes perfectly with the underlying semantics: balance arithmetic is commutative, associative, and order-independent. The LPSlot is essentially a database row with mutable balance, expressed in Aleo's UTXO model. The trader holds exactly one LPSlot for the lifetime of their account.</p>
+
+    <h3>PositionSlot: Post-Liquidation UX Guarantee</h3>
+    <p>Positions are different. Each position is a distinct economic object with its own entry price, size, direction, and liquidation threshold — they don't compose into a single balance. The slot pattern is applied here for a different reason: to solve the dead-record problem that arises from private-position liquidation.</p>
+
+    <p>When the orchestrator liquidates a position, it consumes its LiquidationAuth record (which it owns) but cannot consume the trader's PositionSlot (which only the trader can consume). Without mitigation, every liquidation would leave a permanent dead record in the trader's wallet, with no user-side recovery path. The PositionSlot pattern ensures the trader always has a fresh, usable slot available, refilled either by themselves on voluntary close or by the orchestrator on liquidation.</p>
 
     <div class="table-wrap">
       <table>
@@ -339,19 +354,18 @@ import zkperp_oracle_v3.aleo;</pre>
         <tr><td><code>open_position()</code></td><td>PositionSlot (is_open: false)</td><td>PositionSlot (is_open: true) + LiquidationAuth → orchestrator</td></tr>
         <tr><td><code>close_position()</code></td><td>PositionSlot (is_open: true) + LiquidationAuth</td><td>PositionSlot (is_open: false, zeroed)</td></tr>
         <tr><td><code>liquidate()</code></td><td>LiquidationAuth (orchestrator-owned)</td><td>PositionSlot (is_open: false, zeroed) → trader</td></tr>
-        <tr><td><code>add_liquidity()</code></td><td>LPSlot (existing amount)</td><td>LPSlot (existing + new_lp_tokens)</td></tr>
       </table>
     </div>
 
-    <h3>Slot Direction Binding</h3>
-    <p><code>slot_id</code> is bound to direction inside <code>open_position</code>: slot 0 is reserved for longs, slot 1 for shorts. A trader may therefore hold at most one long and one short position concurrently across all markets — a BTC long and an ETH long cannot coexist, since both require slot 0. This is a deliberate tradeoff in favour of bounded record count; future versions may expand to per-asset slots if demand warrants it.</p>
+    <h3>Slot Direction Binding (PositionSlot only)</h3>
+    <p><code>slot_id</code> is bound to direction inside <code>open_position</code>: slot 0 is reserved for longs, slot 1 for shorts. A trader may therefore hold at most one long and one short position concurrently across all markets — a BTC long and an ETH long cannot coexist, since both require slot 0. This is a deliberate v1 tradeoff: bounded record count and post-liquidation UX in exchange for limited cross-market concurrency. Future versions with orderbook matching will use per-position records to remove this constraint.</p>
 
     <h3>Liquidation UX</h3>
     <p>On liquidation, the orchestrator's <code>liquidate()</code> transition consumes its LiquidationAuth and mints a fresh empty PositionSlot directly to the trader's address. The trader's <em>old</em> filled PositionSlot remains in their wallet as harmless dust — any attempt to use it reverts at finalize because <code>active_position_ids</code> no longer contains the position ID — but a clean empty slot is immediately available for the next trade. No user action is required after liquidation.</p>
 
     <div class="callout green">
       <div class="callout-title">UX Result</div>
-      <p>For the trader: the active slot set is always three records, regardless of trade history. Pending TP/SL orders add one OrderReceipt record each until executed or cancelled. Dead records from past liquidations accumulate as wallet dust but do not require user intervention. For the orchestrator: one LiquidationAuth record is held per open position across all traders — this scales with protocol activity, not with any individual user.</p>
+      <p>For the trader: the active slot set is always three records (two PositionSlots, one LPSlot), regardless of trade history. Pending TP/SL orders add one OrderReceipt record each until executed or cancelled. Dead records from past liquidations accumulate as wallet dust but do not require user intervention. For the orchestrator: one LiquidationAuth record is held per open position across all traders — this scales with protocol activity, not with any individual user.</p>
     </div>
 
     <h3>Spent Record Detection</h3>

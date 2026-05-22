@@ -2,7 +2,7 @@
 
 Private KYC compliance layer for ZKPerp — a privacy-preserving perpetuals DEX on Aleo.
 
-Manages the KYC allowlist, builds Merkle trees, and coordinates the issuance of private `ComplianceRecord`s to approved traders. Built for the Aleo Buildathon.
+Manages the KYC allowlist, builds Merkle trees, and coordinates the issuance of private `ZKPerpComplianceRecord`s to approved traders. Built for the Aleo Buildathon.
 
 ---
 
@@ -16,45 +16,75 @@ Regulated DeFi needs KYC. Traditional approaches publish user identity on-chain 
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  REGISTRATION (once per user)                               │
+│  REGISTRATION (per user, repeats on expiry or root rotation)│
 │                                                             │
 │  1. User completes KYC / connects wallet                    │
 │  2. Backend adds address to allowlist (JSON)                │
 │  3. Merkle tree rebuilt — only new leaves computed          │
 │  4. Admin calls update_root on-chain (delegated proving)    │
 │  5. User fetches Merkle proof from backend                  │
-│  6. User calls issue_compliance(proof)                      │
-│     → ZK proof: "I am in the allowlist"                     │
-│     → Receives private ComplianceRecord in their wallet     │
-│     → Never needs to register again                         │
+│  6. User calls issue_compliance(proof, expires_at)          │
+│     → ZK proof: "I am a leaf in the tree at active root"    │
+│     → Nullifier check prevents double-issuance              │
+│     → Receives private ZKPerpComplianceRecord (valid ~90d)  │
 └─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
 │  TRADING (every action)                                     │
 │                                                             │
-│  7. User calls deposit / trade / withdraw on zkperp_core    │
-│     passing their ComplianceRecord                          │
-│  8. Core asserts ComplianceRecord is valid:                 │
+│  7. User passes ZKPerpComplianceRecord into zkperp_core     │
+│     transitions (open_position / add_liquidity / etc.)      │
+│  8. Core asserts three properties in its own finalize:      │
 │     → issued_under == current active root                   │
-│     → address not revoked                                   │
+│     → address not in revoked mapping                        │
+│     → block.height <= expires_at                            │
 │  9. Record returned unchanged to user's wallet              │
-│     → one-time issuance, permanent validity until revoked   │
-│     → if revoked: next trade rejected instantly             │
+│     → re-used on every trade until expiry, revocation,      │
+│       or root rotation                                      │
+│     → expired/revoked: next trade rejected instantly        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### The ComplianceRecord
+### The ZKPerpComplianceRecord
 
-A private Aleo record issued **once** after KYC approval:
+A private Aleo record issued after KYC approval, valid for up to ~90 days:
 
 ```leo
-record ComplianceRecord {
+record ZKPerpComplianceRecord {
     owner:        address,   // private — only holder can spend
     issued_under: field,     // Merkle root active at issuance
+    expires_at:   u32,       // Aleo block height of expiry
 }
 ```
 
-The record lives in the user's wallet permanently. On every trade, core reads it and asserts validity — no re-issuance needed. Revocation is instant: admin calls `revoke_user(address)` and the next trade fails, without touching the Merkle tree or the record itself.
+The record lives in the user's wallet and is re-used on every trade — `zkperp_core` reads `issued_under` and `expires_at` from the record itself, with no separate cross-program call. The record is returned unchanged from every transition, so trading never consumes it.
+
+**Re-issuance is required when:**
+- The record expires (`block.height > expires_at`, at most ~90 days after issuance)
+- The user is revoked and later reinstated
+- The admin rotates the Merkle root (e.g. after adding/removing allowlist members) — old records carry stale `issued_under` and no longer match `compliance_root`
+
+### Three-way validity gate
+
+On every trade, `zkperp_core` enforces all three conditions in its own finalize block (cross-program mapping reads — no inter-program transition call):
+
+| Check | Failure means | Fix |
+|---|---|---|
+| `cr.issued_under == compliance_root[0u8]` | Root rotated since issuance | Re-call `issue_compliance` |
+| `revoked[caller] == false` | User blacklisted | Admin must `unrevoke_user` |
+| `block.height <= cr.expires_at` | Record expired | Re-call `issue_compliance` |
+
+### Double-issuance protection (nullifiers)
+
+To prevent a user from minting multiple records under the same root (which would let them launder records to non-KYC'd addresses), `issue_compliance` computes a per-issuance nullifier and rejects repeats:
+
+```
+nullifier = Poseidon2::hash_to_field(leaf || computed_root)
+assert(!issued_nullifiers[nullifier])
+issued_nullifiers[nullifier] = true
+```
+
+The nullifier binds the user's leaf hash to the active root. A user can issue **one** record per root epoch. When the admin rotates the root (via `update_root`), nullifiers from the old root are no longer matched on new issuances, so the same user can issue a fresh record. The mapping uses Poseidon2 (faster than BHP256, sufficient for nullifier uniqueness — collision resistance only, no in-circuit verification).
 
 ### The Merkle Tree
 
@@ -64,12 +94,13 @@ The allowlist is stored as a depth-10 Merkle tree (supports 1,024 users). Only t
 - **Node hash**: `BHP256::hash_to_field(FieldPair { left, right })`
 - **Empty slots**: precomputed zero hashes (hardcoded, never recomputed)
 - **Tree cache**: full tree layers persisted to `tree-cache.json` — restarts are instant
+- **Proof shape**: `MerkleProof { path: [MerkleNode; 10] }` where each node has `{ sibling: field, is_left: bool }`
 
-Hashes are computed via `leo run` subprocess to guarantee byte-identical output to the on-chain Leo circuit. This bypasses the Provable SDK's BHP256 implementation which does not match Leo 4.0's snarkVM output.
+Hashes are computed via `leo run` subprocess to guarantee byte-identical output to the on-chain Leo circuit. The Provable SDK's JavaScript BHP256 implementation does not match Leo 4.0's snarkVM output, so server-side hash computation must go through the Leo binary.
 
 ### Delegated Proving
 
-Admin transactions (`update_root`, `revoke_user`) use Provable's TEE-encrypted delegated proving service. This replaces local proof generation (~60s) with server-side proving (~10s):
+Admin transactions (`update_root`, `revoke_user`, `unrevoke_user`) use Provable's TEE-encrypted delegated proving service. This replaces local proof generation (~60s) with server-side proving (~10s):
 
 ```
 1. Build proving request locally (authorization only)
@@ -78,6 +109,8 @@ Admin transactions (`update_root`, `revoke_user`) use Provable's TEE-encrypted d
 4. Submit to /prove/encrypted
 5. Provable proves + broadcasts → returns tx ID
 ```
+
+User-side `issue_compliance` calls use whatever proving the user's wallet provides (Shield Wallet currently proves locally).
 
 ---
 
@@ -185,13 +218,55 @@ On first start: builds the Merkle tree (slow — one `leo run` per address). Eve
 
 **`zkperp_compliance_v7.aleo`** — deployed on Aleo testnet.
 
+### Mappings
+
+| Mapping | Key | Value | Purpose |
+|---|---|---|---|
+| `compliance_root` | `u8` (always `0u8`) | `field` | Current active Merkle root |
+| `revoked` | `address` | `bool` | Per-user blacklist flag |
+| `admin` | `u8` (always `0u8`) | `address` | Admin address (seeded by constructor) |
+| `issued_nullifiers` | `field` | `bool` | Per-(user, root) issuance tracker — prevents double-mint |
+
+### Initialization
+
+An `@custom constructor()` runs once at deploy time and writes `self.program_owner` (the deployer) into `admin[0u8]`. There is no `set_admin` or admin rotation function in v7 — the admin role is **non-transferable for the lifetime of the deployment**. Admin rotation is planned for v8.
+
+### Transitions
+
 | Transition | Caller | Description |
 |---|---|---|
-| `update_root(field)` | Admin | Publish new Merkle root after batch approval |
-| `revoke_user(address)` | Admin | Instantly blacklist a user |
-| `unrevoke_user(address)` | Admin | Remove blacklist |
-| `issue_compliance(proof)` | User | Prove allowlist membership → receive `ComplianceRecord` |
-| `verify_compliance(record)` | Core | Assert record valid — called inline by `zkperp_core` |
+| `update_root(new_root: field)` | Admin | Publish new Merkle root after batch approval |
+| `revoke_user(user: address)` | Admin | Instantly blacklist a user |
+| `unrevoke_user(user: address)` | Admin | Remove blacklist |
+| `issue_compliance(proof: MerkleProof, expires_at: u32)` | User | Prove allowlist membership → receive `ZKPerpComplianceRecord` |
+| `verify_compliance(cr: ZKPerpComplianceRecord)` | External callers | Assert record valid (returns record unchanged) |
+
+### How `zkperp_core` consumes compliance
+
+The `verify_compliance` transition is exposed for external programs that want a single-call gate. However, `zkperp_core_v28` itself does **not** call `verify_compliance` — to avoid an extra transition call per trade, core imports `zkperp_compliance_v7.aleo` and reads its mappings directly inside its own finalize blocks:
+
+```leo
+let active_root: field = Mapping::get(zkperp_compliance_v7.aleo::compliance_root, 0u8);
+assert_eq(cr.issued_under, active_root);
+let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v7.aleo::revoked, caller, false);
+assert(!is_revoked);
+assert(block.height <= cr.expires_at);
+```
+
+This is the same three-check gate that `verify_compliance` performs, just inlined into each core transition's finalize block. The `verify_compliance` function remains available for other Aleo programs (e.g. zkdarkpool) that prefer the single-call pattern over cross-program mapping reads.
+
+### `issue_compliance` finalize gates
+
+In addition to recomputing the Merkle root from the supplied proof and asserting it matches `compliance_root[0u8]`, the finalize block enforces:
+
+| Gate | Assertion |
+|---|---|
+| Caller not revoked | `!revoked[self.caller]` |
+| Not already issued under this root | `!issued_nullifiers[nullifier]` |
+| Expiry must be in the future | `expires_at > block.height` |
+| Expiry within 90-day cap | `expires_at <= block.height + 7_776_000u32` |
+
+After successful issuance, the nullifier is recorded in `issued_nullifiers`.
 
 ---
 
@@ -221,6 +296,21 @@ ZKPerp's compliance architecture addresses real regulatory requirements:
 - **Sanctions screening**: instant revocation via `revoke_user` — no Merkle tree rotation needed
 - **Audit trail**: on-chain root epoch + `/audit` endpoint proves enforcement without exposing user data
 - **Legal disclosure**: the off-chain allowlist maps wallet → identity under legal order, never published on-chain
+- **Expiry**: records auto-expire within ~90 days, forcing periodic re-attestation
 - **MiCA/FATF positioning**: "We know who our traders are. The blockchain doesn't — and it doesn't need to."
 
 In production, the allowlist would come from a regulated KYC provider. In the demo, judges self-enroll. After that, the cryptographic path is identical.
+
+---
+
+## Known Limitations & Future Work
+
+**Non-transferable admin** — `admin[0u8]` is seeded by the deploy-time `@custom constructor()` and there is no `set_admin` transition. Once deployed, the admin role cannot be rotated without redeploying the contract. v8 will add admin rotation gated on a multisig or governance contract.
+
+**Header comment** — line 1 of `main.leo` reads `zkperp_compliance_v2.aleo` but the program declaration is `zkperp_compliance_v7.aleo`. Cosmetic stale comment, no functional impact.
+
+**Tree depth fixed at 10** — 1,024-user ceiling. Beyond that, the contract requires a redeployment with a deeper proof array (e.g. depth 16 = 65k users, depth 20 = 1M users). The depth is fixed in the Leo program because the proof verification loop is unrolled.
+
+**Nullifier cleanup** — `issued_nullifiers` grows unboundedly across root rotations. Old nullifiers are functionally dead (they can never be hit again because their root no longer matches) but they still consume on-chain state. Future cleanup transition planned.
+
+**No `set_admin` / multisig** — see "Non-transferable admin" above. For production, admin should be a 2-of-N multisig or governance contract, not a single hot key.

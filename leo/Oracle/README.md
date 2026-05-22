@@ -26,7 +26,7 @@ Each relayer runs independently. When ≥2 submit the same price for the same as
 
 ## Security Model
 
-Each `submit_price` call is an Aleo transaction — Ed25519 signature verification happens at the protocol level before the Leo program executes. `self.caller` inside the program is a cryptographically verified identity, not a trust assertion.
+Each `submit_price` call is an Aleo transaction — signature verification happens at the protocol level before the Leo program executes. `self.caller` inside the program is a cryptographically verified identity, not a trust assertion.
 
 **What a single compromised key can do:** delay a round by submitting a divergent price, causing the proposal to reset. It cannot commit a bad price alone.
 
@@ -38,6 +38,24 @@ This is the closest design to Chainlink OCR that Leo currently allows. The ideal
 
 ## On-Chain Program (`main.leo`)
 
+### Structs
+
+```leo
+struct PriceData {
+    price:     u64,        // price scaled to 8 decimals (e.g. $69,000 = 6,900,000,000,000)
+    timestamp: u32,        // Aleo block height at quorum (NOT Unix time)
+}
+
+struct PriceProposal {
+    price:     u64,        // candidate price under consideration
+    timestamp: u32,        // candidate timestamp
+    votes:     u8,         // number of distinct oracle votes so far (0, 1, or 2)
+    voter_a:   address,    // first voter (zero address if no vote yet)
+    voter_b:   address,    // second voter
+    voter_c:   address,    // third voter
+}
+```
+
 ### Mappings
 
 | Mapping | Key | Value | Purpose |
@@ -46,22 +64,33 @@ This is the closest design to Chainlink OCR that Leo currently allows. The ideal
 | `oracle_prices` | `field` (asset_id) | `PriceData` | Committed prices read by core contracts |
 | `price_proposals` | `field` (asset_id) | `PriceProposal` | Pending votes accumulating toward quorum |
 
+### Initialization
+
+The program uses an `@custom constructor()` block that runs once at deploy time. It writes `self.program_owner` (the deployer address) into all four `roles` slots. After deploy, the deployer rotates in the real oracle node addresses via `set_oracle` for slots 0/1/2 — slot 3 (admin) remains the deployer unless explicitly transferred with `set_admin`.
+
 ### Transitions
 
 **`submit_price(asset_id: field, price: u64, timestamp: u32)`**
 Called independently by each oracle node. Finalize logic:
-1. Assert caller is a registered oracle node (roles 0–2)
-2. Load existing proposal or create empty one
-3. If proposal price differs from submitted price → reset proposal (new round)
-4. Assert caller has not already voted in current round
-5. Record vote in next empty slot
-6. If `votes >= 2` → write to `oracle_prices`, mark quorum reached
+
+1. **Authorization** — caller must be in `roles[0u8 | 1u8 | 2u8]`. Admin slot does not authorize price submissions.
+2. **Load proposal** — fetch existing `PriceProposal` for `asset_id`, or initialize an empty one keyed at the submitted price.
+3. **Round continuity** — three branches:
+   - If `proposal.votes == 0` (fresh slot, or proposal was cleared after a previous quorum) → start a new round at the submitted price
+   - Else if `proposal.price == submitted price` → continue accumulating votes in the current round
+   - Else (`votes > 0` AND price differs) → reset proposal, start a new round at the submitted price
+4. **No double-voting** — reject if the caller is already recorded as `voter_a`, `voter_b`, or `voter_c` in the current round.
+5. **Record vote** — caller is written into the next empty voter slot (`votes == 0` → `voter_a`, `votes == 1` → `voter_b`, `votes == 2` → `voter_c`). `votes` is incremented.
+6. **Quorum check** — `new_votes >= 2`.
+7. **Commit and clear** — if quorum reached, `oracle_prices[asset_id]` is updated to the new price/timestamp and the proposal slot is reset to all-zero so the next round can start fresh even at the same price. If not, the proposal is stored with the incremented vote count and the existing `oracle_prices` value is preserved unchanged.
+
+Note: `Mapping::set(oracle_prices, ...)` is called on every `submit_price` execution; the new-vs-existing value is gated by a ternary inside the finalize block. This is the Leo idiom for conditional writes.
 
 **`set_oracle(slot: u8, new_addr: address)`**
-Admin-only. Rotates oracle node address without redeployment.
+Admin-only. Rotates oracle node address at the given slot. `slot` is validated against `<= 2u8` — admins cannot accidentally overwrite their own admin slot via this function; use `set_admin` for that.
 
 **`set_admin(new_admin: address)`**
-Admin-only. Transfers admin role.
+Admin-only. Transfers the admin role (slot 3).
 
 ---
 
@@ -76,7 +105,8 @@ Each relayer independently:
 2. Checks freshness against `heartbeatSec` per market
 3. Deduplicates by `roundId` — skips if same Chainlink round already submitted
 4. Normalizes price to 8 decimals → `u64`
-5. Calls `aleoClient.js/submitPriceOnChain`
+5. Fetches current Aleo block height (used as `timestamp`)
+6. Calls `aleoClient.js/submitPriceOnChain`
 
 ### `aleoClient.js`
 Wraps the Provable SDK. Builds and broadcasts the `submit_price` transaction with the relayer's private key. Fee: 0.01 credits, public fee.
@@ -114,14 +144,20 @@ POLL_INTERVAL_MS=15000
 {
   "BTC": {
     "assetKey": "1field",
-    "feedAddress": "0x...",
+    "feedAddress": "0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c",
     "rpcEnvVar": "EVM_RPC_URL",
     "heartbeatSec": 3600
   },
   "ETH": {
     "assetKey": "2field",
-    "feedAddress": "0x...",
+    "feedAddress": "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",
     "rpcEnvVar": "EVM_RPC_URL",
+    "heartbeatSec": 3600
+  },
+  "SOL": {
+    "assetKey": "3field",
+    "feedAddress": "0x24ceA4b8ce57cdA5058b924B9B9987992450590c",
+    "rpcEnvVar": "EVM_RPC_URL_ARB",
     "heartbeatSec": 3600
   }
 }
@@ -131,30 +167,34 @@ POLL_INTERVAL_MS=15000
 
 ## Deployment
 
+The constructor runs automatically at deploy and seeds all four `roles` slots with the deployer address.
+
 ```bash
 # Deploy oracle program
 leo deploy --network testnet
 
-# Initialize roles (call once after deploy)
-# Set oracle A, B, C addresses via set_oracle transitions
+# Rotate in the real oracle node addresses (admin = deployer at this point)
 leo execute set_oracle 0u8 aleo1..._node_a --network testnet
 leo execute set_oracle 1u8 aleo1..._node_b --network testnet
 leo execute set_oracle 2u8 aleo1..._node_c --network testnet
+
+# (Optional) transfer admin to a multisig or cold wallet
+leo execute set_admin aleo1..._admin --network testnet
 
 # Start all three relayers
 npm start
 ```
 
+After rotation, each relayer's address must match its corresponding slot — Relayer A signs with the key whose address is in `roles[0u8]`, and so on. The `submit_price` finalize will reject submissions from any address not in slots 0/1/2.
+
 ---
 
 ## Known Limitations & Future Work
 
-**Caller-supplied timestamp** — `timestamp` is provided by the relayer, not derived from `block.height`. A malicious relayer could supply a stale or future timestamp. Mitigation: replace with `block.height` in finalize and use block-based staleness checks in core contracts.
+**Caller-supplied timestamp** — the `timestamp` argument is provided by the relayer, not derived from `block.height` inside the program. A malicious relayer could supply a stale or future block height. Downstream contracts mitigate this by computing `block.height - timestamp <= MAX_PRICE_AGE_BLOCKS` themselves at read time, but the oracle itself does not validate the submitted timestamp. Future work: derive `timestamp` from `block.height` inside `submit_price` finalize, removing the relayer's influence over this field.
 
-**No price tolerance band** — if relayers submit divergent prices (e.g. due to feed latency), the proposal resets silently and the round produces no quorum. Staleness checks in consuming contracts catch this as a downstream effect.
-
-**Proposal not cleared after quorum** — a third relayer submitting after quorum increments `votes` to 3 and re-writes the same price harmlessly. A post-quorum reset would avoid the redundant write.
-
-**`@custom constructor` / `self.program_owner`** — these are not valid Leo syntax. Role initialization is handled via a post-deploy `set_oracle` sequence called by the deployer address. The constructor block in the current file is non-functional and will be removed in v3.
+**No price tolerance band** — if relayers submit divergent prices (e.g. due to feed latency), the proposal resets silently and the round produces no quorum. Staleness checks in consuming contracts catch this as a downstream effect. A future version could accept prices within ±N basis points as "agreeing" and commit the median.
 
 **Threshold Schnorr (FROST)** — the cryptographically ideal design is a single transaction carrying a co-signed report verified on-chain against two public keys. This requires a `verify_schnorr(pk, msg, sig)` opcode. Leo does not expose this yet. When Aleo ships lower-level signature verification primitives, the oracle can be upgraded to single-transaction quorum with no change to the consuming contracts.
+
+**Admin is a single hot key** — `roles[3u8]` is a single address with full power to rotate oracle nodes. For production, transfer admin to a multisig or governance contract via `set_admin`.

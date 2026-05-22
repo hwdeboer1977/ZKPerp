@@ -32,8 +32,8 @@ Trader B (seller) →  encrypted OrderAuth  →  Operator Bot
                                                ↓
                             FillReceipt → Trader A  (buy confirmed)
                             FillReceipt → Trader B  (sell confirmed)
-                            AssetRecord → Trader B  (asset delivered)
-                            USDCx       → Trader A  (payment received)
+                            AssetRecord → Trader A  (asset delivered)
+                            USDCx       → Trader B  (payment received)
 ```
 
 ---
@@ -44,53 +44,107 @@ Trader B (seller) →  encrypted OrderAuth  →  Operator Bot
 
 The Leo contract enforces all settlement rules as zero-knowledge proofs. The operator cannot cheat — every `settle_match` execution is verified on-chain.
 
-**Key transitions:**
+**All transitions:**
 
 | Transition | Who calls | What it does |
 |---|---|---|
-| `deposit_asset` | Seller | Escrows the asset being sold, issues `DepositAuth` to operator |
-| `submit_order` | Buyer or Seller | Places an order, issues `OrderAuth` to operator |
+| `deposit_asset` | Seller | Escrows the asset being sold; issues `DepositAuth` to operator |
+| `submit_order` | Buyer or Seller | Places an order; issues `OrderAuth` to operator |
+| `cancel_order` | User | Burns a generic OrderCommitment, marks nonce consumed |
+| `cancel_buy_order` | Buyer | Cancels a buy order specifically (no escrow refund needed — USDCx never escrows) |
+| `cancel_and_refund_asset` | Seller | Cancels a sell-side deposit; refunds the escrowed asset back to the seller |
 | `settle_match` | Operator | Settles a matched pair using `OrderAuth` + `DepositAuth` |
-| `claim_test_asset` | Anyone | Claims 10 test units of BTC/ETH/SOL (testnet only) |
+| `partial_fill` | Operator | Settles part of an order, leaving residual liquidity for future matches |
+| `set_operator` | Admin | Rotates the operator address (admin-only) |
 | `withdraw_fees` | Operator | Claims accumulated protocol fees |
+| `claim_test_asset` | Anyone | Claims 10 test units of BTC/ETH/SOL (testnet only) |
+| `mint_test_asset` | Admin | Mints test asset to a specific recipient (testnet only) |
 
-**On-chain enforcement (ZK constraints in `settle_match`):**
-- `clearing_price >= sell_order.limit_price` — seller gets at least their minimum
-- `clearing_price <= buy_order.limit_price` — buyer pays at most their maximum
-- `buy_order.order_nonce` not consumed — no double-fill
-- `sell_order.order_nonce` not consumed — no double-fill
-- `deposit_auth.order_nonce == sell_order.order_nonce` — escrowed asset matches sell order
-- `deposit_auth.amount >= fill_size` — sufficient collateral
+**Two-role system:**
+
+| Role | Slot | Capability |
+|---|---|---|
+| Admin | `roles[0u8]` | Can call `set_operator`, `mint_test_asset` |
+| Operator | `roles[1u8]` | Can call `settle_match`, `partial_fill`, `withdraw_fees`. Receives `OrderAuth` and `DepositAuth` records. |
+
+The `@custom constructor()` runs at deploy time and seeds both roles to `self.program_owner`. They can later diverge via `set_operator` — useful for operating the matching bot from a different key than admin. The admin role has no settlement powers.
+
+**Constants:**
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `MIN_FILL_SIZE` | `1_000_000u64` | Minimum fill size (1.0 unit at 6 decimals) |
+| `MAX_PRICE` | `1_000_000_000u64` | Maximum limit price |
+| `FEE_BPS` | `10u64` | Protocol fee = 0.10% |
+| `BPS_DENOM` | `10_000u64` | Basis-point denominator |
+| `CLAIM_AMOUNT` | `10_000_000u64` | Test asset claim size (10 units) |
+
+**On-chain ZK constraints enforced in `settle_match`:**
+
+- `buy_auth.owner == self.caller`, `sell_auth.owner == self.caller`, `deposit_auth.owner == self.caller` — operator must own all three records
+- `buy_auth.asset_id == sell_auth.asset_id == deposit_auth.asset_id` — cross-asset trades rejected
+- `buy_auth.direction == true`, `sell_auth.direction == false` — direction enforced per side
+- `deposit_auth.user == sell_auth.user` — deposit must belong to the seller (matched by user address, see note below)
+- `clearing_price <= buy_auth.limit_price` — buyer pays at most their maximum
+- `clearing_price >= sell_auth.limit_price` — seller gets at least their minimum
+- `0 < clearing_price <= MAX_PRICE`
+- `MIN_FILL_SIZE <= fill_size <= buy_auth.size`, `<= sell_auth.size`, `<= deposit_auth.amount`
+- `buyer_token.owner == buy_auth.user` — buyer's USDCx token must belong to buyer
+- `buyer_token.amount >= gross_cost` — buyer can afford the trade
+- In finalize: `block.height <= buy_auth.expiry` and `<= sell_auth.expiry` — neither side expired
+- In finalize: `!order_consumed[buy_nonce]` and `!order_consumed[sell_nonce]` — no double-fill, both nonces atomically set true
 
 **What leaks on-chain (finalize arguments are always public on Aleo):**
+
 - That a settlement occurred
-- Order expiry blocks
-- Fee paid
-- Both order nonces (as consumed flags)
+- Order nonces (as consumed flags)
+- Fee accrued to vault
 
 **What stays private:**
+
 - Order size
 - Exact limit prices
+- Clearing price (passed as private transition input, not a finalize argument)
+- Fill size
 - Trader addresses
 - Counterparty identity
+- Expiry blocks (held in OrderAuth, asserted but never published)
 
-### The `LiquidationAuth` Pattern (v5 Innovation)
+### Deposit binding: by user, not by order nonce
 
-Previous versions required off-chain record transfer: the operator needed to receive the user's `OrderCommitment` record via an encrypted API call. This was complex (ECIES encryption, key management) and fragile.
+The `DepositAuth` record has no `order_nonce` field — it carries `{ owner, user, asset_id, amount }`. The contract enforces `deposit_auth.user == sell_auth.user` at settle time, binding the deposit to the seller by **address**. A seller can therefore have multiple deposits and multiple sell orders open in the same asset; the operator chooses which deposit settles which order.
 
-v5 eliminates this entirely using the **operator-auth record pattern** from ZKPerp:
+This is a deliberate simplification: requiring pre-binding would force traders to know their order nonce before deposit, which complicates UX. The trust impact is bounded — the operator can pair deposits to orders, but cannot create or modify either record, cannot settle below the seller's limit, and cannot send the asset anywhere except to the matched buyer.
+
+### Cancellation paths
+
+Three user-initiated escapes exist before order expiry:
+
+| Transition | Used by | Effect |
+|---|---|---|
+| `cancel_order` | Either side | Burns the OrderCommitment, marks order nonce consumed. No asset refund. |
+| `cancel_buy_order` | Buyer | Specifically asserts `direction == true`. Otherwise same as `cancel_order`. |
+| `cancel_and_refund_asset` | Seller | Burns the `AssetEscrowReceipt`, refunds the escrowed `AssetRecord`, marks the **deposit salt** consumed (so the same deposit can't be refunded twice). |
+
+The `AssetEscrowReceipt.order_nonce` field is misleadingly named — it's actually the **deposit salt** passed to `deposit_asset`, not an order nonce. It serves as a nullifier for the deposit (preventing double-refund), not as a link to any specific order. A trader can deposit with one salt and then submit orders with completely independent nonces.
+
+### The Operator-Auth Record Pattern (v5+ innovation)
+
+Earlier versions required off-chain record transfer: the operator received the user's `OrderCommitment` via an encrypted API call. This was complex (ECIES encryption, key management) and fragile.
+
+v5 onward eliminates this entirely using the **operator-auth pattern** borrowed from ZKPerp's LiquidationAuth:
 
 ```
 submit_order() returns:
   → OrderCommitment  (to user's wallet — their proof of order)
-  → OperatorOrderRef (to operator — lightweight: nonce + direction)
+  → OperatorOrderRef (to operator — lightweight: nonce + direction + asset)
   → OrderAuth        (to operator — ALL fields needed to settle)
 
 deposit_asset() returns:
   → AssetRecord[escrowed]  (to user — their asset locked)
   → AssetRecord[change]    (to user — remainder)
-  → AssetEscrowReceipt     (to user — receipt)
-  → DepositAuth            (to operator — amount + nonce)
+  → AssetEscrowReceipt     (to user — cancellation receipt with deposit salt)
+  → DepositAuth            (to operator — amount + user + asset_id, NO nonce)
 ```
 
 The operator receives everything on-chain at order placement time. No JSON files, no ECIES, no API calls between frontend and bot.
@@ -120,7 +174,7 @@ Clearing price = P that maximises volume
 All matched buyers pay the same clearing price, all matched sellers receive the same clearing price. This is identical to how traditional dark pools and call auctions work.
 
 **Safety checks before matching:**
-- Sell orders without a live `DepositAuth` in memory are skipped (their escrow is spent)
+- Sell orders without a live `DepositAuth` from the same seller in the same asset are skipped
 - Expired orders are pruned before each batch
 - On confirmed settlement: `OrderAuth`, `DepositAuth` removed from memory; `START_BLOCK` updated in `.env`
 
@@ -148,11 +202,12 @@ executeTransaction() → Shield wallet approves → tempTxId returned
 ### Sell Side
 ```
 1. Trader claims test asset (Tools → Claim Test Asset)
-2. Trader deposits asset with a generated nonce (Tools → Deposit Asset)
-   → Contract issues DepositAuth to operator on-chain
+2. Trader deposits asset with a generated salt (Tools → Deposit Asset)
+   → Contract issues DepositAuth to operator on-chain (bound to seller by user+asset_id)
+   → User receives escrowed AssetRecord, change AssetRecord, AssetEscrowReceipt
    → Bot scans and stores DepositAuth in memory
 3. Trader goes to Order → Sell
-   → Bot /deposits endpoint returns available deposits
+   → Bot /deposits endpoint returns the seller's available deposits
    → Trader selects deposit, enters size + min price
    → submit_order issues OrderAuth to operator on-chain
    → Bot scans and adds sell order to order book
@@ -174,13 +229,20 @@ Every BATCH_BLOCKS blocks:
    a. USDCx scanner refreshes Token + Credentials from Provable API
    b. Delegated proving: pm.provingRequest() → Provable DPS → tx broadcast
    c. On confirmation:
-      - FillReceipt issued to buyer and seller
-      - USDCx payment transferred to buyer's change record
-      - Asset record returned to seller (or transferred to buyer)
-      - Protocol fee (0.10%) accrued to fee_vault
+      - FillReceipt issued to buyer (with fee_paid)
+      - FillReceipt issued to seller (with fee_paid = 0)
+      - USDCx payment transferred buyer → seller (gross_cost = fill_size × clearing_price / 1_000_000)
+      - Asset record (fill_size) returned to buyer
+      - Asset record (deposit.amount - fill_size) returned to seller as remainder
+      - Protocol fee (0.10% of gross_cost) accrued to fee_vault
+      - Both order nonces marked consumed
       - OrderAuth + DepositAuth removed from operator memory
       - START_BLOCK updated in .env
 ```
+
+### Fee Model
+
+**Buyer-side only.** The 0.10% protocol fee is computed as `(gross_cost × 10) / 10_000` and is borne by the **buyer**. The seller receives the full clearing-price-multiplied amount without deduction. Both `FillReceipt` records carry a `fee_paid` field: the buyer's shows the actual fee, the seller's is always `0u64`. Fees are denominated in USDCx and accrue to the on-chain `fee_vault[0u8]` mapping. The operator withdraws fees via `withdraw_fees`.
 
 ---
 
@@ -190,14 +252,14 @@ Every BATCH_BLOCKS blocks:
 |---|---|---|
 | Order direction (buy/sell) | Operator only | From OperatorOrderRef |
 | Asset ID | Operator only | From OperatorOrderRef |
-| Order size | Nobody | Encrypted in OrderAuth |
-| Limit price | Nobody | Encrypted in OrderAuth |
-| Trader address | Nobody | Owner field is private |
-| Clearing price | Everyone | Finalize argument (public) |
-| That a settlement occurred | Everyone | On-chain transaction |
-| Expiry blocks | Everyone | Finalize argument (public) |
-| Fee paid | Everyone | Finalize argument (public) |
+| Order size | Nobody | Encrypted in OrderAuth record |
+| Limit price | Nobody | Encrypted in OrderAuth record |
+| Trader address | Nobody | Owner field on records is private |
+| Clearing price | Nobody | Private transition input, not in finalize |
+| Fill size | Nobody | Private transition input, not in finalize |
 | Order nonces (consumed) | Everyone | Finalize — double-fill prevention |
+| Fee accrued (vault total) | Everyone | `fee_vault` mapping |
+| That a settlement occurred | Everyone | On-chain transaction |
 
 The operator sees direction and asset from `OperatorOrderRef` but **not** size or price. The full `OrderAuth` is encrypted to the operator's address and only Unshieldable with the operator view key.
 
@@ -207,14 +269,18 @@ The operator sees direction and asset from `OperatorOrderRef` but **not** size o
 
 | Action | Can Operator Do It? | Why Not |
 |---|---|---|
-| Settle outside limit prices | ❌ No | ZK constraint in `settle_match` |
-| Steal escrowed assets | ❌ No | DepositAuth only spendable in `settle_match` |
-| Double-fill an order | ❌ No | `order_consumed` mapping on-chain |
-| Censor orders | ⚠️ Yes | Orders expire after `expiry` blocks |
-| See order sizes/prices | ⚠️ Yes | Operator holds OrderAuth records |
-| Front-run orders | ⚠️ Limited | Batch auction reduces front-running opportunity |
+| Settle outside limit prices | ❌ No | ZK constraint: `sell.limit ≤ clearing ≤ buy.limit` |
+| Steal escrowed assets | ❌ No | DepositAuth only spendable in `settle_match`; asset goes to buyer or remainder back to seller |
+| Forge order fields | ❌ No | OrderAuth contents come from `submit_order` and are signed by user |
+| Double-fill an order | ❌ No | `order_consumed` mapping checked + set atomically in finalize |
+| Pair deposit to wrong seller | ❌ No | `deposit_auth.user == sell_auth.user` enforced |
+| Settle expired orders | ❌ No | `block.height <= expiry` for both buy and sell |
+| Choose which of seller's deposits backs a fill | ⚠️ Yes | Deposits matched to seller by address, not by order nonce — operator picks |
+| Censor orders | ⚠️ Yes | Mitigated by `cancel_order` / `cancel_buy_order` / `cancel_and_refund_asset` and the expiry mechanism |
+| See order sizes/prices | ⚠️ Yes | Operator holds OrderAuth records (necessary for matching) |
+| Front-run orders | ⚠️ Limited | Batch auction with uniform clearing price reduces front-running surface |
 
-Censorship is mitigated by the expiry mechanism — if the operator refuses to settle, traders can prove their order was placed (via `OrderCommitment` record) and funds are recoverable after expiry.
+Users can recover funds before expiry without operator cooperation: sellers call `cancel_and_refund_asset` to reclaim their escrow, buyers call `cancel_buy_order` to invalidate their order (USDCx is never escrowed buyer-side, so no refund needed).
 
 ---
 
@@ -261,16 +327,18 @@ npm run build         # production build
 ## Technical Constraints
 
 **Aleo platform constraints:**
-- `finalize` arguments are always public — clearing price, expiry, fee visible on-chain
+- `finalize` arguments are always public — fee, consumed nonces visible on-chain
 - 32 call limit per transaction — limits batch size
-- ~6s block time, ~30-60s proving time — throughput ~1-2 settlements/minute
-- One settlement per transaction — no batch settlement
+- ~6s block time, ~30–60s proving time — throughput ~1–2 settlements/minute
+- One settlement per transaction — no batch settlement at the contract level
 
 **Design decisions:**
 - Single operator (centralised matching, decentralised settlement verification)
 - In-memory order book — state lost on restart, `START_BLOCK` determines recovery window
 - USDCx (`test_usdcx_stablecoin.aleo`) as the quote currency for testnet
 - Uniform clearing price (not FIFO) — fairer for privacy-preserving batch auctions
+- Buyer-side fee only — reduces transaction complexity; seller receives clean payout
+- Deposit matched to seller by user address, not bound to specific order nonce — improves UX at the cost of weaker cryptographic pairing
 
 ---
 
@@ -282,7 +350,7 @@ npm run build         # production build
 | Trader identity | ❌ Public | ❌ Public | ✅ Private |
 | Settlement verification | Off-chain | Off-chain | ✅ On-chain ZK proof |
 | Front-running resistance | ❌ No | ❌ No | ✅ Batch auction |
-| Censorship resistance | ❌ Centralised | ❌ Centralised | ⚠️ Expiry fallback |
+| Censorship resistance | ❌ Centralised | ❌ Centralised | ⚠️ Cancel + expiry fallback |
 
 ---
 
@@ -290,17 +358,30 @@ npm run build         # production build
 
 - [ ] Multi-operator support (threshold settlement)
 - [ ] Asset bridge (replace `claim_test_asset` with real bridge)
-- [ ] Partial fill support (currently one full fill per settlement)
+- [x] Partial fill support — `partial_fill` transition deployed in v8
 - [ ] ETH/SOL markets (separate program per market — required by Aleo privacy model)
 - [ ] Record consolidation (`join` multiple AssetRecords)
 - [ ] On-chain price oracle integration for clearing price validation
 - [ ] Mainnet deployment
+- [ ] Deposit-to-order nonce binding (stronger cryptographic pairing than current address-only binding)
+
+---
+
+## Known Limitations & Future Work
+
+**Stale file header** — line 3 of `main.leo` reads `zkdarkpool_v5.aleo` but the program declaration at line 64 is `zkdarkpool_v8.aleo`. Cosmetic stale comment from v5→v8 iterations, no functional impact.
+
+**Address-based deposit binding** — see "Deposit binding" section above. The operator selects which of a seller's deposits backs each sell-order settlement. Future versions could bind `DepositAuth.order_nonce` at deposit time for stronger pairing, at the cost of pre-knowing the order nonce.
+
+**Single operator** — censorship mitigated by user-initiated cancel transitions and order expiry, but a stalled operator forces traders to wait for expiry or proactively cancel. Multi-operator threshold settlement is on the roadmap.
+
+**In-memory order book** — bot state is reconstructed from on-chain records on restart, using `START_BLOCK` as the recovery anchor. Operator can fall behind during prolonged downtime; users with orders placed during the gap may need to cancel and resubmit.
 
 ---
 
 ## Related Projects
 
-- [ZKPerp](https://zkperp.io) — Private perpetuals DEX on Aleo (same operator key infrastructure)
+- [ZKPerp](https://zkperp.io) — Private perpetuals DEX on Aleo (same operator-auth record pattern, same compliance layer)
 - [HumanityLink](https://humanitylink.org) — ZK-based humanitarian aid distribution on Aleo
 
 ---

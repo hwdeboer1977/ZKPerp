@@ -128,10 +128,10 @@
     <h1>ZKPerp — Privacy-First<br><span>Perpetual Futures</span></h1>
     <p class="cover-subtitle">A zero-knowledge perpetual DEX built natively on the Aleo blockchain. Position sizes, entry prices, leverage, and PnL are cryptographically private by default — hidden from all other market participants, including the protocol itself.</p>
     <div class="cover-meta">
-      <div class="cover-meta-item"><div class="label">Protocol</div><div class="value">zkperp_core_v28.aleo · zkperp_core_eth_v28.aleo · zkperp_core_sol_v28.aleo · zkperp_oracle_v3.aleo · zkperp_compliance_v7.aleo · zkperp_amm_v3.aleo · zkdarkpool_v5.aleo · test_usdcx_stablecoin.aleo</div></div>
+      <div class="cover-meta-item"><div class="label">Protocol</div><div class="value">zkperp_core_v28.aleo · zkperp_core_eth_v28.aleo · zkperp_core_sol_v28.aleo · zkperp_oracle_v3.aleo · zkperp_compliance_v7.aleo · zkperp_amm_v4.aleo · zkdarkpool_v8.aleo · test_usdcx_stablecoin.aleo</div></div>
       <div class="cover-meta-item"><div class="label">Network</div><div class="value">Aleo Testnet</div></div>
       <div class="cover-meta-item"><div class="label">Author</div><div class="value">Henk-Wim de Boer</div></div>
-      <div class="cover-meta-item"><div class="label">Version</div><div class="value">Wave 5.1 · May 2026</div></div>
+      <div class="cover-meta-item"><div class="label">Version</div><div class="value">v28 · May 2026</div></div>
     </div>
     <div class="cover-badges">
       <span class="cover-badge green">● Aleo Testnet Live</span>
@@ -181,7 +181,7 @@
     </div>
     <p>ZKPerp is a decentralized perpetual futures exchange built natively on the Aleo blockchain — a Layer-1 network designed from the ground up around zero-knowledge proofs. Unlike existing perpetual DEX protocols (GMX, dYdX, Hyperliquid), where every position size, entry price, leverage ratio, and PnL figure is permanently visible on-chain, ZKPerp stores all position data in Aleo private records: encrypted UTXO-style objects readable only by the position owner's viewing key.</p>
     <p>This is not a privacy layer bolted on top of a transparent system. ZKPerp is built in Leo 4.0 — Aleo's native language — and leverages the platform's fundamental property: the Aleo VM can verify the mathematical correctness of any computation — that a position was opened at a valid price, with valid collateral, producing a valid PnL — entirely through a ZK proof, without the contract ever learning the underlying values.</p>
-    <p>Wave 5 closed the most significant architectural gaps identified in the Wave 4 judge review: the <strong>position commitment scheme</strong> (eliminates the inflated-payout attack vector on close), the migration to <strong>fully on-chain 2-of-3 oracle quorum</strong> (replaces the off-chain coordinator), a <strong>privacy-preserving KYC compliance layer</strong>, an institutional-grade <strong>ZK Dark Pool</strong>, and a <strong>Concentrated Liquidity AMM</strong> for USDCx/ALEO liquidity. Wave 5.1 (v28) extends commitment verification to the <strong>liquidation path</strong> — <code>finalize_liquidate</code> now recomputes the BHP256 commitment from the orchestrator's <code>LiquidationAuth</code> fields and computes the margin condition in-circuit against the live oracle price.</p>
+    <p>ZKPerp closes the most significant architectural gaps in privacy-preserving perpetuals: the <strong>position commitment scheme</strong> (eliminates the inflated-payout attack vector on close), a <strong>fully on-chain 2-of-3 oracle quorum</strong> (no off-chain coordinator), a <strong>privacy-preserving KYC compliance layer</strong>, an institutional-grade <strong>ZK Dark Pool</strong>, and a <strong>Concentrated Liquidity AMM</strong> for USDCx/ALEO liquidity. v28 extends commitment verification to the <strong>liquidation path</strong> — <code>finalize_liquidate</code> recomputes the BHP256 commitment from the orchestrator's <code>LiquidationAuth</code> fields and computes the margin condition in-circuit against the live oracle price.</p>
 
     <div class="card-grid" style="margin-top:2rem;">
       <div class="card"><div class="card-icon">🔒</div><h4>Position Privacy</h4><p>Size, entry price, leverage, and PnL encrypted in Aleo private records. No one except the trader can read position data.</p></div>
@@ -254,7 +254,7 @@
 │                     Aleo Testnet                                 │
 │  zkperp_core_v28   · zkperp_core_eth_v28  · zkperp_core_sol_v28  │
 │  zkperp_oracle_v3  · zkperp_compliance_v7                        │
-│  zkdarkpool_v5     · zkperp_amm_v3                               │
+│  zkdarkpool_v8     · zkperp_amm_v4                               │
 │                                                                  │
 │  Private: PositionSlot · LiquidationAuth · LPSlot                │
 │           ExecTPSLAuth · ComplianceRecord · OrderAuth            │
@@ -282,8 +282,8 @@
         <tr><td><code>zkperp_core_sol_v28.aleo</code></td><td>SOL/USDC perpetuals</td><td><span class="tag tag-green">Live</span></td></tr>
         <tr><td><code>zkperp_oracle_v3.aleo</code></td><td>2-of-3 on-chain quorum price oracle</td><td><span class="tag tag-green">Live</span></td></tr>
         <tr><td><code>zkperp_compliance_v7.aleo</code></td><td>KYC compliance gating</td><td><span class="tag tag-green">Live</span></td></tr>
-        <tr><td><code>zkdarkpool_v5.aleo</code></td><td>ZK dark pool batch auction</td><td><span class="tag tag-green">Live</span></td></tr>
-        <tr><td><code>zkperp_amm_v3.aleo</code></td><td>Concentrated liquidity AMM (USDCx/ALEO)</td><td><span class="tag tag-green">Live</span></td></tr>
+        <tr><td><code>zkdarkpool_v8.aleo</code></td><td>ZK dark pool batch auction</td><td><span class="tag tag-green">Live</span></td></tr>
+        <tr><td><code>zkperp_amm_v4.aleo</code></td><td>Concentrated liquidity AMM (USDCx/ALEO)</td><td><span class="tag tag-green">Live</span></td></tr>
         <tr><td><code>test_usdcx_stablecoin.aleo</code></td><td>Official Aleo testnet stablecoin</td><td><span class="tag tag-blue">Official</span></td></tr>
       </table>
     </div>
@@ -548,8 +548,8 @@ pending_orders: field => bool   // true = active; null = executed/cancelled</pre
     </div>
 
     <div class="callout">
-      <div class="callout-title">Wave 4 Judge Finding — Fully Resolved</div>
-      <p>The Wave 4 judges identified that <code>close_position</code> accepted <code>expected_payout</code> as an unverified private input — a malicious trader could claim an inflated payout and drain the pool. v26 introduced the BHP256 commitment scheme on the close path. v28 extends it to the liquidation path: <code>finalize_liquidate</code> now recomputes the same commitment from the orchestrator's <code>LiquidationAuth</code> and asserts equality with the stored hash. The commitment is the on-chain source of truth for position parameters on every termination path.</p>
+      <div class="callout-title">Inflated-Payout Attack — Resolved</div>
+      <p>An earlier version of <code>close_position</code> accepted <code>expected_payout</code> as an unverified private input — a malicious trader could claim an inflated payout and drain the pool. v26 introduced the BHP256 commitment scheme on the close path. v28 extends it to the liquidation path: <code>finalize_liquidate</code> recomputes the same commitment from the orchestrator's <code>LiquidationAuth</code> and asserts equality with the stored hash. The commitment is the on-chain source of truth for position parameters on every termination path.</p>
     </div>
 
     <h3>The Attack Vector (Pre-v26)</h3>
@@ -607,7 +607,7 @@ assert(pool.total_liquidity >= payout);               // Gate 3: solvency</pre>
       <span class="section-num">§8</span>
       <h2>Oracle Infrastructure — On-Chain 2-of-3 Quorum</h2>
     </div>
-    <p>ZKPerp requires tamper-resistant price feeds for BTC, ETH, and SOL. Wave 4 used a coordinator process to aggregate 2-of-3 relayer signatures off-chain before submitting to Aleo. Wave 5 eliminates the coordinator entirely: quorum is now enforced by <strong>the Leo contract itself</strong> on-chain.</p>
+    <p>ZKPerp requires tamper-resistant price feeds for BTC, ETH, and SOL. An earlier design used a coordinator process to aggregate 2-of-3 relayer signatures off-chain before submitting to Aleo. The current design eliminates the coordinator entirely: quorum is enforced by <strong>the Leo contract itself</strong> on-chain.</p>
 
     <h3>Architecture: zkperp_oracle_v3.aleo</h3>
     <pre>
@@ -717,7 +717,7 @@ record ZKPerpComplianceRecord {
     expires_at:   u32,      // block height of expiry (~90 days)
 }</pre>
 
-    <p>The record lives in the user's wallet permanently and is re-used on every trade. It is returned unchanged as a transition output, so trading never consumes it — only renewal or revocation creates a new one.</p>
+    <p>The record lives in the user's wallet and is re-used on every trade for up to ~90 days (the maximum value of <code>expires_at</code> enforced in <code>issue_compliance</code>'s finalize). It is returned unchanged as a transition output, so trading never consumes it — only renewal, revocation, or root rotation creates a new one. Users re-call <code>issue_compliance</code> when their record expires, after being unrevoked, or when the admin rotates the Merkle root (in which case the old <code>issued_under</code> no longer matches <code>compliance_root</code>).</p>
 
     <h3>Merkle Tree Construction</h3>
     <p>The allowlist is a depth-10 BHP256 Merkle tree supporting 1,024 users. Only the root — a single field element — is published on-chain. Individual addresses are never revealed.</p>
@@ -732,6 +732,14 @@ record ZKPerpComplianceRecord {
       <div class="callout-title">Implementation Note — Leo Hashing Required</div>
       <p>BHP256 hashes must be computed by the Leo CLI to guarantee byte-identical output to the on-chain snarkVM circuit. The Provable SDK's JavaScript BHP256 implementation does not match Leo 4.0's snarkVM output. The compliance server shells out to <code>leo run</code> via a subprocess. This requires a machine with Leo installed — the compliance server runs on the Vultr VPS alongside the oracle bot.</p>
     </div>
+
+    <h3>Double-Issuance Protection</h3>
+    <p>To prevent a user from minting multiple records under the same root (which would allow re-use across multiple identities or transfer to non-KYC'd addresses), <code>issue_compliance</code> computes a per-issuance nullifier and rejects repeats:</p>
+    <pre>
+nullifier = Poseidon2::hash_to_field(FieldPair { left: leaf, right: computed_root })
+assert(!issued_nullifiers[nullifier])
+issued_nullifiers[nullifier] = true</pre>
+    <p>The nullifier binds the user's leaf hash to the active Merkle root. A user can issue exactly one record per (user, root) pair. When the admin rotates the root, nullifiers from previous roots no longer match new issuances, so the same user can issue a fresh record post-rotation. Poseidon2 is used here (rather than BHP256) because the nullifier needs only collision resistance, not in-circuit verification — Poseidon2 is faster.</p>
 
     <h3>Revocation</h3>
     <p>Revocation is instant via <code>revoke_user(address)</code> — sets a boolean in the on-chain <code>revoked</code> mapping. No Merkle tree rebuild is required. The next trade from that address fails immediately. Reinstatement is via <code>unrevoke_user(address)</code>.</p>
@@ -753,7 +761,7 @@ record ZKPerpComplianceRecord {
       <span class="section-num">§10</span>
       <h2>ZK Dark Pool</h2>
     </div>
-    <p>ZKDarkPool (<code>zkdarkpool_v5.aleo</code>) is a companion protocol deployed on Aleo testnet. It implements institutional-grade batch auction settlement where all bids and asks are sealed until a uniform clearing price is computed and proven on-chain.</p>
+    <p>ZKDarkPool (<code>zkdarkpool_v8.aleo</code>) is a companion protocol deployed on Aleo testnet. It implements institutional-grade batch auction settlement where all bids and asks are sealed until a uniform clearing price is computed and proven on-chain.</p>
 
     <h3>The Problem with Continuous Order Books</h3>
     <p>In a continuous limit order book (CLOB), order placement and cancellation are public events. Large institutional orders must be broken up into small slices to avoid telegraphing intent. Even sliced orders are visible in the order flow data after the fact. MEV bots can detect large buy-side pressure building up and front-run each slice.</p>
@@ -781,7 +789,11 @@ Phase 4: On-chain Settlement → settle_match() ZK proof enforces price constrai
       <li><code>clearing_price &lt;= buy_order.limit_price</code> — buyer pays at most their maximum</li>
       <li>Order nonces not previously consumed — no double-fill</li>
       <li><code>deposit_auth.amount >= fill_size</code> — sufficient escrowed collateral</li>
+      <li>Both order expiries respected — <code>block.height &lt;= buy_expiry</code> and <code>block.height &lt;= sell_expiry</code> at finalize time</li>
     </ul>
+
+    <h3>Fee Model</h3>
+    <p>Protocol fee is <strong>0.10% (10 bps)</strong> of gross trade value, paid <strong>buyer-side only</strong>. The seller receives the full clearing-price-multiplied amount without deduction. Fees are denominated in USDCx and accrue to an on-chain <code>fee_vault</code> mapping; the operator withdraws accumulated fees via the <code>withdraw_fees</code> transition. The fee is computed in the transition body as <code>(fill_size × clearing_price / 1_000_000) × 10 / 10_000</code> and is reflected in the buyer's <code>FillReceipt.fee_paid</code> field; the seller's receipt always shows <code>fee_paid: 0</code>.</p>
 
     <h3>Privacy Model</h3>
     <div class="table-wrap">
@@ -790,8 +802,12 @@ Phase 4: On-chain Settlement → settle_match() ZK proof enforces price constrai
         <tr><td>Order size</td><td>Nobody</td><td>Encrypted in OrderAuth record</td></tr>
         <tr><td>Limit price</td><td>Nobody</td><td>Encrypted in OrderAuth record</td></tr>
         <tr><td>Trader address</td><td>Nobody</td><td>Owner field is private</td></tr>
+        <tr><td>Clearing price</td><td>Nobody</td><td>Private transition input, not a finalize argument</td></tr>
+        <tr><td>Fill size</td><td>Nobody</td><td>Private transition input</td></tr>
         <tr><td>Order direction</td><td>Operator only</td><td>From OperatorOrderRef</td></tr>
-        <tr><td>Clearing price</td><td>Everyone</td><td>finalize argument — always public on Aleo</td></tr>
+        <tr><td>Asset ID</td><td>Operator only</td><td>From OperatorOrderRef</td></tr>
+        <tr><td>Fee accrued (vault total)</td><td>Everyone</td><td>On-chain <code>fee_vault</code> mapping</td></tr>
+        <tr><td>Order nonces (consumed)</td><td>Everyone</td><td>Finalize — double-fill prevention</td></tr>
         <tr><td>That a settlement occurred</td><td>Everyone</td><td>On-chain transaction</td></tr>
       </table>
     </div>
@@ -803,6 +819,11 @@ Phase 4: On-chain Settlement → settle_match() ZK proof enforces price constrai
         <tr><td>Batch #1 (BTC)</td><td>$49,500</td><td>1.0 BTC</td><td><span class="tag tag-green">✅ On-chain confirmed</span></td></tr>
       </table>
     </div>
+
+    <div class="callout">
+      <div class="callout-title">Further Reading</div>
+      <p>The dark pool is maintained as a standalone subproject alongside ZKPerp. For full contract internals — batch auction proof construction, OrderAuth and OperatorOrderRef record layouts, settlement transition flow, and operator runbooks — see <a href="https://github.com/hwdeboer1977/ZKPerp/blob/main/zkperp-darkpool/README.md">zkperp-darkpool/README.md</a> on GitHub.</p>
+    </div>
   </div>
 </div>
 
@@ -813,7 +834,9 @@ Phase 4: On-chain Settlement → settle_match() ZK proof enforces price constrai
       <span class="section-num">§11</span>
       <h2>Concentrated Liquidity AMM</h2>
     </div>
-    <p><code>zkperp_amm_v3.aleo</code> is a Uniswap v3-style Concentrated Liquidity AMM for the USDCx/ALEO pair with a 0.3% fee tier. LP positions are private records. Pool state (price, tick, liquidity) is public — full AMM privacy is architecturally impossible because price discovery requires public state.</p>
+    <p><code>zkperp_amm_v4.aleo</code> is a Uniswap v3-style Concentrated Liquidity AMM for the USDCx/ALEO pair with a 0.3% fee tier. LP positions are private records. Pool state (price, tick, liquidity) is public — full AMM privacy is architecturally impossible because price discovery requires public state.</p>
+
+    <p>Both legs of every transition move real assets. USDCx flows through <code>test_usdcx_stablecoin.aleo</code>'s private token interface; native ALEO flows through <code>credits.aleo</code>'s <code>transfer_private_to_public</code> and <code>transfer_public_to_private</code> functions. <code>mint_position</code> and <code>swap_sell</code> consume a private <code>credits.aleo::credits</code> record from the caller; <code>burn_position</code> and <code>swap_buy</code> mint one in return. The previous version tracked ALEO in a mapping counter without any matching <code>credits.aleo</code> call, leaving the ALEO leg accounted for only on paper.</p>
 
     <h3>Key Parameters</h3>
     <ul>
@@ -847,7 +870,12 @@ amountOut  = L × (sqrtAfter − sqrtBefore) × Q64 / (sqrtAfter × sqrtBefore)<
 
     <div class="callout amber">
       <div class="callout-title">Privacy Note</div>
-      <p>Swap amounts on the AMM are public — they appear as finalize arguments. For large private trades, use <code>zkdarkpool_v5.aleo</code> (batch auctions) instead. The AMM and dark pool serve complementary use cases: the AMM for continuous liquidity provision, the dark pool for institutional sealed-bid settlement.</p>
+      <p>Swap amounts on the AMM are public — they appear as finalize arguments. For large private trades, use <code>zkdarkpool_v8.aleo</code> (batch auctions) instead. The AMM and dark pool serve complementary use cases: the AMM for continuous liquidity provision, the dark pool for institutional sealed-bid settlement.</p>
+    </div>
+
+    <div class="callout">
+      <div class="callout-title">Further Reading</div>
+      <p>The AMM is maintained as a standalone subproject alongside ZKPerp. For full contract internals — Q64 fixed-point math, tick crossing, the credits.aleo integration, and the orchestrator's role in pre-computing swap steps — see <a href="https://github.com/hwdeboer1977/ZKPerp/blob/main/zkperp-amm/README.md">zkperp-amm/README.md</a> on GitHub.</p>
     </div>
   </div>
 </div>
@@ -886,7 +914,7 @@ Live test: ~81 USDC bridged successfully in under 15 minutes</pre>
       <span class="section-num">§13</span>
       <h2>OI Tradeoff: Privacy vs On-Chain State</h2>
     </div>
-    <p>The Wave 4 judges raised the question of whether <code>update_pool_state</code> should derive open interest from on-chain position data rather than trusting orchestrator inputs. This section addresses that question with full architectural transparency.</p>
+    <p>A natural question is whether <code>update_pool_state</code> should derive open interest from on-chain position data rather than trusting orchestrator inputs. This section addresses that question with full architectural transparency.</p>
 
     <h3>Why OI Cannot Be Derived On-Chain Without Leaking Sizes</h3>
     <p>The chain stores only:</p>
@@ -945,11 +973,13 @@ Live test: ~81 USDC bridged successfully in under 15 minutes</pre>
         <tr><td>Inflated Payout Attack (close)</td><td><span class="tag tag-green">✅ Resolved</span></td><td>BHP256 position commitment scheme in v26 — payout fully verified in finalize</td></tr>
         <tr><td>Unverified Liquidation Parameters</td><td><span class="tag tag-green">✅ Resolved</span></td><td>v28 — LiquidationAuth fields commitment-checked; margin computed in-circuit from live oracle</td></tr>
         <tr><td>KYC / Compliance</td><td><span class="tag tag-green">✅ Resolved</span></td><td>zkperp_compliance_v7.aleo — BHP256 Merkle allowlist, circuit-level enforcement</td></tr>
-        <tr><td>ZK Dark Pool</td><td><span class="tag tag-green">✅ Resolved</span></td><td>zkdarkpool_v5.aleo — batch auction, live on testnet</td></tr>
-        <tr><td>Concentrated Liquidity AMM</td><td><span class="tag tag-green">✅ Resolved</span></td><td>zkperp_amm_v3.aleo — Uniswap v3-style, USDCx/ALEO</td></tr>
+        <tr><td>ZK Dark Pool</td><td><span class="tag tag-green">✅ Resolved</span></td><td>zkdarkpool_v8.aleo — batch auction, live on testnet</td></tr>
+        <tr><td>Concentrated Liquidity AMM</td><td><span class="tag tag-green">✅ Resolved</span></td><td>zkperp_amm_v4.aleo — Uniswap v3-style, USDCx/ALEO with full credits.aleo integration</td></tr>
         <tr><td>2M Variable Limit (single contract)</td><td><span class="tag tag-green">✅ Resolved</span></td><td>Split into _core (market orders) + _orders (limit orders) contracts</td></tr>
         <tr><td>Trusted OI Aggregation</td><td><span class="tag tag-amber">⚠ Documented Tradeoff</span></td><td>Architecturally impossible to fix without leaking trade sizes on-chain — see §13</td></tr>
         <tr><td>Single Orchestrator</td><td><span class="tag tag-amber">⚠ Open</span></td><td>One wallet controls liquidations and order execution. Multi-orchestrator rotation planned.</td></tr>
+        <tr><td>Non-Transferable Compliance Admin</td><td><span class="tag tag-amber">⚠ Open</span></td><td>v7 admin is fixed at deploy time (no <code>set_admin</code>). v8 will add multisig/governance-gated admin rotation.</td></tr>
+        <tr><td>Dark Pool Deposit-to-Order Binding</td><td><span class="tag tag-amber">⚠ Documented Tradeoff</span></td><td>Sell-side deposits bound to seller by address + asset_id, not by order nonce. Operator picks which deposit settles which order. Stronger nonce-binding planned.</td></tr>
         <tr><td>No Funding Rate</td><td><span class="tag tag-amber">⚠ Open</span></td><td>Flat borrow rate model. Dynamic funding rates planned for mainnet.</td></tr>
         <tr><td>No Partial Close</td><td><span class="tag tag-amber">⚠ Open</span></td><td>Positions must be closed in full. Partial close is architecturally supported by the slot model.</td></tr>
         <tr><td>Leo Ternary Both-Branch Evaluation</td><td><span class="tag tag-blue">Language</span></td><td>Both branches evaluate before selection — safe-cap pattern used throughout</td></tr>
@@ -967,7 +997,7 @@ Live test: ~81 USDC bridged successfully in under 15 minutes</pre>
       <h2>Roadmap</h2>
     </div>
 
-    <h3>✅ Completed (Waves 1–5.1)</h3>
+    <h3>✅ Completed</h3>
     <ul>
       <li>Core perpetuals: open / close / liquidate with USDCx token integration</li>
       <li>Slot model — 3 records, forever</li>
@@ -980,13 +1010,13 @@ Live test: ~81 USDC bridged successfully in under 15 minutes</pre>
       <li>Commitment verification extended to the liquidation path — margin computed in-circuit (v28)</li>
       <li>KYC compliance layer — BHP256 Merkle tree, circuit-level enforcement</li>
       <li>ZK Dark Pool — batch auction with uniform clearing price</li>
-      <li>Concentrated Liquidity AMM — Uniswap v3-style USDCx/ALEO</li>
+      <li>Concentrated Liquidity AMM — Uniswap v3-style USDCx/ALEO with full credits.aleo integration</li>
       <li>Portfolio, compliance, and system status pages</li>
       <li>ETH → Aleo bridge tested (xReserve, ~15 min)</li>
       <li>Contract split: _core + _orders (resolves 2M variable limit)</li>
     </ul>
 
-    <h3>📋 Wave 6 (Next)</h3>
+    <h3>📋 Next</h3>
     <ul>
       <li>Verifiable performance proofs (ZK circuit) — copy trading without revealing trades</li>
       <li>Leaderboard — opt-in, privacy-preserving</li>
@@ -1087,8 +1117,8 @@ Live test: ~81 USDC bridged successfully in under 15 minutes</pre>
         <a href="https://testnet.explorer.provable.com/program/zkperp_core_sol_v28.aleo">zkperp_core_sol_v28.aleo</a>
         <a href="https://testnet.explorer.provable.com/program/zkperp_oracle_v3.aleo">zkperp_oracle_v3.aleo</a>
         <a href="https://testnet.explorer.provable.com/program/zkperp_compliance_v7.aleo">zkperp_compliance_v7.aleo</a>
-        <a href="https://testnet.explorer.provable.com/program/zkperp_amm_v3.aleo">zkperp_amm_v3.aleo</a>
-        <a href="https://testnet.explorer.provable.com/program/zkdarkpool_v5.aleo">zkdarkpool_v5.aleo</a>
+        <a href="https://testnet.explorer.provable.com/program/zkperp_amm_v4.aleo">zkperp_amm_v4.aleo</a>
+        <a href="https://testnet.explorer.provable.com/program/zkdarkpool_v8.aleo">zkdarkpool_v8.aleo</a>
         <a href="https://testnet.explorer.provable.com/program/test_usdcx_stablecoin.aleo">test_usdcx_stablecoin.aleo</a>
       </div>
       <div>
@@ -1106,7 +1136,7 @@ Live test: ~81 USDC bridged successfully in under 15 minutes</pre>
       </div>
     </div>
     <div class="footer-bottom">
-      ZKPerp · MIT License · Aleo Testnet · Wave 5.1 · May 2026
+      ZKPerp · MIT License · Aleo Testnet · v28 · May 2026
     </div>
   </div>
 </div>

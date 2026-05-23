@@ -6,7 +6,8 @@ import { useTransaction } from './useTransaction'
 import {
   fetchPoolState, computeQuote, computeMintQuote,
   buildSwapBuyInputs, buildSwapSellInputs, buildMintInputs, buildBurnInputs,
-  parseLPPosition, sqrtToPrice, tickToPrice, alignTick, priceToTick, tickToSqrtX64,
+  parseLPPosition, parseCreditsRecordMicrocredits,
+  sqrtToPrice, tickToPrice, alignTick, priceToTick, tickToSqrtX64,
   formatUsdc, formatAleo,
   PROGRAM_ID, USDCX_ID, TICK_SPACING, Q64,
   type PoolState, type SwapQuote, type MintQuote, type LPPosition,
@@ -92,6 +93,7 @@ function normalize(plaintext: string): string {
 }
 
 interface USDCxRecord { amount: bigint; plaintext: string; label: string }
+interface AleoRecord  { amount: bigint; plaintext: string; label: string }
 type Tab = 'swap' | 'liquidity' | 'burn'
 
 // ── Transaction status panel ──────────────────────────────────
@@ -191,6 +193,49 @@ function useUSDCxRecords() {
   return { records, loading, load }
 }
 
+// ── credits.aleo records (native ALEO) ────────────────────────
+// Parallel to useUSDCxRecords. Used by mint_position and swap_sell which need
+// a private credits.aleo::credits input record.
+// Sort by ascending balance so the selector defaults to the smallest record —
+// callers should then pick the smallest record that covers their requirement,
+// to avoid splitting large holdings unnecessarily.
+function useAleoRecords() {
+  const { requestRecords, decrypt } = useWallet()
+  const [records, setRecords] = useState<AleoRecord[]>([])
+  const [loading, setLoading] = useState(false)
+  const load = useCallback(async () => {
+    if (!requestRecords || !decrypt) return
+    setLoading(true)
+    try {
+      const raw = await requestRecords('credits.aleo', true) as any[]
+      // credits.aleo records have recordName === 'credits' (lowercase, matches the record def)
+      const creds = raw.filter((r: any) => r.recordName === 'credits' && !r.spent)
+      const parsed = await Promise.all(creds.map(async (r: any) => {
+        try {
+          const pt = await decrypt(r.recordCiphertext)
+          const amt = parseCreditsRecordMicrocredits(pt)
+          if (amt === null) return null
+          return { amount: amt, plaintext: pt, label: `${(Number(amt)/1e6).toFixed(6)} ALEO` }
+        } catch { return null }
+      }))
+      // Ascending sort: smallest first. Pick the smallest sufficient record at use site.
+      setRecords(
+        parsed
+          .filter((r): r is AleoRecord => r !== null)
+          .sort((a, b) => (a.amount < b.amount ? -1 : a.amount > b.amount ? 1 : 0)),
+      )
+    } finally { setLoading(false) }
+  }, [requestRecords, decrypt])
+  return { records, loading, load }
+}
+
+// Pick the smallest record in `records` whose balance is >= `needed`.
+// Returns the plaintext, or null if no record is large enough.
+function pickAleoRecord(records: AleoRecord[], needed: bigint): string | null {
+  for (const r of records) if (r.amount >= needed) return r.plaintext
+  return null
+}
+
 function useLPPositions() {
   const { requestRecords, decrypt } = useWallet()
   const [positions, setPositions] = useState<LPPosition[]>([])
@@ -215,14 +260,27 @@ function SwapTab({ pool }: { pool: PoolState | null }) {
   const { connected } = useWallet()
   const tx = useTransaction()
   const { records, loading: recLoading, load: loadRecs } = useUSDCxRecords()
+  const { records: aleoRecs, loading: aleoLoading, load: loadAleo } = useAleoRecords()
   const [direction, setDirection] = useState<'buy'|'sell'>('buy')
   const [amountIn, setAmountIn] = useState('')
   const [quote, setQuote] = useState<SwapQuote | null>(null)
   const [selected, setSelected] = useState('')
+  const [selectedAleo, setSelectedAleo] = useState('')
   const isBuy = direction === 'buy'
   const busy = tx.status === 'submitting' || tx.status === 'pending'
 
   useEffect(() => { if (records.length > 0 && !selected) setSelected(records[0].plaintext) }, [records])
+  // For sell: default to the smallest record that covers amountIn, else the largest available.
+  useEffect(() => {
+    if (aleoRecs.length === 0 || selectedAleo) return
+    if (quote) {
+      const pick = pickAleoRecord(aleoRecs, quote.amountIn)
+      setSelectedAleo(pick ?? aleoRecs[aleoRecs.length - 1].plaintext)
+    } else {
+      setSelectedAleo(aleoRecs[0].plaintext)
+    }
+  }, [aleoRecs, quote, selectedAleo])
+
   useEffect(() => {
     if (!pool || !amountIn || parseFloat(amountIn) <= 0) { setQuote(null); return }
     setQuote(computeQuote(pool, BigInt(Math.floor(parseFloat(amountIn) * 1e6)), isBuy))
@@ -231,7 +289,9 @@ function SwapTab({ pool }: { pool: PoolState | null }) {
   const swap = async () => {
     if (!quote) return
     const mp = await getMerkleProof(USDCX_ID, '')
-    const inputs = isBuy ? buildSwapBuyInputs(quote, normalize(selected), mp) : buildSwapSellInputs(quote)
+    const inputs = isBuy
+      ? buildSwapBuyInputs(quote, normalize(selected), mp)
+      : buildSwapSellInputs(quote, normalize(selectedAleo))
     await tx.execute({ program: PROGRAM_ID, function: isBuy ? 'swap_buy' : 'swap_sell', inputs, fee: 5_000_000, privateFee: false })
   }
 
@@ -266,7 +326,21 @@ function SwapTab({ pool }: { pool: PoolState | null }) {
           }
         </div>
       )}
-      <button onClick={swap} disabled={!quote || !connected || (isBuy && !selected) || busy}
+      {!isBuy && (
+        <div>
+          <label className="text-slate-500 text-xs uppercase tracking-widest block mb-1">ALEO Credits Record</label>
+          {aleoRecs.length === 0
+            ? <button onClick={loadAleo} disabled={!connected || aleoLoading} className="w-full text-xs text-slate-500 border border-cyan-400/15 rounded-xl px-4 py-2 text-left hover:border-cyan-400/40 hover:text-cyan-300 transition-all disabled:opacity-40">{aleoLoading ? '⟳ Loading…' : '↓ Load ALEO credits from Shield wallet'}</button>
+            : <>
+                <select value={selectedAleo} onChange={e => setSelectedAleo(e.target.value)} className="w-full bg-black/30 border border-cyan-400/15 text-white text-xs rounded-xl px-3 py-2 font-mono"><option value="">— select —</option>{aleoRecs.map((r,i) => <option key={i} value={r.plaintext}>{r.label}</option>)}</select>
+                {quote && selectedAleo && (parseCreditsRecordMicrocredits(selectedAleo) ?? 0n) < quote.amountIn && (
+                  <div className="text-red-400 text-xs mt-1">Selected record balance is below the required amount.</div>
+                )}
+              </>
+          }
+        </div>
+      )}
+      <button onClick={swap} disabled={!quote || !connected || (isBuy && !selected) || (!isBuy && !selectedAleo) || busy}
         className={`w-full py-4 rounded-xl text-xs font-bold uppercase tracking-widest transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg ${isBuy ? 'bg-gradient-to-r from-cyan-400 to-cyan-500 text-slate-950 hover:from-cyan-300' : 'bg-gradient-to-r from-red-500 to-red-600 text-white hover:from-red-400'}`}>
         {tx.status === 'submitting' ? '⟳ Approving…' : tx.status === 'pending' ? '⟳ Confirming on-chain…' : isBuy ? 'Buy ALEO' : 'Sell ALEO'}
       </button>
@@ -280,14 +354,28 @@ function LiquidityTab({ pool }: { pool: PoolState | null }) {
   const { connected } = useWallet()
   const tx = useTransaction()
   const { records, loading: recLoading, load: loadRecs } = useUSDCxRecords()
+  const { records: aleoRecs, loading: aleoLoading, load: loadAleo } = useAleoRecords()
   const [priceLo, setPriceLo] = useState('')
   const [priceHi, setPriceHi] = useState('')
   const [liqInput, setLiqInput] = useState('')
   const [selected, setSelected] = useState('')
+  const [selectedAleo, setSelectedAleo] = useState('')
   const [quote, setQuote] = useState<MintQuote | null>(null)
   const busy = tx.status === 'submitting' || tx.status === 'pending'
 
   useEffect(() => { if (records.length > 0 && !selected) setSelected(records[0].plaintext) }, [records])
+  // For mint: pick the smallest record covering quote.amount1. Re-pick whenever the quote changes
+  // so the selector tracks the current ALEO requirement automatically.
+  useEffect(() => {
+    if (aleoRecs.length === 0) return
+    if (quote) {
+      const pick = pickAleoRecord(aleoRecs, quote.amount1)
+      setSelectedAleo(pick ?? aleoRecs[aleoRecs.length - 1].plaintext)
+    } else if (!selectedAleo) {
+      setSelectedAleo(aleoRecs[0].plaintext)
+    }
+  }, [aleoRecs, quote])
+
   const currentPrice = pool ? sqrtToPrice(pool.sqrtPriceX64) : null
 
   useEffect(() => {
@@ -309,9 +397,9 @@ function LiquidityTab({ pool }: { pool: PoolState | null }) {
   }, [pool, priceLo, priceHi, liqInput])
 
   const mint = async () => {
-    if (!quote || !selected) return
+    if (!quote || !selected || !selectedAleo) return
     const mp = await getMerkleProof(USDCX_ID, '')
-    const inputs = buildMintInputs(quote, normalize(selected), pool!, mp)
+    const inputs = buildMintInputs(quote, normalize(selected), normalize(selectedAleo), pool!, mp)
     await tx.execute({ program: PROGRAM_ID, function: 'mint_position', inputs, fee: 5_000_000, privateFee: false })
   }
 
@@ -348,7 +436,19 @@ function LiquidityTab({ pool }: { pool: PoolState | null }) {
           : <select value={selected} onChange={e => setSelected(e.target.value)} className="w-full bg-black/30 border border-cyan-400/15 text-white text-xs rounded-xl px-3 py-2 font-mono"><option value="">— select —</option>{records.map((r,i) => <option key={i} value={r.plaintext}>{r.label}</option>)}</select>
         }
       </div>
-      <button onClick={mint} disabled={!quote||!selected||!connected||busy||!pool}
+      <div>
+        <label className="text-slate-500 text-xs uppercase tracking-widest block mb-1">ALEO Credits Record</label>
+        {aleoRecs.length === 0
+          ? <button onClick={loadAleo} disabled={!connected || aleoLoading} className="w-full text-xs text-slate-500 border border-cyan-400/15 rounded-xl px-4 py-2 text-left hover:border-cyan-400/40 hover:text-cyan-300 transition-all disabled:opacity-40">{aleoLoading ? '⟳ Loading…' : '↓ Load ALEO credits from Shield wallet'}</button>
+          : <>
+              <select value={selectedAleo} onChange={e => setSelectedAleo(e.target.value)} className="w-full bg-black/30 border border-cyan-400/15 text-white text-xs rounded-xl px-3 py-2 font-mono"><option value="">— select —</option>{aleoRecs.map((r,i) => <option key={i} value={r.plaintext}>{r.label}</option>)}</select>
+              {quote && selectedAleo && (parseCreditsRecordMicrocredits(selectedAleo) ?? 0n) < quote.amount1 && (
+                <div className="text-red-400 text-xs mt-1">Selected record balance is below the required amount.</div>
+              )}
+            </>
+        }
+      </div>
+      <button onClick={mint} disabled={!quote||!selected||!selectedAleo||!connected||busy||!pool}
         className="w-full py-4 rounded-xl text-xs font-bold uppercase tracking-widest bg-gradient-to-r from-violet-500 to-violet-600 text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed hover:from-violet-400 shadow-lg">
         {tx.status === 'submitting' ? '⟳ Approving…' : tx.status === 'pending' ? '⟳ Confirming on-chain…' : 'Add Liquidity'}
       </button>

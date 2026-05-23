@@ -1,5 +1,5 @@
 // ── Constants ─────────────────────────────────────────────────
-export const PROGRAM_ID    = 'zkperp_amm_v3.aleo'
+export const PROGRAM_ID    = 'zkperp_amm_v4.aleo'
 export const USDCX_ID      = 'test_usdcx_stablecoin.aleo'
 export const API           = 'https://api.explorer.provable.com/v1/testnet'
 export const Q64           = 2n ** 64n

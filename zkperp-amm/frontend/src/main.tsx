@@ -16,7 +16,7 @@ createRoot(document.getElementById('root')!).render(
       autoConnect={false}
       network={Network.TESTNET}
       decryptPermission={DecryptPermission.UponRequest}
-      programs={['zkperp_amm_v3.aleo', 'test_usdcx_stablecoin.aleo', 'credits.aleo']}
+      programs={['zkperp_amm_v4.aleo', 'test_usdcx_stablecoin.aleo', 'credits.aleo']}
       onError={(e) => console.error(e.message)}
     >
       <WalletModalProvider>

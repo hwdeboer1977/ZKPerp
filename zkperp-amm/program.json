@@ -1,5 +1,5 @@
 {
-  "program": "zkperp_amm_v3.aleo",
+  "program": "zkperp_amm_v4.aleo",
   "version": "0.1.0",
   "description": "",
   "license": "MIT",
@@ -7,6 +7,12 @@
      "dependencies": [
         {
             "name": "test_usdcx_stablecoin.aleo",
+            "location": "network",
+            "network": "testnet",
+            "path": null,
+            "edition": null
+        },        {
+            "name": "credits.aleo",
             "location": "network",
             "network": "testnet",
             "path": null,

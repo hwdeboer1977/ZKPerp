@@ -206,25 +206,54 @@ export function computeMintQuote(
   }
 }
 
+// ── Credits record helpers ────────────────────────────────────
+// Extract the microcredits balance from a credits.aleo::credits plaintext record.
+// Used to fail-fast in builders if the user-supplied record is too small.
+export function parseCreditsRecordMicrocredits(plaintext: string): bigint | null {
+  const m = plaintext.match(/microcredits:\s*(\d+)u64/)
+  return m ? BigInt(m[1]) : null
+}
+
 // ── Build mint_position inputs ────────────────────────────────
-export function buildMintInputs(q: MintQuote, tokenRecord: string, pool: PoolState, merkleProof: string = ZERO_PROOF): string[] {
+// v4 signature: mint_position takes a private credits.aleo::credits record at slot 2.
+// aleoRecord must be a plaintext credits record owned by self.signer with at least
+// amount1 microcredits (the contract will burn it and return change).
+export function buildMintInputs(
+  q: MintQuote,
+  tokenRecord: string,
+  aleoRecord: string,
+  pool: PoolState,
+  merkleProof: string = ZERO_PROOF,
+): string[] {
+  // Fail-fast: check the credits record has enough balance before sending to the orchestrator.
+  // The contract will also enforce this, but failing here gives a clearer error.
+  const bal = parseCreditsRecordMicrocredits(aleoRecord)
+  if (bal === null) {
+    throw new Error('buildMintInputs: aleoRecord is not a valid credits.aleo::credits plaintext')
+  }
+  if (bal < q.amount1) {
+    throw new Error(
+      `buildMintInputs: aleoRecord balance ${bal} microcredits is less than required ${q.amount1}`,
+    )
+  }
   // 10% slippage buffer on max amounts
   const max0 = q.amount0 * 110n / 100n
   const max1 = q.amount1 * 110n / 100n
   return [
-    tokenRecord,
-    merkleProof,
-    `${q.tickLower}i32`,
-    `${q.tickUpper}i32`,
-    `${q.liquidity}u128`,
-    `${max0}u64`,                          // amount_0_max
-    `${max1}u64`,                          // amount_1_max
-    `${q.amount0}u64`,                     // amount_0_actual
-    `${q.amount1}u64`,                     // amount_1_actual
-    `${pool.sqrtPriceX64}u128`,            // verified on-chain
-    `${pool.currentTick}i32`,             // verified on-chain
-    `${q.feeGrowthIn0}u128`,
-    `${q.feeGrowthIn1}u128`,
+    tokenRecord,                           // 0:  lp_token
+    merkleProof,                           // 1:  merkle_proof
+    aleoRecord,                            // 2:  aleo_in (credits.aleo::credits)  ← v4
+    `${q.tickLower}i32`,                   // 3:  tick_lower
+    `${q.tickUpper}i32`,                   // 4:  tick_upper
+    `${q.liquidity}u128`,                  // 5:  liquidity_desired
+    `${max0}u64`,                          // 6:  amount_0_max
+    `${max1}u64`,                          // 7:  amount_1_max
+    `${q.amount0}u64`,                     // 8:  amount_0_actual
+    `${q.amount1}u64`,                     // 9:  amount_1_actual
+    `${pool.sqrtPriceX64}u128`,            // 10: sqrt_price_x64  (verified on-chain)
+    `${pool.currentTick}i32`,              // 11: current_tick    (verified on-chain)
+    `${q.feeGrowthIn0}u128`,               // 12: fee_growth_inside_0
+    `${q.feeGrowthIn1}u128`,               // 13: fee_growth_inside_1
   ]
 }
 
@@ -341,11 +370,27 @@ export function buildSwapBuyInputs(q: SwapQuote, tokenRecord: string, merkleProo
   ]
 }
 
-export function buildSwapSellInputs(q: SwapQuote): string[] {
+// v4 signature: swap_sell takes a private credits.aleo::credits record at slot 1
+// (immediately after merkle_proof). aleoRecord balance must be >= q.amountIn.
+// Note: swap_sell does NOT take a USDCx token record on input — ALEO is the input asset.
+export function buildSwapSellInputs(q: SwapQuote, aleoRecord: string): string[] {
+  const bal = parseCreditsRecordMicrocredits(aleoRecord)
+  if (bal === null) {
+    throw new Error('buildSwapSellInputs: aleoRecord is not a valid credits.aleo::credits plaintext')
+  }
+  if (bal < q.amountIn) {
+    throw new Error(
+      `buildSwapSellInputs: aleoRecord balance ${bal} microcredits is less than required ${q.amountIn}`,
+    )
+  }
   return [
-    ZERO_PROOF,
-    `${q.amountIn}u64`, `${q.amountOut}u64`, `${q.fee}u64`,
-    `${q.sqrtAfter}u128`, `${q.tickAfter}i32`,
-    ...q.steps.map(stepToLeo),
+    ZERO_PROOF,                            // 0:  merkle_proof (USDCx, for the payout)
+    aleoRecord,                            // 1:  aleo_in (credits.aleo::credits)  ← v4
+    `${q.amountIn}u64`,                    // 2:  total_amount_in
+    `${q.amountOut}u64`,                   // 3:  total_amount_out
+    `${q.fee}u64`,                         // 4:  total_fee
+    `${q.sqrtAfter}u128`,                  // 5:  sqrt_price_final
+    `${q.tickAfter}i32`,                   // 6:  tick_final
+    ...q.steps.map(stepToLeo),             // 7-10: step0..step3
   ]
 }

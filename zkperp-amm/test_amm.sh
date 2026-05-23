@@ -2,7 +2,7 @@
 # leo deploy --network testnet --broadcast
 
 
-source .env && snarkos developer execute zkperp_amm_v3.aleo initialize_pool \
+source .env && snarkos developer execute zkperp_amm_v4.aleo initialize_pool \
   --private-key $PRIVATE_KEY \
   --query https://api.explorer.provable.com/v1 \
   --broadcast https://api.explorer.provable.com/v1/testnet/transaction/broadcast \

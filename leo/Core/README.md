@@ -1,4 +1,4 @@
-# ZKPerp Core (`zkperp_core_v29.aleo`)
+# ZKPerp Core (`zkperp_core_v29c.aleo`)
 
 The core settlement contract for **ZKPerp**, a privacy-first perpetuals DEX on Aleo. It custodies trader collateral, opens and closes leveraged positions against an LP pool, runs take-profit / stop-loss orders, and liquidates underwater positions. Position parameters (size, entry price, collateral, direction) are never written to public state — only a **commitment hash** is stored on-chain, so the network can verify a position's lifecycle without learning its contents.
 
@@ -7,7 +7,7 @@ This program depends on three companion programs:
 | Import | Role |
 | --- | --- |
 | `test_usdcx_stablecoin.aleo` | The USDCx collateral token (private/public transfers, compliance records). |
-| `zkperp_compliance_v7.aleo` | KYC/compliance gate — every trader action checks a `ZKPerpComplianceRecord`. |
+| `zkperp_compliance_v8b.aleo` | KYC/compliance gate — every trader action checks a `ZKPerpComplianceRecord`. |
 | `zkperp_oracle_v3.aleo` | Price feed. Prices are committed only after a **2-of-3 oracle quorum** agrees, and reads enforce a staleness guard. |
 
 ---
@@ -137,7 +137,7 @@ Because positions are private, only a holder of the position **preimage** can co
 
 ## Deployment & test sequence
 
-1. Deploy `zkperp_core_v29.aleo` (companion programs must already be deployed).
+1. Deploy `zkperp_core_v29c.aleo` (companion programs must already be deployed).
 2. `set_liquidator` × 3 to register keepers `0`, `1`, `2`.
 3. Fund the LP pool via `add_liquidity`.
 4. A trader runs `initialize_slots`, then `open_position` — this mints three `LiquidationAuth` records, one to each keeper.

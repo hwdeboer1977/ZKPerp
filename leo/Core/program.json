@@ -1,5 +1,5 @@
 {
-  "program": "zkperp_core_v29.aleo",
+  "program": "zkperp_core_v29c.aleo",
   "version": "0.1.0",
   "description": "",
   "license": "MIT",
@@ -13,7 +13,7 @@
             "edition": null
         },
         {
-            "name": "zkperp_compliance_v7.aleo",
+            "name": "zkperp_compliance_v8bb.aleo",
             "location": "network",
             "network": "testnet",
             "path": null,

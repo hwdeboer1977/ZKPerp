@@ -174,7 +174,7 @@ On first start: builds the Merkle tree (slow — one `leo run` per address). Eve
 | `ADMIN_PRIVATE_KEY` | ✓ | Aleo private key of the program deployer |
 | `ADMIN_ADDRESS` | ✓ | Aleo address of the admin |
 | `ALEO_NETWORK_URL` | ✓ | `https://api.explorer.provable.com/v1` |
-| `COMPLIANCE_PROGRAM_ID` | ✓ | `zkperp_compliance_v7.aleo` |
+| `COMPLIANCE_PROGRAM_ID` | ✓ | `zkperp_compliance_v8b.aleo` |
 | `ADMIN_API_KEY` | ✓ | Secret for admin endpoints |
 | `PROVABLE_API_KEY` | ✓ | Provable API key for delegated proving |
 | `PROVABLE_CONSUMER_ID` | ✓ | Provable consumer ID |
@@ -216,7 +216,7 @@ On first start: builds the Merkle tree (slow — one `leo run` per address). Eve
 
 ## On-chain Program
 
-**`zkperp_compliance_v7.aleo`** — deployed on Aleo testnet.
+**`zkperp_compliance_v8b.aleo`** — deployed on Aleo testnet.
 
 ### Mappings
 
@@ -243,12 +243,12 @@ An `@custom constructor()` runs once at deploy time and writes `self.program_own
 
 ### How `zkperp_core` consumes compliance
 
-The `verify_compliance` transition is exposed for external programs that want a single-call gate. However, `zkperp_core_v28` itself does **not** call `verify_compliance` — to avoid an extra transition call per trade, core imports `zkperp_compliance_v7.aleo` and reads its mappings directly inside its own finalize blocks:
+The `verify_compliance` transition is exposed for external programs that want a single-call gate. However, `zkperp_core_v28` itself does **not** call `verify_compliance` — to avoid an extra transition call per trade, core imports `zkperp_compliance_v8b.aleo` and reads its mappings directly inside its own finalize blocks:
 
 ```leo
-let active_root: field = Mapping::get(zkperp_compliance_v7.aleo::compliance_root, 0u8);
+let active_root: field = Mapping::get(zkperp_compliance_v8b.aleo::compliance_root, 0u8);
 assert_eq(cr.issued_under, active_root);
-let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v7.aleo::revoked, caller, false);
+let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v8b.aleo::revoked, caller, false);
 assert(!is_revoked);
 assert(block.height <= cr.expires_at);
 ```
@@ -307,7 +307,7 @@ In production, the allowlist would come from a regulated KYC provider. In the de
 
 **Non-transferable admin** — `admin[0u8]` is seeded by the deploy-time `@custom constructor()` and there is no `set_admin` transition. Once deployed, the admin role cannot be rotated without redeploying the contract. v8 will add admin rotation gated on a multisig or governance contract.
 
-**Header comment** — line 1 of `main.leo` reads `zkperp_compliance_v2.aleo` but the program declaration is `zkperp_compliance_v7.aleo`. Cosmetic stale comment, no functional impact.
+**Header comment** — line 1 of `main.leo` reads `zkperp_compliance_v2.aleo` but the program declaration is `zkperp_compliance_v8b.aleo`. Cosmetic stale comment, no functional impact.
 
 **Tree depth fixed at 10** — 1,024-user ceiling. Beyond that, the contract requires a redeployment with a deeper proof array (e.g. depth 16 = 65k users, depth 20 = 1M users). The depth is fixed in the Leo program because the proof verification loop is unrolled.
 

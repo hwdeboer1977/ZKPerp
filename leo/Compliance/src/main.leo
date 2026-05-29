@@ -19,7 +19,7 @@ struct MerkleProof {
     path: [MerkleNode; 10],
 }
 
-program zkperp_compliance_v7.aleo {
+program zkperp_compliance_v8b.aleo {
 
     record ZKPerpComplianceRecord {
         owner:        address,

@@ -14,7 +14,7 @@
 // Compliance required on place and cancel. Execution is orchestrator-only.
 
 import test_usdcx_stablecoin.aleo;
-import zkperp_compliance_v7.aleo;
+import zkperp_compliance_v8b.aleo;
 import zkperp_oracle_v3.aleo;
 
 struct LimitOrderIdInput {
@@ -75,7 +75,7 @@ program zkperp_limit_v26.aleo {
     // ══════════════════════════════════════════════════════════════
 
     fn place_limit_order(
-        cr: zkperp_compliance_v7.aleo::ZKPerpComplianceRecord,
+        cr: zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord,
         token: test_usdcx_stablecoin.aleo::Token,
         public asset_id: field,
         private is_long: bool,
@@ -85,7 +85,7 @@ program zkperp_limit_v26.aleo {
         merkle_proof: [test_usdcx_stablecoin.aleo::MerkleProof; 2],
         private orchestrator: address,
         nonce: field,
-    ) -> (zkperp_compliance_v7.aleo::ZKPerpComplianceRecord, LimitOrderReceipt, ExecLimitAuth, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
+    ) -> (zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord, LimitOrderReceipt, ExecLimitAuth, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
         assert(size_usdc >= 100u64);
         let collateral_u64: u64 = collateral as u64;
         let leverage_scaled: u64 = (size_usdc * 100u64) / collateral_u64;
@@ -140,9 +140,9 @@ program zkperp_limit_v26.aleo {
 
         return (cr, receipt, auth, usdcx_compliance, change_token, final {
             // ── Compliance check ──
-            let active_root: field = Mapping::get(zkperp_compliance_v7.aleo::compliance_root, 0u8);
+            let active_root: field = Mapping::get(zkperp_compliance_v8b.aleo::compliance_root, 0u8);
             assert_eq(cr_issued_under, active_root);
-            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v7.aleo::revoked, caller, false);
+            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v8b.aleo::revoked, caller, false);
             assert(!is_revoked);
             assert(block.height <= cr_expires_at);
             // ── End compliance ──
@@ -214,9 +214,9 @@ program zkperp_limit_v26.aleo {
     // ══════════════════════════════════════════════════════════════
 
     fn cancel_limit_order(
-        cr: zkperp_compliance_v7.aleo::ZKPerpComplianceRecord,
+        cr: zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord,
         receipt: LimitOrderReceipt,
-    ) -> (zkperp_compliance_v7.aleo::ZKPerpComplianceRecord, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
+    ) -> (zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
         assert_eq(self.signer, receipt.owner);
 
         let cr_issued_under: field = cr.issued_under;
@@ -233,9 +233,9 @@ program zkperp_limit_v26.aleo {
 
         return (cr, usdcx_compliance, refund_token, final {
             // ── Compliance check ──
-            let active_root: field = Mapping::get(zkperp_compliance_v7.aleo::compliance_root, 0u8);
+            let active_root: field = Mapping::get(zkperp_compliance_v8b.aleo::compliance_root, 0u8);
             assert_eq(cr_issued_under, active_root);
-            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v7.aleo::revoked, caller, false);
+            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v8b.aleo::revoked, caller, false);
             assert(!is_revoked);
             assert(block.height <= cr_expires_at);
             // ── End compliance ──

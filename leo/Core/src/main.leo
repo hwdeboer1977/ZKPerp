@@ -1,15 +1,26 @@
-// ZKPerp Core v26 — oracle reads from zkperp_oracle_v3.aleo
+// ZKPerp Core v28 — oracle reads from zkperp_oracle_v3.aleo
 //
-// Price reads are now cross-program calls to zkperp_oracle_v3.aleo::oracle_prices.
+// Price reads are cross-program calls to zkperp_oracle_v3.aleo::oracle_prices.
 // Prices are only committed there after 2-of-3 independent oracle nodes agree.
-// update_price and core's own oracle_prices mapping have been removed.
 // A staleness guard (150 blocks ≈ 5 min) is enforced on every price read.
 //
 // All trader functions require a valid ZKPerpComplianceRecord:
 //   - issued_under must match active compliance root
 //   - expires_at must be > block.height
 //   - address must not be revoked
-// Admin/oracle functions (update_pool_state, update_net_pnl, liquidate) are exempt.
+//
+// LIQUIDATION (v29 change):
+//   liquidate() no longer trusts a caller-supplied reward or a single
+//   orchestrator. It now (a) recomputes the position commit from the
+//   supplied preimage and asserts it matches position_commits, (b) reads the
+//   quorum-agreed oracle price and recomputes PnL, (c) asserts the position is
+//   genuinely below maintenance margin, and (d) derives the reward
+//   deterministically from collateral. Wrongful liquidation is therefore
+//   impossible on-chain. Liveness/omission is handled by a 1-of-N keeper set:
+//   open_position mints one LiquidationAuth (the preimage) per keeper, and ANY
+//   keeper in liquidator_set may liquidate. The reward goes to whoever submits,
+//   making the keepers race rather than collude. liquidator_set is admin-managed
+//   (roles[0u8]) so a trader cannot substitute colluding keeper addresses.
 
 import test_usdcx_stablecoin.aleo;
 import zkperp_compliance_v7.aleo;
@@ -43,7 +54,7 @@ struct PositionCommit {
     position_id: field,
 }
 
-program zkperp_core_v27.aleo {
+program zkperp_core_v29.aleo {
 
     @custom
     constructor() {
@@ -51,10 +62,14 @@ program zkperp_core_v27.aleo {
         Mapping::set(roles, 1u8, self.program_owner);
     }
 
-    const OPENING_FEE_BPS: u64       = 1_000u64;
-    const WITHDRAWAL_BUFFER_BPS: u64 = 100_000u64;
-    const PRICE_PRECISION: u64       = 100_000_000_000u64;
-    const MAX_PRICE_AGE_BLOCKS: u32  = 150u32; // ≈ 5 min staleness limit
+    const OPENING_FEE_BPS: u64        = 1_000u64;
+    const WITHDRAWAL_BUFFER_BPS: u64  = 100_000u64;
+    const PRICE_PRECISION: u64        = 100_000_000_000u64;
+    const MAX_PRICE_AGE_BLOCKS: u32   = 150u32;     // ≈ 5 min staleness limit
+
+    // Per-million units (same convention as OPENING_FEE_BPS: value / 1_000_000).
+    const MAINTENANCE_MARGIN_BPS: u64 = 50_000u64;  // 5% of notional size
+    const LIQ_PENALTY_BPS: u64        = 100_000u64; // 10% of collateral → liquidator reward
 
     mapping roles: u8 => address;
     mapping slots_initialized: address => bool;
@@ -67,6 +82,11 @@ program zkperp_core_v27.aleo {
     mapping order_traders: field => address;
     mapping order_nonces: field => bool;
     mapping position_commits: field => field;
+
+    // 0u8,1u8,2u8 → the three liquidator keepers. Admin-managed (roles[0u8]).
+    // Read in open_position's finalize to verify the trader cannot substitute
+    // colluding addresses, and in liquidate's finalize for membership.
+    mapping liquidator_set: u8 => address;
 
     record PositionSlot {
         owner: address,
@@ -127,34 +147,21 @@ program zkperp_core_v27.aleo {
     }
 
     // ══════════════════════════════════════════════════════════════
-    // COMPLIANCE CHECK HELPER (inline into every trader function)
+    // LIQUIDATOR SET MANAGEMENT — admin only (roles[0u8])
     // ══════════════════════════════════════════════════════════════
     //
-    // Usage in each trader fn:
-    //   1. Accept: cr: zkperp_compliance_v7.aleo::ZKPerpComplianceRecord
-    //   2. Extract before final{}: let cr_issued_under = cr.issued_under; let cr_expires_at = cr.expires_at;
-    //   3. Return cr as first output
-    //   4. In final{}: assert compliance (see pattern below)
-    //
-    // final{} compliance block:
-    //   let active_root: field = Mapping::get(zkperp_compliance_v7.aleo::compliance_root, 0u8);
-    //   assert_eq(cr_issued_under, active_root);
-    //   let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v7.aleo::revoked, caller, false);
-    //   assert(!is_revoked);
-    //   assert(block.height <= cr_expires_at);
+    // Call this three times after deploy (idx 0,1,2) to populate the keeper
+    // set BEFORE any position is opened. The trader cannot influence it.
 
-    // ══════════════════════════════════════════════════════════════
-    // ORACLE PRICE READ HELPER
-    // ══════════════════════════════════════════════════════════════
-    //
-    // All price reads go through zkperp_oracle_v3.aleo::oracle_prices.
-    // Prices are committed there only after 2-of-3 oracle nodes agree.
-    // Pattern used in every finalize that needs a price:
-    //
-    //   let price_data: zkperp_oracle_v3.aleo::PriceData =
-    //       Mapping::get(zkperp_oracle_v3.aleo::oracle_prices, asset_id);
-    //   assert_eq(exit_price, price_data.price);
-    //   assert(block.height - price_data.timestamp <= MAX_PRICE_AGE_BLOCKS);
+    fn set_liquidator(public idx: u8, public keeper: address) -> Final {
+        let caller: address = self.caller;
+        return final {
+            let admin: address = Mapping::get(roles, 0u8);
+            assert_eq(caller, admin);
+            assert(idx < 3u8);
+            Mapping::set(liquidator_set, idx, keeper);
+        };
+    }
 
     // ══════════════════════════════════════════════════════════════
     // SLOT INITIALIZATION
@@ -294,6 +301,11 @@ program zkperp_core_v27.aleo {
     // ══════════════════════════════════════════════════════════════
     // TRADING
     // ══════════════════════════════════════════════════════════════
+    //
+    // v28: orchestrator input removed. Three LiquidationAuth records are minted
+    // (one per keeper in liquidator_set). The keeper addresses are passed in and
+    // verified against the on-chain liquidator_set in finalize so the trader
+    // cannot supply colluding addresses.
 
     fn open_position(
         cr: zkperp_compliance_v7.aleo::ZKPerpComplianceRecord,
@@ -306,10 +318,12 @@ program zkperp_core_v27.aleo {
         private max_slippage: u64,
         nonce: field,
         recipient: address,
-        private orchestrator: address,
+        private keeper_0: address,
+        private keeper_1: address,
+        private keeper_2: address,
         merkle_proof: [test_usdcx_stablecoin.aleo::MerkleProof; 2],
         public asset_id: field,
-    ) -> (zkperp_compliance_v7.aleo::ZKPerpComplianceRecord, PositionSlot, LiquidationAuth, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
+    ) -> (zkperp_compliance_v7.aleo::ZKPerpComplianceRecord, PositionSlot, LiquidationAuth, LiquidationAuth, LiquidationAuth, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
         assert(!slot.is_open);
         assert_eq(slot.owner, self.signer);
         let expected_slot_id: u8 = is_long ? 0u8 : 1u8;
@@ -345,8 +359,20 @@ program zkperp_core_v27.aleo {
             size_usdc: size, collateral_usdc: collateral_after_fee, entry_price: entry_price,
         };
 
-        let liq_auth: LiquidationAuth = LiquidationAuth {
-            owner: orchestrator, trader: recipient, slot_id: slot.slot_id,
+        // One auth per keeper — each record carries the full position preimage,
+        // so any single keeper can later recompute the commit and liquidate.
+        let liq_auth_0: LiquidationAuth = LiquidationAuth {
+            owner: keeper_0, trader: recipient, slot_id: slot.slot_id,
+            position_id: position_id, is_long: is_long,
+            size_usdc: size, collateral_usdc: collateral_after_fee, entry_price: entry_price,
+        };
+        let liq_auth_1: LiquidationAuth = LiquidationAuth {
+            owner: keeper_1, trader: recipient, slot_id: slot.slot_id,
+            position_id: position_id, is_long: is_long,
+            size_usdc: size, collateral_usdc: collateral_after_fee, entry_price: entry_price,
+        };
+        let liq_auth_2: LiquidationAuth = LiquidationAuth {
+            owner: keeper_2, trader: recipient, slot_id: slot.slot_id,
             position_id: position_id, is_long: is_long,
             size_usdc: size, collateral_usdc: collateral_after_fee, entry_price: entry_price,
         };
@@ -359,7 +385,7 @@ program zkperp_core_v27.aleo {
             position_id:     position_id,
         });
 
-        return (cr, filled_slot, liq_auth, usdcx_compliance, change_token, final {
+        return (cr, filled_slot, liq_auth_0, liq_auth_1, liq_auth_2, usdcx_compliance, change_token, final {
             // ── Compliance check ──
             let active_root: field = Mapping::get(zkperp_compliance_v7.aleo::compliance_root, 0u8);
             assert_eq(cr_issued_under, active_root);
@@ -378,8 +404,15 @@ program zkperp_core_v27.aleo {
             assert(slippage <= max_slippage);
             // ── End oracle check ──
             transfer_final.run();
-            let expected_orchestrator: address = Mapping::get(roles, 1u8);
-            assert_eq(orchestrator, expected_orchestrator);
+            // ── Keepers must match the on-chain liquidator set ──
+            // (trader cannot substitute their own colluding addresses)
+            let set_0: address = Mapping::get(liquidator_set, 0u8);
+            let set_1: address = Mapping::get(liquidator_set, 1u8);
+            let set_2: address = Mapping::get(liquidator_set, 2u8);
+            assert_eq(keeper_0, set_0);
+            assert_eq(keeper_1, set_1);
+            assert_eq(keeper_2, set_2);
+            // ── End keeper check ──
             let nonce_used: bool = Mapping::get_or_use(used_nonces, nonce, false);
             assert(!nonce_used);
             Mapping::set(used_nonces, nonce, true);
@@ -462,21 +495,61 @@ program zkperp_core_v27.aleo {
     }
 
     // ══════════════════════════════════════════════════════════════
-    // LIQUIDATION — no compliance check (orchestrator calls this)
+    // LIQUIDATION — 1-of-N keepers, insolvency enforced on-chain
     // ══════════════════════════════════════════════════════════════
+    //
+    // No compliance check (the liquidator, not the trader, calls this), but the
+    // finalize now PROVES the liquidation is justified:
+    //   1. position is open (active_position_ids)
+    //   2. supplied params match the on-chain commit (no lying about size/collateral)
+    //   3. exit_price is the fresh, quorum-agreed oracle price
+    //   4. equity < maintenance margin (position genuinely underwater)
+    //   5. caller is a current member of liquidator_set
+    //   6. pool can cover the (deterministic) reward
+    // Reward is collateral * LIQ_PENALTY_BPS, NOT a caller-supplied amount.
 
     fn liquidate(
         auth: LiquidationAuth,
-        public liquidator_reward: u128,
+        public asset_id: field,
+        public exit_price: u64,
+        private entry_price: u64,
+        private size_usdc: u64,
+        private collateral_usdc: u64,
+        private is_long: bool,
     ) -> (PositionSlot, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
+        // Record ownership already guarantees the caller holds this auth.
         assert_eq(auth.owner, self.caller);
+        // The supplied direction must match the auth (commit check covers the rest).
+        assert_eq(is_long, auth.is_long);
 
+        let caller: address = self.caller;
         let position_id: field = auth.position_id;
+
+        // Recompute the commit so the caller cannot lie about position params.
+        let recomputed_commit: field = BHP256::hash_to_field(PositionCommit {
+            entry_price:     entry_price,
+            size_usdc:       size_usdc,
+            collateral_usdc: collateral_usdc,
+            is_long:         is_long,
+            position_id:     position_id,
+        });
+
+        // PnL — identical formula to close_position.
+        let raw_pnl: i64 = is_long
+            ? (exit_price as i64 - entry_price as i64) * size_usdc as i64 / PRICE_PRECISION as i64
+            : (entry_price as i64 - exit_price as i64) * size_usdc as i64 / PRICE_PRECISION as i64;
+
+        let equity_i64: i64 = collateral_usdc as i64 + raw_pnl;
+
+        // Deterministic reward off collateral (not caller-chosen). Because
+        // collateral_usdc is verified against the commit in finalize, the reward
+        // cannot be inflated by lying — the whole tx reverts if it doesn't match.
+        let liquidator_reward: u64 = (collateral_usdc * LIQ_PENALTY_BPS) / 1_000_000u64;
 
         let (usdcx_compliance, reward_token, transfer_final):
             (test_usdcx_stablecoin.aleo::ComplianceRecord,
              test_usdcx_stablecoin.aleo::Token, Final) =
-            test_usdcx_stablecoin.aleo::transfer_public_to_private(self.caller, liquidator_reward);
+            test_usdcx_stablecoin.aleo::transfer_public_to_private(self.caller, liquidator_reward as u128);
 
         let empty_slot: PositionSlot = PositionSlot {
             owner: auth.trader, slot_id: auth.slot_id, is_open: false,
@@ -486,10 +559,36 @@ program zkperp_core_v27.aleo {
 
         return (empty_slot, usdcx_compliance, reward_token, final {
             transfer_final.run();
+
+            // 1. Position must be open.
             let stored_id: field = Mapping::get(active_position_ids, position_id);
             assert_eq(stored_id, position_id);
+
+            // 2. Params must match the on-chain commit.
+            let stored_commit: field = Mapping::get(position_commits, position_id);
+            assert_eq(recomputed_commit, stored_commit);
+
+            // 3. Exit price must be the fresh, quorum-agreed oracle price.
+            let price_data: zkperp_oracle_v3.aleo::PriceData =
+                Mapping::get(zkperp_oracle_v3.aleo::oracle_prices, asset_id);
+            assert_eq(exit_price, price_data.price);
+            assert(block.height - price_data.timestamp <= MAX_PRICE_AGE_BLOCKS);
+
+            // 4. Position must actually be underwater.
+            let maint_margin: i64 = (size_usdc * MAINTENANCE_MARGIN_BPS / 1_000_000u64) as i64;
+            assert(equity_i64 < maint_margin);
+
+            // 5. Caller must be a current keeper (defends against rotated-out keys).
+            let s0: address = Mapping::get(liquidator_set, 0u8);
+            let s1: address = Mapping::get(liquidator_set, 1u8);
+            let s2: address = Mapping::get(liquidator_set, 2u8);
+            let is_keeper: bool = (caller == s0) || (caller == s1) || (caller == s2);
+            assert(is_keeper);
+
+            // 6. Pool can cover the reward.
             let pool: PoolState = Mapping::get(pool_state, 0field);
-            assert(pool.total_liquidity >= liquidator_reward as u64);
+            assert(pool.total_liquidity >= liquidator_reward);
+
             Mapping::remove(position_commits, position_id);
             Mapping::remove(position_open_blocks, position_id);
             Mapping::remove(active_position_ids, position_id);
@@ -807,6 +906,22 @@ program zkperp_core_v27.aleo {
         return final {
             let still_pending: bool = Mapping::contains(pending_orders, order_id);
             assert(!still_pending);
+        };
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // BURN STALE LIQUIDATION AUTH — losing keepers discard their auth for a
+    // position that's already closed/liquidated. No compliance needed.
+    // ══════════════════════════════════════════════════════════════
+
+    fn burn_liquidation_auth(auth: LiquidationAuth) -> Final {
+        assert_eq(auth.owner, self.signer);
+        let position_id: field = auth.position_id;
+        return final {
+            // Only burnable once the position is no longer active —
+            // prevents discarding an auth for a still-open position.
+            let still_active: bool = Mapping::contains(active_position_ids, position_id);
+            assert(!still_active);
         };
     }
 

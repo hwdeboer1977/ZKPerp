@@ -1,4 +1,5 @@
 import test_usdcx_stablecoin.aleo;
+import credits.aleo;
 
 // ============================================================
 // zkperp_amm_v1.aleo — Concentrated Liquidity AMM
@@ -8,7 +9,7 @@ import test_usdcx_stablecoin.aleo;
 // All math is inlined directly.
 // ============================================================
 
-program zkperp_amm_v3.aleo {
+program zkperp_amm_v4.aleo {
 
     const FEE_BPS: u64       = 3_000u64;
     const FEE_DENOM: u64     = 1_000_000u64;
@@ -122,6 +123,7 @@ program zkperp_amm_v3.aleo {
     fn mint_position(
         lp_token: test_usdcx_stablecoin.aleo::Token,
         merkle_proof: [test_usdcx_stablecoin.aleo::MerkleProof; 2],
+        aleo_in: credits.aleo::credits,
         tick_lower: i32,
         tick_upper: i32,
         liquidity_desired: u128,
@@ -133,7 +135,7 @@ program zkperp_amm_v3.aleo {
         public current_tick: i32,
         public fee_growth_inside_0: u128,
         public fee_growth_inside_1: u128,
-    ) -> (LPPosition, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
+    ) -> (LPPosition, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, credits.aleo::credits, Final) {
 
         assert(liquidity_desired > 0u128);
         assert(tick_lower < tick_upper);
@@ -168,9 +170,16 @@ program zkperp_amm_v3.aleo {
                 self.address, amount_0_actual as u128, lp_token, merkle_proof,
             );
 
-        // xfer_final.run() executes the USDCx transfer on-chain inside the finalize block.
-        return (position, compliance_rec, change_token, final {
+        // Transfer ALEO (native credits) from caller's private record to AMM's public balance.
+        // Returns change credits record (sent back to caller) and a deferred Final.
+        let (aleo_change, aleo_xfer_final): (credits.aleo::credits, Final) =
+            credits.aleo::transfer_private_to_public(aleo_in, self.address, amount_1_actual);
+
+        // Both .run() calls execute on-chain inside the finalize block, in order.
+        // If either fails, the entire mint_position transition is aborted.
+        return (position, compliance_rec, change_token, aleo_change, final {
             xfer_final.run();
+            aleo_xfer_final.run();
             let pool: PoolState = Mapping::get(pool_state, POOL_KEY);
             assert_eq(pool.sqrt_price_x64, sqrt_price_x64);
             assert_eq(pool.current_tick, current_tick);
@@ -266,7 +275,7 @@ program zkperp_amm_v3.aleo {
         public amount_1_out: u64,
         public sqrt_price_x64: u128,
         public current_tick: i32,
-    ) -> (test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
+    ) -> (test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, credits.aleo::credits, Final) {
 
         assert_eq(position.owner, self.signer);
         assert(position.liquidity > 0u128);
@@ -284,9 +293,16 @@ program zkperp_amm_v3.aleo {
             test_usdcx_stablecoin.aleo::transfer_public_to_private(
                 owner, amount_0_out as u128);
 
-        // xfer_final.run() executes the USDCx payout on-chain.
-        return (compliance_rec, payout_token, final {
+        // Transfer ALEO (native credits) from AMM's public balance to a new private record
+        // owned by the LP. credits.aleo's caller here is this AMM program, so the public
+        // balance debited is self.address (the AMM's).
+        let (aleo_payout, aleo_xfer_final): (credits.aleo::credits, Final) =
+            credits.aleo::transfer_public_to_private(owner, amount_1_out);
+
+        // Both .run() calls execute on-chain inside the finalize block, in order.
+        return (compliance_rec, payout_token, aleo_payout, final {
             xfer_final.run();
+            aleo_xfer_final.run();
             let pool: PoolState = Mapping::get(pool_state, POOL_KEY);
             assert_eq(pool.sqrt_price_x64, sqrt_price_x64);
             assert_eq(pool.current_tick, current_tick);
@@ -372,7 +388,7 @@ program zkperp_amm_v3.aleo {
         public step1: TickStep,
         public step2: TickStep,
         public step3: TickStep,
-    ) -> (SwapReceipt, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
+    ) -> (SwapReceipt, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, credits.aleo::credits, Final) {
 
         // Verify fee matches 0.3% of gross input. Step amounts must sum to total.
         assert(total_amount_in > 0u64);
@@ -413,10 +429,15 @@ program zkperp_amm_v3.aleo {
             test_usdcx_stablecoin.aleo::transfer_private_to_public(
                 self.address, total_amount_in as u128, usdcx_in, merkle_proof);
 
+        // Pay ALEO out: AMM's public balance -> private credits record owned by swapper.
+        let (aleo_out, aleo_xfer_final): (credits.aleo::credits, Final) =
+            credits.aleo::transfer_public_to_private(self.signer, total_amount_out);
+
         // ── Finalize block: all on-chain state updates ──────────────────────────────
-        // xfer_final.run() settles the USDCx transfer first.
-        return (receipt, compliance_rec, change_token, final {
+        // xfer_final.run() settles the USDCx transfer first; aleo_xfer_final.run() pays out ALEO.
+        return (receipt, compliance_rec, change_token, aleo_out, final {
             xfer_final.run();
+            aleo_xfer_final.run();
             let pool: PoolState = Mapping::get(pool_state, POOL_KEY);
             let a0: bool  = step0.tick_next != TICK_SENTINEL;
             let k0: field = a0 ? (step0.tick_next as i64 + 2_147_483_647i64) as u64 as field : 0field;
@@ -640,6 +661,7 @@ program zkperp_amm_v3.aleo {
 
     fn swap_sell(
         merkle_proof: [test_usdcx_stablecoin.aleo::MerkleProof; 2],
+        aleo_in: credits.aleo::credits,
         public total_amount_in:  u64,
         public total_amount_out: u64,
         public total_fee:        u64,
@@ -649,7 +671,7 @@ program zkperp_amm_v3.aleo {
         public step1: TickStep,
         public step2: TickStep,
         public step3: TickStep,
-    ) -> (SwapReceipt, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
+    ) -> (SwapReceipt, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, credits.aleo::credits, Final) {
 
         // Verify fee and step sums. Fee = 0.3% of ALEO amount_in.
         assert(total_amount_in > 0u64);
@@ -684,6 +706,11 @@ program zkperp_amm_v3.aleo {
         let fee: u64     = total_fee;
         let seller: address = self.caller;
 
+        // Transfer ALEO from seller's private credits record to AMM's public balance.
+        // Returns change credits record (sent back to seller) and a deferred Final.
+        let (aleo_change, aleo_xfer_final): (credits.aleo::credits, Final) =
+            credits.aleo::transfer_private_to_public(aleo_in, self.address, total_amount_in);
+
         // Transfer USDCx from AMM public balance to seller. Returns compliance record and token.
         let (compliance_rec, usdc_out, xfer_final):
             (test_usdcx_stablecoin.aleo::ComplianceRecord,
@@ -692,7 +719,9 @@ program zkperp_amm_v3.aleo {
                 self.signer, total_amount_out as u128);
 
         // ── Finalize block ──────────────────────────────────────────────────────────
-        return (receipt, compliance_rec, usdc_out, final {
+        // ALEO inbound runs first so a malformed credits input aborts before USDCx is paid out.
+        return (receipt, compliance_rec, usdc_out, aleo_change, final {
+            aleo_xfer_final.run();
             xfer_final.run();
             let pool: PoolState = Mapping::get(pool_state, POOL_KEY);
                         // ── STEP 0 ──────────────────────────────────────────

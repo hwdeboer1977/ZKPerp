@@ -45,27 +45,28 @@ function rebuildTree(addresses, existingLeafHashes = {}) {
   return currentTree;
 }
 
-// ─── Called after every successful update_root on-chain ───────────────────────
-// Marks all addresses whose compliance_epochs.issued_under no longer matches
-// the new root as needing re-issuance. Does NOT invalidate their record on-chain
-// (the Leo contract does that automatically via assert_eq). This is purely a
-// server-side flag so /reissue-check can answer instantly without a chain query.
+// ─── Epoch repair ─────────────────────────────────────────────────────────────
+// NOTE (compliance fix): the compliance contract no longer asserts a record's
+// issued_under against the current root at verify/trade time. A record stays
+// valid until it expires or the address is revoked. Rotating the root when a
+// NEW user registers therefore does NOT invalidate existing holders, so we must
+// NOT mark them stale. This function only ensures every address has an epoch
+// entry; it never flips an already-issued holder back to needs_reissuance.
 
-function markStaleEpochs(data, newRoot) {
-  let staleCount = 0;
+function ensureEpochEntries(data) {
+  let repaired = 0;
   for (const address of data.addresses) {
-    const epoch = data.compliance_epochs[address];
-    if (!epoch || epoch.issued_under !== newRoot) {
+    if (!data.compliance_epochs[address]) {
       data.compliance_epochs[address] = {
-        issued_under: null,   // null = not yet issued under current root
-        issued_at: epoch?.issued_at ?? null,
-        needs_reissuance: true,
+        issued_under: null,
+        issued_at: null,
+        needs_reissuance: true,   // genuinely never issued
       };
-      staleCount++;
+      repaired++;
     }
   }
-  if (staleCount > 0) {
-    console.log(`[epoch] Marked ${staleCount} address(es) as needing re-issuance under root ${newRoot.slice(0, 20)}...`);
+  if (repaired > 0) {
+    console.log(`[epoch] Initialized ${repaired} missing epoch entr${repaired === 1 ? 'y' : 'ies'}.`);
   }
 }
 
@@ -86,28 +87,17 @@ async function startup() {
     try {
       const txId = await updateRootOnChain(currentTree.root);
       await waitForConfirmation(txId);
-      markStaleEpochs(data, currentTree.root);
+      ensureEpochEntries(data);
       saveAllowlist(data);
-      console.log(`[startup] Root synced ✓`);
+      console.log(`[startup] Root synced ✓ (existing holders remain valid)`);
     } catch (e) {
       console.warn(`[startup] Root sync failed: ${e.message}`);
     }
   } else {
     console.log(`[startup] Root matches on-chain ✓`);
     // Repair any missing epoch entries without rotating the root
-    let repaired = false;
-    for (const address of data.addresses) {
-      const epoch = data.compliance_epochs[address];
-      if (!epoch) {
-        data.compliance_epochs[address] = {
-          issued_under: null,
-          issued_at: null,
-          needs_reissuance: true,
-        };
-        repaired = true;
-      }
-    }
-    if (repaired) saveAllowlist(data);
+    ensureEpochEntries(data);
+    saveAllowlist(data);
   }
 }
 
@@ -154,9 +144,10 @@ app.post('/api/compliance/register', async (req, res) => {
     rebuildTree(data.addresses, existingLeafHashes);
     const leafIndex = data.addresses.indexOf(address);
 
-    // Root rotated — mark all existing holders as stale
-    markStaleEpochs(data, currentTree.root);
-
+    // Root rotated by adding this leaf. Existing holders stay valid (their
+    // records are checked on expiry + revocation, not root), so we do NOT
+    // mark them stale. We still push the new root on-chain so that THIS new
+    // user can be issued against it.
     const txId = await updateRootOnChain(currentTree.root);
     data.registrations[address].tx_id = txId;
     saveAllowlist(data);
@@ -167,7 +158,8 @@ app.post('/api/compliance/register', async (req, res) => {
       root: currentTree.root,
       leaf_index: leafIndex,
       tx_id: txId,
-      // Tell the frontend this address (and all others) should re-issue compliance
+      // Only THIS newly-registered address needs issuance. Existing holders
+      // are unaffected by the root rotation.
       needs_reissuance: true,
     });
   } catch (err) {
@@ -215,7 +207,10 @@ app.get('/api/compliance/reissue-check/:address', async (req, res) => {
 
     const epoch = data.compliance_epochs[address];
     const currentRoot = currentTree?.root ?? null;
-    const needsReissuance = !epoch || epoch.needs_reissuance || epoch.issued_under !== currentRoot;
+    // A record issued under ANY past root is still valid (verified on expiry +
+    // revocation, not root). So reissuance is needed only if never issued or
+    // explicitly flagged — NOT because the root has since rotated.
+    const needsReissuance = !epoch || epoch.needs_reissuance;
 
     res.json({
       address,
@@ -275,7 +270,7 @@ app.get('/api/compliance/status/:address', async (req, res) => {
     const isRevoked = await isRevokedOnChain(address);
     const onChainRoot = await getCurrentRootOnChain();
     const epoch = data.compliance_epochs[address];
-    const needsReissuance = !epoch || epoch.needs_reissuance || epoch.issued_under !== currentTree?.root;
+    const needsReissuance = !epoch || epoch.needs_reissuance;
 
     res.json({
       address,
@@ -311,7 +306,7 @@ app.get('/api/compliance/audit/:address', async (req, res) => {
       proof_valid: !isRevoked,
       root_epoch: onChainRoot,
       issued_under: epoch?.issued_under ?? null,
-      needs_reissuance: !epoch || epoch.needs_reissuance || epoch.issued_under !== onChainRoot,
+      needs_reissuance: !epoch || epoch.needs_reissuance,
       registered_at: reg?.registered_at ?? null,
       revoked: isRevoked,
       trade_details: '— hidden —',

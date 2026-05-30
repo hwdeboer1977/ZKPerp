@@ -41,6 +41,16 @@ const CONFIG = {
   privateKey: process.env.PRIVATE_KEY || '',
   viewKey:    process.env.VIEW_KEY    || '',
 
+  // This keeper's own address — used to verify membership in liquidator_set at
+  // startup and (optionally) to stagger race entry. Each of the 3 keeper bots
+  // sets its OWN address here. If unset, the membership check is skipped.
+  keeperAddress: process.env.KEEPER_ADDRESS || '',
+  // Optional '0'|'1'|'2': adds keeperIndex * RACE_STAGGER_MS delay before firing
+  // a liquidation, so the 3 keepers don't all prove the same tx simultaneously.
+  // Leave unset for an even (no-stagger) race.
+  keeperIndex:    process.env.KEEPER_INDEX || '',
+  raceStaggerMs:  parseInt(process.env.RACE_STAGGER_MS || '0'),
+
   // Provable API
   consumerId: process.env.PROVABLE_CONSUMER_ID || '',
   apiKey:     process.env.PROVABLE_API_KEY     || '',
@@ -68,10 +78,8 @@ const CONFIG = {
   frontendOrigin: process.env.FRONTEND_ORIGIN || 'http://localhost:5173',
 
   execUseFeeMaster: process.env.EXEC_USE_FEE_MASTER === 'true',
-
-  // Contract constants
-  liquidationThresholdBps: 10000n,  // 1%
-  liquidationRewardBps:    5000n,   // 0.5%
+  // Note: liquidation threshold (5% maint margin) and reward (10% of collateral)
+  // are now enforced and derived on-chain — see MAINTENANCE_MARGIN_BPS / LIQ_PENALTY_BPS.
 };
 
 // Oracle asset key mapping — matches zkperp_oracle_v3.aleo markets.json
@@ -80,6 +88,11 @@ const ORACLE_ASSET_KEYS = {
   'ETH_USD': '2field',
   'SOL_USD': '3field',
 };
+
+// ── On-chain constants (must match zkperp_core_v29c.aleo) ───────
+const PRICE_PRECISION        = 100_000_000_000n; // 1e11
+const MAINTENANCE_MARGIN_BPS = 50_000n;          // 5% of notional → liquidation threshold
+const LIQ_PENALTY_BPS        = 100_000n;         // 10% of collateral → keeper reward (on-chain derived)
 
 const ALL_PROGRAM_IDS = new Set([CONFIG.programId]);
 
@@ -224,19 +237,20 @@ async function getCurrentOraclePriceFromChain() {
 // HTTP API SERVER
 // ═══════════════════════════════════════════════════════════════
 
+// Mirrors zkperp_core_v29c.aleo::liquidate finalize exactly so the dashboard and
+// the chain agree on what is liquidatable. PnL uses PRICE_PRECISION=1e11, the
+// maintenance margin is 5% of notional (MAINTENANCE_MARGIN_BPS=50_000), and the
+// reward is collateral * 10% (LIQ_PENALTY_BPS=100_000) — all computed on-chain.
 function calcLiquidation(pos, price) {
   if (!price || price === 0n) return { pnl: 0n, marginRatio: 100, isLiquidatable: false, reward: 0n };
-  const size8       = pos.size * 100n;
-  const collateral8 = pos.collateral * 100n;
-  const priceDiff   = price > pos.entryPrice ? price - pos.entryPrice : pos.entryPrice - price;
-  const pnlAbs      = (size8 * priceDiff) / (pos.entryPrice + 1n);
-  const traderProfits = (pos.isLong && price > pos.entryPrice) || (!pos.isLong && price < pos.entryPrice);
-  const pnl           = traderProfits ? pnlAbs : -pnlAbs;
-  const remainingMargin = collateral8 + pnl;
-  const marginRatio   = Number(remainingMargin * 100n * 10000n / (size8 + 1n)) / 10000;
-  const isLiquidatable = marginRatio < 1;
-  const reward        = (pos.size * CONFIG.liquidationRewardBps) / 1_000_000n;
-  return { pnl, marginRatio, isLiquidatable, reward };
+  const rawPnl = pos.isLong
+    ? (price - pos.entryPrice) * pos.size / PRICE_PRECISION
+    : (pos.entryPrice - price) * pos.size / PRICE_PRECISION;
+  const equity      = pos.collateral + rawPnl;                       // may be negative
+  const maintMargin = (pos.size * MAINTENANCE_MARGIN_BPS) / 1_000_000n;
+  const marginRatio = pos.size > 0n ? Number(equity * 10000n / pos.size) / 100 : 0;
+  const reward      = (pos.collateral * LIQ_PENALTY_BPS) / 1_000_000n;
+  return { pnl: rawPnl, marginRatio, isLiquidatable: equity < maintMargin, reward };
 }
 
 function serializePosition(pos) {
@@ -328,6 +342,17 @@ function startApiServer() {
         execLimitAuthCount: execLimitAuthStore.size,
         upSince: botStartedAt,
       }));
+      return;
+    }
+
+    if (url.pathname === '/api/liquidator-set') {
+      getLiquidatorSet().then(set => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          liquidatorSet: set,
+          keeper_0: set['0u8'], keeper_1: set['1u8'], keeper_2: set['2u8'],
+        }));
+      }).catch(() => { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'failed to read liquidator_set' })); });
       return;
     }
 
@@ -1005,36 +1030,46 @@ function parsePendingOrderFromPlaintext(plaintext) {
 // LIQUIDATION
 // ═══════════════════════════════════════════════════════════════
 
+// Mirrors zkperp_core_v29c.aleo::liquidate finalize step 4 exactly:
+//   equity = collateral + raw_pnl;  liquidatable iff equity < 5% of notional.
 function calculateMarginRatio(position, price) {
   const { isLong, size, collateral, entryPrice } = position;
-  const size8           = size * 100n;
-  const collateral8     = collateral * 100n;
-  const priceDiff       = price > entryPrice ? price - entryPrice : entryPrice - price;
-  const pnlAbs          = (size8 * priceDiff) / (entryPrice + 1n);
-  const traderProfits   = (isLong && price > entryPrice) || (!isLong && price < entryPrice);
-  const pnl             = traderProfits ? pnlAbs : -pnlAbs;
-  const remainingMargin = collateral8 + pnl;
-  const marginRatioBps  = (remainingMargin * 1_000_000n) / (size8 + 1n);
+  const rawPnl = isLong
+    ? (price - entryPrice) * size / PRICE_PRECISION
+    : (entryPrice - price) * size / PRICE_PRECISION;
+  const equity      = collateral + rawPnl;
+  const maintMargin = (size * MAINTENANCE_MARGIN_BPS) / 1_000_000n;
+  const marginPercent = size > 0n ? Number(equity * 10000n / size) / 100 : 0;
   return {
-    pnl, marginRatioBps,
-    marginPercent:  Number(marginRatioBps) / 10000,
-    isLiquidatable: marginRatioBps < CONFIG.liquidationThresholdBps,
+    pnl: rawPnl,
+    maintMargin,
+    marginPercent,
+    isLiquidatable: equity < maintMargin,
   };
 }
 
 async function liquidatePosition(position) {
-  const { positionId, size, plaintext } = position;
+  const { positionId, size, collateral, entryPrice, isLong, plaintext } = position;
 
   if (!plaintext) {
-    logError('LIQUIDATE', `No plaintext record for ${positionId.slice(0, 20)} — cannot liquidate`);
+    logError('LIQUIDATE', `No LiquidationAuth record for ${positionId.slice(0, 20)} — cannot liquidate`);
     return false;
   }
 
-  let reward = (size * CONFIG.liquidationRewardBps) / 1_000_000n;
-  if (reward < 1n) reward = 1n;
+  // exit_price MUST equal oracle_prices[asset_id].price exactly (finalize step 3).
+  // We pass the value read this tick; if the oracle ticks before we land, the tx
+  // reverts and we retry on the next scan. Reward is derived on-chain now.
+  const exitPrice = currentOraclePrice;
+  const assetKey  = ORACLE_ASSET_KEYS[CONFIG.assetId] || '1field';
+  const estReward = (collateral * LIQ_PENALTY_BPS) / 1_000_000n; // for logging only
 
-  log('LIQUIDATE', `Liquidating ${positionId.slice(0, 20)}...`);
-  log('LIQUIDATE', `Plaintext preview: ${plaintext?.substring(0, 150)}`);
+  // Optional stagger so the 3 keepers don't all prove the same tx at once.
+  if (CONFIG.keeperIndex !== '' && CONFIG.raceStaggerMs > 0) {
+    const delay = parseInt(CONFIG.keeperIndex) * CONFIG.raceStaggerMs;
+    if (delay > 0) { log('LIQUIDATE', `Keeper ${CONFIG.keeperIndex} stagger: waiting ${delay}ms`); await sleep(delay); }
+  }
+
+  log('LIQUIDATE', `Liquidating ${positionId.slice(0, 20)} @ exit $${(Number(exitPrice) / 1e8).toFixed(2)}...`);
 
   try {
     const liqProgramId = position.programId || CONFIG.programId;
@@ -1042,17 +1077,44 @@ async function liquidatePosition(position) {
       privateKey:    CONFIG.privateKey,
       programId:     liqProgramId,
       functionName:  'liquidate',
-      inputs:        [plaintext, `${reward}u128`],
+      inputs: [
+        plaintext,                  // auth: LiquidationAuth (this keeper's own record)
+        assetKey,                   // public asset_id: field
+        `${exitPrice}u64`,          // public exit_price: u64
+        `${entryPrice}u64`,         // private entry_price: u64
+        `${size}u64`,               // private size_usdc: u64
+        `${collateral}u64`,         // private collateral_usdc: u64
+        isLong ? 'true' : 'false',  // private is_long: bool
+      ],
       useFeeMaster:  CONFIG.execUseFeeMaster,
       timeoutMs:     180_000,
     });
-    log('LIQUIDATE', `✅ Liquidated! Reward: $${(Number(reward) / 1_000_000).toFixed(4)}`);
+    log('LIQUIDATE', `✅ Liquidated ${positionId.slice(0, 20)}! Est. reward ~$${(Number(estReward) / 1_000_000).toFixed(4)}`);
     positionStore.delete(positionId);
     return true;
   } catch (err) {
-    logError('LIQUIDATE', `Failed: ${err.message.substring(0, 200)}`);
+    const msg = String(err?.message ?? err);
+    // In a 3-keeper race, losing is the expected outcome ~2/3 of the time:
+    // another keeper already removed the position from active_position_ids /
+    // position_commits, so our finalize asserts revert. Don't treat as an error.
+    if (isBenignRaceLoss(msg)) {
+      log('LIQUIDATE', `↩︎ Already closed / lost race for ${positionId.slice(0, 20)} — skipping`);
+      positionStore.delete(positionId);
+      return false;
+    }
+    logError('LIQUIDATE', `Failed: ${msg.substring(0, 200)}`);
     return false;
   }
+}
+
+// Heuristic: a reverted finalize from losing the keeper race vs. a genuine fault.
+function isBenignRaceLoss(msg) {
+  const m = msg.toLowerCase();
+  return m.includes('assert')
+      || m.includes('active_position_ids')
+      || m.includes('position_commits')
+      || m.includes('already')
+      || m.includes('finalize');
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1303,6 +1365,36 @@ async function getOrchestratorAddress() {
   } catch { return ''; }
 }
 
+// Reads liquidator_set[0u8..2u8] — the three keeper addresses the contract
+// accepts in liquidate() and requires the trader to pass into open_position().
+async function getLiquidatorSet() {
+  const out = {};
+  for (const idx of ['0u8', '1u8', '2u8']) {
+    try {
+      const raw = await getMapping('liquidator_set', idx);
+      out[idx] = (raw && raw !== 'null') ? raw.replace(/"/g, '').trim() : null;
+    } catch { out[idx] = null; }
+  }
+  return out;
+}
+
+// Fail-fast: if this keeper's address isn't in liquidator_set, every liquidate()
+// will revert at finalize step 5. Warn loudly at startup rather than at 3am.
+async function assertKeeperMembership() {
+  const set   = await getLiquidatorSet();
+  const addrs = Object.values(set).filter(Boolean);
+  log('BOT', `liquidator_set: [${addrs.map(a => a.slice(0, 12) + '…').join(', ') || 'EMPTY'}]`);
+  if (!CONFIG.keeperAddress) {
+    log('BOT', '⚠️ KEEPER_ADDRESS unset — cannot confirm this key is a current keeper. liquidate() reverts if it is not.');
+    return;
+  }
+  if (addrs.includes(CONFIG.keeperAddress)) {
+    log('BOT', `✅ This keeper (${CONFIG.keeperAddress.slice(0, 12)}…) is in liquidator_set${CONFIG.keeperIndex !== '' ? ` as index ${CONFIG.keeperIndex}` : ''}.`);
+  } else {
+    logError('BOT', `This keeper (${CONFIG.keeperAddress.slice(0, 12)}…) is NOT in liquidator_set — liquidations will revert. Admin must call set_liquidator(idx, keeper).`);
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════
 // MAIN
 // ═══════════════════════════════════════════════════════════════
@@ -1310,7 +1402,8 @@ async function getOrchestratorAddress() {
 async function main() {
   console.log('');
   console.log('╔════════════════════════════════════════════════════════════╗');
-  console.log('║  ZKPerp Liquidation + Order Bot v14                        ║');
+  console.log('║  ZKPerp Liquidation + Order Bot v15                        ║');
+  console.log('║  Core: zkperp_core_v29c.aleo (1-of-3 keeper race)         ║');
   console.log('║  Oracle: zkperp_oracle_v3.aleo (2-of-3 Chainlink quorum)  ║');
   console.log('╚════════════════════════════════════════════════════════════╝');
   console.log('');
@@ -1328,6 +1421,8 @@ async function main() {
   }
 
   startApiServer();
+
+  await assertKeeperMembership();
 
   if (CONFIG.viewKey && CONFIG.consumerId && CONFIG.apiKey) {
     const scannerOk = await initScanner();

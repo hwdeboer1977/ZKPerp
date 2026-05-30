@@ -3,7 +3,8 @@
     "aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0",
     "aleo122uq924daywh5h5r3feuk2hjsa6j6w47kp79zeudhnmq5dqf8grsqgx28a",
     "aleo1eqet6nt8g746332dsydm0xazsfnafe3ff5asmkzezdz2tyuxtszqx9rljz",
-    "aleo13ykf36688w7gmgt7qllletll5pw0gww0qxwh2m9ps5lk7azlpy9s59tw4n"
+    "aleo13ykf36688w7gmgt7qllletll5pw0gww0qxwh2m9ps5lk7azlpy9s59tw4n",
+    "aleo1tjl78p3rv92f8tx5jnypu5xpetqdz72qyvy8rlsj0zn0jggsyspsy8pxju"
   ],
   "registrations": {
     "aleo1d9es6d8kuzg65dlfdpx9zxchcsarh8k0hwxfx5eg6k4w7ew6gs8sv5aza0": {
@@ -21,6 +22,10 @@
     "aleo13ykf36688w7gmgt7qllletll5pw0gww0qxwh2m9ps5lk7azlpy9s59tw4n": {
       "registered_at": "2026-04-11T05:06:08.255Z",
       "tx_id": "at1p7p39wygrgh759vmdwrd3asyhd6uvqtdzqlp822qtge9d0xqwgzsf95xxl"
+    },
+    "aleo1tjl78p3rv92f8tx5jnypu5xpetqdz72qyvy8rlsj0zn0jggsyspsy8pxju": {
+      "registered_at": "2026-05-29T15:05:00.509Z",
+      "tx_id": "at1yrsu7delueurqx499qjry2akmhryrp2j09l4kn03tq7cs5ymu5gs4hdcr3"
     }
   },
   "compliance_epochs": {
@@ -40,6 +45,11 @@
       "needs_reissuance": true
     },
     "aleo13ykf36688w7gmgt7qllletll5pw0gww0qxwh2m9ps5lk7azlpy9s59tw4n": {
+      "issued_under": null,
+      "issued_at": null,
+      "needs_reissuance": true
+    },
+    "aleo1tjl78p3rv92f8tx5jnypu5xpetqdz72qyvy8rlsj0zn0jggsyspsy8pxju": {
       "issued_under": null,
       "issued_at": null,
       "needs_reissuance": true

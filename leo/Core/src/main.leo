@@ -1,4 +1,4 @@
-// ZKPerp Core v28 — oracle reads from zkperp_oracle_v3.aleo
+// ZKPerp Core v29c — oracle reads from zkperp_oracle_v3.aleo
 //
 // Price reads are cross-program calls to zkperp_oracle_v3.aleo::oracle_prices.
 // Prices are only committed there after 2-of-3 independent oracle nodes agree.
@@ -7,7 +7,7 @@
 // All trader functions require a valid ZKPerpComplianceRecord:
 //   - expires_at must be >= block.height
 //   - address must not be revoked
-// The record is unforgeable (only zkperp_compliance_v8bb::issue_compliance can
+// The record is unforgeable (only zkperp_compliance_v8b::issue_compliance can
 // mint it), so possession already proves KYC-set membership. The Merkle root
 // is checked ONCE at issuance, NOT here — re-checking it would lock out every
 // existing trader whenever a new user registers and rotates the root.
@@ -27,7 +27,7 @@
 //   (roles[0u8]) so a trader cannot substitute colluding keeper addresses.
 
 import test_usdcx_stablecoin.aleo;
-import zkperp_compliance_v8bb.aleo;
+import zkperp_compliance_v8b.aleo;
 import zkperp_oracle_v3.aleo;
 
 struct PoolState {
@@ -197,13 +197,13 @@ program zkperp_core_v29c.aleo {
     // ══════════════════════════════════════════════════════════════
 
     fn add_liquidity(
-        cr: zkperp_compliance_v8bb.aleo::ZKPerpComplianceRecord,
+        cr: zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord,
         lp_slot: LPSlot,
         token: test_usdcx_stablecoin.aleo::Token,
         deposit_amount: u64,
         merkle_proof: [test_usdcx_stablecoin.aleo::MerkleProof; 2],
         recipient: address,
-    ) -> (zkperp_compliance_v8bb.aleo::ZKPerpComplianceRecord, LPSlot, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
+    ) -> (zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord, LPSlot, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
         assert(deposit_amount >= 100u64);
         assert_eq(lp_slot.owner, self.signer);
 
@@ -224,7 +224,7 @@ program zkperp_core_v29c.aleo {
 
         return (cr, updated_slot, usdcx_compliance, change_token, final {
             // ── Compliance check ──
-            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v8bb.aleo::revoked, caller, false);
+            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v8b.aleo::revoked, caller, false);
             assert(!is_revoked);
             assert(block.height <= cr_expires_at);
             // ── End compliance ──
@@ -246,11 +246,11 @@ program zkperp_core_v29c.aleo {
     }
 
     fn remove_liquidity(
-        cr: zkperp_compliance_v8bb.aleo::ZKPerpComplianceRecord,
+        cr: zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord,
         lp_slot: LPSlot,
         public amount_to_burn: u64,
         public expected_usdc: u128,
-    ) -> (zkperp_compliance_v8bb.aleo::ZKPerpComplianceRecord, LPSlot, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
+    ) -> (zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord, LPSlot, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
         assert_eq(lp_slot.owner, self.signer);
         assert(lp_slot.is_open);
         assert(lp_slot.lp_amount >= amount_to_burn);
@@ -271,7 +271,7 @@ program zkperp_core_v29c.aleo {
 
         return (cr, updated_slot, usdcx_compliance, payout_token, final {
             // ── Compliance check ──
-            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v8bb.aleo::revoked, caller, false);
+            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v8b.aleo::revoked, caller, false);
             assert(!is_revoked);
             assert(block.height <= cr_expires_at);
             // ── End compliance ──
@@ -306,7 +306,7 @@ program zkperp_core_v29c.aleo {
     // cannot supply colluding addresses.
 
     fn open_position(
-        cr: zkperp_compliance_v8bb.aleo::ZKPerpComplianceRecord,
+        cr: zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord,
         slot: PositionSlot,
         token: test_usdcx_stablecoin.aleo::Token,
         collateral: u128,
@@ -321,7 +321,7 @@ program zkperp_core_v29c.aleo {
         private keeper_2: address,
         merkle_proof: [test_usdcx_stablecoin.aleo::MerkleProof; 2],
         public asset_id: field,
-    ) -> (zkperp_compliance_v8bb.aleo::ZKPerpComplianceRecord, PositionSlot, LiquidationAuth, LiquidationAuth, LiquidationAuth, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
+    ) -> (zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord, PositionSlot, LiquidationAuth, LiquidationAuth, LiquidationAuth, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
         assert(!slot.is_open);
         assert_eq(slot.owner, self.signer);
         let expected_slot_id: u8 = is_long ? 0u8 : 1u8;
@@ -384,7 +384,7 @@ program zkperp_core_v29c.aleo {
 
         return (cr, filled_slot, liq_auth_0, liq_auth_1, liq_auth_2, usdcx_compliance, change_token, final {
             // ── Compliance check ──
-            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v8bb.aleo::revoked, caller, false);
+            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v8b.aleo::revoked, caller, false);
             assert(!is_revoked);
             assert(block.height <= cr_expires_at);
             // ── End compliance ──
@@ -418,7 +418,7 @@ program zkperp_core_v29c.aleo {
     }
 
     fn close_position(
-        cr: zkperp_compliance_v8bb.aleo::ZKPerpComplianceRecord,
+        cr: zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord,
         slot: PositionSlot,
         public asset_id: field,
         public exit_price: u64,
@@ -426,7 +426,7 @@ program zkperp_core_v29c.aleo {
         private size_usdc: u64,
         private collateral_usdc: u64,
         private is_long: bool,
-    ) -> (zkperp_compliance_v8bb.aleo::ZKPerpComplianceRecord, PositionSlot, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
+    ) -> (zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord, PositionSlot, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
         assert(slot.is_open);
         assert_eq(slot.owner, self.signer);
 
@@ -465,7 +465,7 @@ program zkperp_core_v29c.aleo {
 
         return (cr, empty_slot, usdcx_compliance, payout_token, final {
             // ── Compliance check ──
-            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v8bb.aleo::revoked, caller, false);
+            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v8b.aleo::revoked, caller, false);
             assert(!is_revoked);
             assert(block.height <= cr_expires_at);
             // ── End compliance ──
@@ -592,12 +592,12 @@ program zkperp_core_v29c.aleo {
     // ══════════════════════════════════════════════════════════════
 
     fn place_take_profit(
-        cr: zkperp_compliance_v8bb.aleo::ZKPerpComplianceRecord,
+        cr: zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord,
         slot: PositionSlot,
         private trigger_price: u64,
         private orchestrator: address,
         nonce: field,
-    ) -> (zkperp_compliance_v8bb.aleo::ZKPerpComplianceRecord, OrderReceipt, ExecTPSLAuth, PositionSlot, Final) {
+    ) -> (zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord, OrderReceipt, ExecTPSLAuth, PositionSlot, Final) {
         assert(slot.is_open);
         assert_eq(slot.owner, self.signer);
 
@@ -636,7 +636,7 @@ program zkperp_core_v29c.aleo {
 
         return (cr, receipt, auth, trader_slot, final {
             // ── Compliance check ──
-            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v8bb.aleo::revoked, caller, false);
+            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v8b.aleo::revoked, caller, false);
             assert(!is_revoked);
             assert(block.height <= cr_expires_at);
             // ── End compliance ──
@@ -718,12 +718,12 @@ program zkperp_core_v29c.aleo {
     // ══════════════════════════════════════════════════════════════
 
     fn place_stop_loss(
-        cr: zkperp_compliance_v8bb.aleo::ZKPerpComplianceRecord,
+        cr: zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord,
         slot: PositionSlot,
         private trigger_price: u64,
         private orchestrator: address,
         nonce: field,
-    ) -> (zkperp_compliance_v8bb.aleo::ZKPerpComplianceRecord, OrderReceipt, ExecTPSLAuth, PositionSlot, Final) {
+    ) -> (zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord, OrderReceipt, ExecTPSLAuth, PositionSlot, Final) {
         assert(slot.is_open);
         assert_eq(slot.owner, self.signer);
 
@@ -763,7 +763,7 @@ program zkperp_core_v29c.aleo {
 
         return (cr, receipt, auth, trader_slot, final {
             // ── Compliance check ──
-            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v8bb.aleo::revoked, caller, false);
+            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v8b.aleo::revoked, caller, false);
             assert(!is_revoked);
             assert(block.height <= cr_expires_at);
             // ── End compliance ──
@@ -848,10 +848,10 @@ program zkperp_core_v29c.aleo {
     }
 
     fn cancel_tp_sl(
-        cr: zkperp_compliance_v8bb.aleo::ZKPerpComplianceRecord,
+        cr: zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord,
         slot: PositionSlot,
         receipt: OrderReceipt,
-    ) -> (zkperp_compliance_v8bb.aleo::ZKPerpComplianceRecord, PositionSlot, Final) {
+    ) -> (zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord, PositionSlot, Final) {
         assert_eq(self.signer, slot.owner);
         assert_eq(self.signer, receipt.owner);
         assert_eq(slot.position_id, receipt.position_id);
@@ -865,7 +865,7 @@ program zkperp_core_v29c.aleo {
 
         return (cr, returned_slot, final {
             // ── Compliance check ──
-            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v8bb.aleo::revoked, caller, false);
+            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v8b.aleo::revoked, caller, false);
             assert(!is_revoked);
             assert(block.height <= cr_expires_at);
             // ── End compliance ──

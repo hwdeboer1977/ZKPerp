@@ -242,7 +242,9 @@ Every BATCH_BLOCKS blocks:
 
 ### Fee Model
 
-**Buyer-side only.** The 0.10% protocol fee is computed as `(gross_cost × 10) / 10_000` and is borne by the **buyer**. The seller receives the full clearing-price-multiplied amount without deduction. Both `FillReceipt` records carry a `fee_paid` field: the buyer's shows the actual fee, the seller's is always `0u64`. Fees are denominated in USDCx and accrue to the on-chain `fee_vault[0u8]` mapping. The operator withdraws fees via `withdraw_fees`.
+**Buyer-side, by design — but not yet collected on-chain.** The 0.10% protocol fee is computed as `(gross_cost × 10) / 10_000` and is *intended* to be borne by the buyer, with the seller receiving the full clearing-price-multiplied amount without deduction. Both `FillReceipt` records carry a `fee_paid` field: the buyer's shows the computed fee, the seller's is always `0u64`.
+
+⚠️ **Current contract behavior:** as of `zkdarkpool_v8.aleo`, `settle_match` does **not** actually collect the fee. The buyer is charged exactly `gross_cost` (the check is `buyer_token.amount >= gross_cost`, not `gross_cost + fee`) and the seller receives exactly `gross_cost`; the `fee` value is only written to the buyer's `FillReceipt.fee_paid` and added to the `fee_vault[0u8]` counter via `accrue_fee`. No USDCx is moved to the program, so `fee_vault` is an unbacked accounting counter and `withdraw_fees` decrements it without a corresponding on-chain balance. Collecting the fee for real (charging the buyer `gross_cost + fee` and routing `fee` to the program) is a pending contract change — see Known Limitations.
 
 ---
 
@@ -337,7 +339,7 @@ npm run build         # production build
 - In-memory order book — state lost on restart, `START_BLOCK` determines recovery window
 - USDCx (`test_usdcx_stablecoin.aleo`) as the quote currency for testnet
 - Uniform clearing price (not FIFO) — fairer for privacy-preserving batch auctions
-- Buyer-side fee only — reduces transaction complexity; seller receives clean payout
+- Buyer-side fee only (by design) — reduces transaction complexity; seller receives clean payout. Note: fee collection is computed/tracked but not yet enforced in `settle_match` (see Fee Model and Known Limitations)
 - Deposit matched to seller by user address, not bound to specific order nonce — improves UX at the cost of weaker cryptographic pairing
 
 ---
@@ -370,6 +372,8 @@ npm run build         # production build
 ## Known Limitations & Future Work
 
 **Stale file header** — line 3 of `main.leo` reads `zkdarkpool_v5.aleo` but the program declaration at line 64 is `zkdarkpool_v8.aleo`. Cosmetic stale comment from v5→v8 iterations, no functional impact.
+
+**Fee computed but not collected** — `settle_match` computes the 0.10% fee and increments the `fee_vault[0u8]` counter, but it does not charge the buyer for it or move any USDCx to the program. The buyer pays `gross_cost`, the seller receives `gross_cost`, and `fee_vault` is therefore an unbacked counter; `withdraw_fees` decrements it without a real balance behind it. A future contract revision should assert `buyer_token.amount >= gross_cost + fee` and route `fee` to the program (or deduct it from the seller's payout) so the vault is backed by actual USDCx. The README's Fee Model section documents both the intent and the current behavior.
 
 **Address-based deposit binding** — see "Deposit binding" section above. The operator selects which of a seller's deposits backs each sell-order settlement. Future versions could bind `DepositAuth.order_nonce` at deposit time for stronger pairing, at the cost of pre-knowing the order nonce.
 

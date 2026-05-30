@@ -82,7 +82,7 @@ Called independently by each oracle node. Finalize logic:
 4. **No double-voting** — reject if the caller is already recorded as `voter_a`, `voter_b`, or `voter_c` in the current round.
 5. **Record vote** — caller is written into the next empty voter slot (`votes == 0` → `voter_a`, `votes == 1` → `voter_b`, `votes == 2` → `voter_c`). `votes` is incremented.
 6. **Quorum check** — `new_votes >= 2`.
-7. **Commit and clear** — if quorum reached, `oracle_prices[asset_id]` is updated to the new price/timestamp and the proposal slot is reset to all-zero so the next round can start fresh even at the same price. If not, the proposal is stored with the incremented vote count and the existing `oracle_prices` value is preserved unchanged.
+7. **Commit** — the proposal is stored with the incremented vote count and recorded voters in **both** cases (the `Mapping::set(price_proposals, ...)` is unconditional). If quorum (`new_votes >= 2`) is reached, `oracle_prices[asset_id]` is updated to the new price/timestamp; if not, the existing `oracle_prices` value is preserved unchanged (the commit is gated by a ternary). The proposal slot is **not** reset on quorum — it retains `votes` and the voter addresses. A subsequent round only starts fresh when a **divergent** price is submitted, which triggers the reset branch in step 3. See Known Limitations regarding same-price rounds.
 
 Note: `Mapping::set(oracle_prices, ...)` is called on every `submit_price` execution; the new-vs-existing value is gated by a ternary inside the finalize block. This is the Leo idiom for conditional writes.
 
@@ -192,6 +192,8 @@ After rotation, each relayer's address must match its corresponding slot — Rel
 ## Known Limitations & Future Work
 
 **Caller-supplied timestamp** — the `timestamp` argument is provided by the relayer, not derived from `block.height` inside the program. A malicious relayer could supply a stale or future block height. Downstream contracts mitigate this by computing `block.height - timestamp <= MAX_PRICE_AGE_BLOCKS` themselves at read time, but the oracle itself does not validate the submitted timestamp. Future work: derive `timestamp` from `block.height` inside `submit_price` finalize, removing the relayer's influence over this field.
+
+**Proposal not reset on quorum (same-price stall)** — `submit_price` stores the proposal unconditionally with the incremented vote count and voters; it does **not** clear the proposal slot after a successful quorum. Because a round only resets when a *divergent* price is submitted (step 3), two consecutive rounds at a byte-identical price cannot re-reach quorum from the same two nodes: the recorded voters are blocked by the no-double-voting check, and the proposal never resets. The third (non-voting) node can push the count to 3 and re-commit once, after which the slot is stuck until a different price arrives. In practice 8-decimal prices almost always differ round to round, so this rarely surfaces, but a flat price stalls the feed. Future fix: reset the proposal to all-zero in the quorum branch so the next round starts fresh regardless of price.
 
 **No price tolerance band** — if relayers submit divergent prices (e.g. due to feed latency), the proposal resets silently and the round produces no quorum. Staleness checks in consuming contracts catch this as a downstream effect. A future version could accept prices within ±N basis points as "agreeing" and commit the median.
 

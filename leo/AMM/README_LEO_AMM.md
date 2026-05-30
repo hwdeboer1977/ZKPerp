@@ -1,4 +1,4 @@
-# zkperp_amm_v3 — Concentrated Liquidity AMM on Aleo
+# zkperp_amm_v4 — Concentrated Liquidity AMM on Aleo
 
 A Uniswap v3-style Concentrated Liquidity AMM built in Leo 4.0 for the Aleo blockchain.  
 Trading pair: **USDCx / ALEO** · Fee tier: **0.3%** · Network: **Testnet**
@@ -9,7 +9,7 @@ Trading pair: **USDCx / ALEO** · Fee tier: **0.3%** · Network: **Testnet**
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    zkperp_amm_v3.aleo                    │
+│                    zkperp_amm_v4.aleo                    │
 │                                                          │
 │  Transitions (ZK-proven, private inputs)                 │
 │  ┌─────────────────┐  ┌──────────────────┐              │
@@ -61,13 +61,15 @@ Trading pair: **USDCx / ALEO** · Fee tier: **0.3%** · Network: **Testnet**
 The contract handles up to **4 tick crossings** per swap. For single-range swaps (common case) all 4 steps have `tick_next = TICK_SENTINEL` and amounts in step0:
 
 ```
-step0: { tick_next: 887221, amount_in: X, amount_out: Y, fee: Z }
-step1: { tick_next: 887221, amount_in: 0, amount_out: 0, fee: 0 }  // empty
+step0: { tick_next: 887221, amount_in_step: X, amount_out_step: Y, fee_step: Z }
+step1: { tick_next: 887221, amount_in_step: 0, amount_out_step: 0, fee_step: 0 }  // empty
 step2: { tick_next: 887221, ...0... }
 step3: { tick_next: 887221, ...0... }
 ```
 
-The contract verifies: `sum(step.amount_in) == total_amount_in`
+The contract verifies: `sum(step.amount_in_step) == total_amount_in`
+
+> `TickStep` also carries `sqrt_price_next`, `liquidity_net`, and `liquidity_net_is_negative` (set per crossing by the orchestrator); only the amount fields are shown above for brevity.
 
 ### Orchestrator Requirement
 For tick-crossing swaps, an orchestrator must:
@@ -100,15 +102,18 @@ This is the standard ZK pattern: **prover computes off-chain, verifier checks on
 ### `initialize_pool`
 ```leo
 fn initialize_pool(
-    public sqrt_price_x64: u128,  // initial sqrt(price) * 2^64
-    public initial_tick:   i32,   // initial tick
+    public initial_sqrt_price_x64: u128,  // initial sqrt(price) * 2^64
+    public initial_tick:           i32,   // initial tick
 ) -> Final
 ```
-Sets up pool state. Can only be called once.
+Sets up pool state. Admin-only (`roles[0]`); can only be called once (`is_init` guard).
 
 ### `mint_position`
 ```leo
 fn mint_position(
+    lp_token:     test_usdcx_stablecoin.aleo::Token,        // private: USDCx record to deposit
+    merkle_proof: [test_usdcx_stablecoin.aleo::MerkleProof; 2], // private: USDCx compliance proof
+    aleo_in:      credits.aleo::credits,                    // private: ALEO record to deposit
     tick_lower: i32,              // private: position range lower tick
     tick_upper: i32,              // private: position range upper tick
     liquidity_desired: u128,      // private: liquidity units to add
@@ -120,8 +125,15 @@ fn mint_position(
     public current_tick: i32,     // current pool tick (verified on-chain)
     public fee_growth_inside_0: u128,
     public fee_growth_inside_1: u128,
-) -> (LPPosition, Final)
+) -> (
+    LPPosition,
+    test_usdcx_stablecoin.aleo::ComplianceRecord,  // from USDCx transfer
+    test_usdcx_stablecoin.aleo::Token,             // USDCx change
+    credits.aleo::credits,                         // ALEO change
+    Final
+)
 ```
+Deposits USDCx (token0) and ALEO (token1) and returns an `LPPosition` record plus the change/compliance records emitted by the two `transfer_private_to_public` calls.
 
 ### `burn_position`
 ```leo
@@ -133,12 +145,20 @@ fn burn_position(
     public amount_1_out: u64,     // ALEO to withdraw
     public sqrt_price_x64: u128,
     public current_tick: i32,
-) -> Final
+) -> (
+    test_usdcx_stablecoin.aleo::ComplianceRecord,  // from USDCx payout
+    test_usdcx_stablecoin.aleo::Token,             // USDCx returned to LP
+    credits.aleo::credits,                         // ALEO returned to LP
+    Final
+)
 ```
+Burns the `LPPosition` and pays out via `transfer_public_to_private` on both USDCx and ALEO.
 
 ### `swap_buy` (USDCx → ALEO)
 ```leo
 fn swap_buy(
+    usdcx_in:     test_usdcx_stablecoin.aleo::Token,        // private: USDCx record spent
+    merkle_proof: [test_usdcx_stablecoin.aleo::MerkleProof; 2], // private: USDCx compliance proof
     public total_amount_in:  u64,   // USDCx in (gross, includes fee)
     public total_amount_out: u64,   // ALEO out
     public total_fee:        u64,   // fee paid (0.3%)
@@ -148,11 +168,38 @@ fn swap_buy(
     public step1: TickStep,
     public step2: TickStep,
     public step3: TickStep,
-) -> (SwapReceipt, Final)
+) -> (
+    SwapReceipt,
+    test_usdcx_stablecoin.aleo::ComplianceRecord,
+    test_usdcx_stablecoin.aleo::Token,             // USDCx change
+    credits.aleo::credits,                         // ALEO paid out
+    Final
+)
 ```
 
 ### `swap_sell` (ALEO → USDCx)
-Same signature as `swap_buy`. Direction determined by `zero_for_one` flag in `SwapReceipt`.
+```leo
+fn swap_sell(
+    merkle_proof: [test_usdcx_stablecoin.aleo::MerkleProof; 2], // private: USDCx compliance proof
+    aleo_in:      credits.aleo::credits,                    // private: ALEO record spent
+    public total_amount_in:  u64,   // ALEO in (gross, includes fee)
+    public total_amount_out: u64,   // USDCx out
+    public total_fee:        u64,
+    public sqrt_price_final: u128,
+    public tick_final:       i32,
+    public step0: TickStep,
+    public step1: TickStep,
+    public step2: TickStep,
+    public step3: TickStep,
+) -> (
+    SwapReceipt,
+    test_usdcx_stablecoin.aleo::ComplianceRecord,
+    test_usdcx_stablecoin.aleo::Token,             // USDCx paid out
+    credits.aleo::credits,                         // ALEO change
+    Final
+)
+```
+The public params match `swap_buy`, but the private token inputs are mirrored: `swap_buy` takes a USDCx `Token` in, `swap_sell` takes a `credits` record in. Direction is recorded as the `zero_for_one` flag in `SwapReceipt` (`true` for buy).
 
 ---
 

@@ -229,7 +229,7 @@ On first start: builds the Merkle tree (slow — one `leo run` per address). Eve
 
 ### Initialization
 
-An `@custom constructor()` runs once at deploy time and writes `self.program_owner` (the deployer) into `admin[0u8]`. There is no `set_admin` or admin rotation function in v7 — the admin role is **non-transferable for the lifetime of the deployment**. Admin rotation is planned for v8.
+An `@custom constructor()` runs once at deploy time and writes `self.program_owner` (the deployer) into `admin[0u8]`. As of `v8b` there is no `set_admin` or admin rotation function — the admin role is **non-transferable for the lifetime of the deployment**. Admin rotation remains future work.
 
 ### Transitions
 
@@ -238,12 +238,12 @@ An `@custom constructor()` runs once at deploy time and writes `self.program_own
 | `update_root(new_root: field)` | Admin | Publish new Merkle root after batch approval |
 | `revoke_user(user: address)` | Admin | Instantly blacklist a user |
 | `unrevoke_user(user: address)` | Admin | Remove blacklist |
-| `issue_compliance(proof: MerkleProof, expires_at: u32)` | User | Prove allowlist membership → receive `ZKPerpComplianceRecord` |
+| `issue_compliance(proof: MerkleProof, public expires_at: u32)` | User | Prove allowlist membership → receive `ZKPerpComplianceRecord` |
 | `verify_compliance(cr: ZKPerpComplianceRecord)` | External callers | Assert record valid (returns record unchanged) |
 
 ### How `zkperp_core` consumes compliance
 
-The `verify_compliance` transition is exposed for external programs that want a single-call gate. However, `zkperp_core_v28` itself does **not** call `verify_compliance` — to avoid an extra transition call per trade, core imports `zkperp_compliance_v8b.aleo` and reads its mappings directly inside its own finalize blocks:
+The `verify_compliance` transition is exposed for external programs that want a single-call gate. However, the current `zkperp_core` (verify the exact version/edition you have deployed) does **not** call `verify_compliance` — to avoid an extra transition call per trade, core imports `zkperp_compliance_v8b.aleo` and reads its mappings directly inside its own finalize blocks:
 
 ```leo
 let active_root: field = Mapping::get(zkperp_compliance_v8b.aleo::compliance_root, 0u8);
@@ -305,7 +305,7 @@ In production, the allowlist would come from a regulated KYC provider. In the de
 
 ## Known Limitations & Future Work
 
-**Non-transferable admin** — `admin[0u8]` is seeded by the deploy-time `@custom constructor()` and there is no `set_admin` transition. Once deployed, the admin role cannot be rotated without redeploying the contract. v8 will add admin rotation gated on a multisig or governance contract.
+**Non-transferable admin** — `admin[0u8]` is seeded by the deploy-time `@custom constructor()` and there is no `set_admin` transition as of `v8b`. Once deployed, the admin role cannot be rotated without redeploying the contract. A future version should add admin rotation gated on a multisig or governance contract.
 
 **Header comment** — line 1 of `main.leo` reads `zkperp_compliance_v2.aleo` but the program declaration is `zkperp_compliance_v8b.aleo`. Cosmetic stale comment, no functional impact.
 

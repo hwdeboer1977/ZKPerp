@@ -20,7 +20,7 @@ This program depends on three companion programs:
 
 **Oracle-gated prices.** Every price-sensitive `finalize` reads `zkperp_oracle_v3.aleo::oracle_prices`, asserts the supplied price equals the committed oracle price, and asserts the price is no older than `MAX_PRICE_AGE_BLOCKS` (150 blocks ≈ 5 min). The oracle itself only publishes a price after a 2-of-3 node quorum.
 
-**Compliance on every trader action.** Trader-facing functions take a `ZKPerpComplianceRecord` and assert in `finalize` that it was issued under the active compliance root, that the caller isn't revoked, and that it hasn't expired. Keeper/orchestrator functions (`liquidate`, `update_pool_state`, `update_net_pnl`) are exempt, since they aren't trader actions.
+**Compliance on every trader action.** Trader-facing functions take a `ZKPerpComplianceRecord` and assert in `finalize` that the caller isn't revoked and that the record hasn't expired. The record is unforgeable — only `zkperp_compliance_v8b.aleo::issue_compliance` can mint it, and that function already verified the trader's Merkle-set membership against the active root at issuance time — so requiring the record as a typed input *is* the membership check. The core deliberately does **not** re-assert the record's `issued_under` against the live compliance root: doing so would invalidate every existing trader whenever a new user registers and rotates the root. Keeper/orchestrator functions (`liquidate`, `update_pool_state`, `update_net_pnl`) are exempt, since they aren't trader actions.
 
 ---
 
@@ -152,7 +152,7 @@ Because positions are private, only a holder of the position **preimage** can co
 - **Boundary timing.** A keeper can liquidate the instant a position crosses maintenance margin. This is valid (the position really is underwater) but aggressive. Consider a buffer band (`equity < maint_margin − buffer`) and/or keeper bonding/slashing to discourage premature liquidation.
 - **All-keepers-offline tail.** 1-of-N tolerates N−1 offline keepers but not all N. A production deployment should add an insurance fund / backstop vault to absorb the cost of a late liquidation, as other perp DEXs do.
 - **Privacy vs. liquidator-set size.** Every keeper holds each position's preimage, so widening the keeper set for liveness widens the privacy surface linearly. A future threshold-secret-sharing scheme (reconstruct the preimage only on a justified liquidation) would break this trade-off but depends on on-chain threshold-signature support (`verify_schnorr`).
-- **Versioning.** Aleo programs are immutable once deployed; each revision needs a new program name (hence `v29`). Existing positions from a prior version are not portable to a new deployment.
+- **Versioning.** Aleo programs are immutable once deployed; each revision needs a new program name (hence `v29c`). Existing positions from a prior version are not portable to a new deployment.
 - **Tunable risk params.** `MAINTENANCE_MARGIN_BPS` and `LIQ_PENALTY_BPS` are placeholders; confirm the maintenance-margin basis (notional vs. entry-notional) against your risk model before mainnet.
 
 ---

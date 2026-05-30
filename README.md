@@ -59,9 +59,9 @@ ZKPerp is a decentralized perpetual futures exchange built natively on the Aleo 
                                ▼
 ┌──────────────────────────────────────────────────────────────────────┐
 │                        Aleo Testnet                                  │
-│  zkperp_core_v27.aleo (BTC) · zkperp_eth_v21.aleo · zkperp_sol_v21  │
-│  zkperp_compliance_v7.aleo · zkperp_oracle_v3.aleo                   │
-│  zkdarkpool_v8.aleo · zkperp_amm_v3.aleo                             │
+│  zkperp_core_v29c.aleo (BTC) · zkperp_eth_v21.aleo · zkperp_sol_v21  │
+│  zkperp_compliance_v8b.aleo · zkperp_oracle_v3.aleo                   │
+│  zkdarkpool_v8.aleo · zkperp_amm_v4.aleo                             │
 │                                                                      │
 │  Private records: PositionSlot · LiquidationAuth · LPSlot            │
 │                   OrderReceipt · ExecTPSLAuth · ComplianceRecord      │
@@ -88,77 +88,34 @@ ZKPerp is a decentralized perpetual futures exchange built natively on the Aleo 
 
 ```
 ZKPerp/
-├── contracts/                        # Leo smart contracts
-│   ├── zkperp_core_v27/
-│   │   └── src/main.leo              # BTC/USDC perpetuals (v26, oracle-integrated)
-│   ├── zkperp_eth_v21/
-│   │   └── src/main.leo              # ETH/USDC perpetuals contract
-│   ├── zkperp_sol_v21/
-│   │   └── src/main.leo              # SOL/USDC perpetuals contract
-│   ├── zkperp_oracle_v3/
-│   │   └── src/main.leo              # 2-of-3 on-chain quorum oracle
-│   ├── zkperp_compliance_v7/
-│   │   └── src/main.leo              # KYC compliance gating
-│   ├── zkperp_amm_v3/
-│   │   └── src/main.leo              # Uniswap v3-style CL AMM (USDCx/ALEO)
-│   └── zkdarkpool_v8/
-│       └── src/main.leo              # ZK dark pool batch auction
+├── leo/                              # All Leo smart contracts — one subfolder per program
+│   ├── Core/                         # zkperp_core_v29c.aleo — BTC/USDC perpetuals (keeper-race liquidation)
+│   │   ├── src/main.leo
+│   │   └── README_LEO_CORE.md
+│   ├── AMM/                          # zkperp_amm_v4.aleo — Uniswap v3-style CL AMM (USDCx/ALEO)
+│   │   ├── src/main.leo
+│   │   └── README_LEO_AMM.md
+│   ├── Compliance/                   # zkperp_compliance_v8b.aleo — KYC compliance gating
+│   │   ├── src/main.leo
+│   │   └── README_LEO_COMPLIANCE.md
+│   ├── Darkpool/                     # zkdarkpool_v8.aleo — ZK dark pool batch auction
+│   │   ├── src/main.leo
+│   │   └── README_LEO_DARKPOOL.md
+│   └── Oracle/                       # zkperp_oracle_v3.aleo — 2-of-3 on-chain quorum oracle
+│       ├── src/main.leo
+│       └── README_LEO_ORACLE.md
 │
-├── frontend/                         # React + Vite + TypeScript frontend
-│   ├── src/
-│   │   ├── components/               # TradingWidget, PositionDisplay, LiquidityPanel, etc.
-│   │   ├── hooks/                    # useSlots, useUSDCx, useCompliance, useOnChainData
-│   │   ├── pages/                    # TradePage, LiquidityPage, DarkpoolPage, CompliancePage
-│   │   ├── config/                   # pairs.ts — BTC/ETH/SOL market config + programIds
-│   │   └── utils/                    # aleo.ts, merkleProof.ts
-│   ├── .env.example
-│   └── README.md                     # → docs/README_frontend.md
+│   # Frontends (React + Vite + Shield wallet)
+├── frontend/                         # Main perps trading UI                    → README_MAIN_FRONTEND.md
+├── zkperp-amm/                       # AMM swap / liquidity UI                   → README_AMM_FRONTEND.md
 │
-├── zkperp-bot/                       # Orchestrator + liquidation + TP/SL bot
-│   ├── zkperp-bot.mjs                # Main bot: oracle, liquidation, TP/SL, limit, pool sync
-│   ├── zkperp-bot-manager.mjs        # Process manager (auto-restart on crash)
-│   └── README.md                     # → docs/README_bot.md
+│   # Backends (Node.js services)
+├── zkperp-bot/                       # Orchestrator: keeper/liquidation, TP/SL, limit, pool sync  → README_BOT_BACKEND.md
+├── zkperp-oracle/                    # 2-of-3 Chainlink → Aleo price relay (3 relayers)           → README_ORACLE_BACKEND.md
+├── zkperp-compliance/                # KYC compliance server (Merkle tree + delegated proving)    → README_COMPLIANCE_SERVER.md
 │
-├── aleo-oracle/                      # 2-of-3 Chainlink oracle relay
-│   ├── backend/
-│   │   ├── manager.js                # Spawns 3 independent relayer processes
-│   │   ├── relayer.js                # Per-relayer: reads Chainlink, submits on-chain
-│   │   ├── shared/
-│   │   │   ├── chainlink.js          # Chainlink feed reader (ethers v6)
-│   │   │   └── aleoClient.js         # Provable SDK wrapper for submit_price
-│   │   └── config/
-│   │       └── markets.json          # BTC/ETH/SOL feed addresses + asset keys
-│   └── README.md                     # → docs/README_oracle.md
-│
-├── zkperp-compliance/                # KYC compliance layer
-│   ├── backend/
-│   │   ├── index.js                  # Express API server
-│   │   ├── compliance-tree.js        # Depth-10 BHP256 Merkle tree builder
-│   │   ├── aleo-admin.js             # Delegated proving for update_root / revoke
-│   │   ├── allowlist.json            # Approved addresses (off-chain)
-│   │   └── hasher/                   # Leo hasher program for BHP256 hashing
-│   │       └── src/main.leo
-│   └── README.md                     # → docs/README_compliance.md
-│
-├── zkdarkpool/                       # ZK Dark Pool (batch auction DEX)
-│   ├── contracts/
-│   │   └── zkdarkpool_v8/
-│   │       └── src/main.leo
-│   ├── bot/                          # Operator bot: scans orders, runs clearing auction
-│   ├── frontend/                     # React dark pool UI
-│   └── README.md                     # → docs/README_darkpool.md
-│
-├── zkperp-amm/                       # Concentrated Liquidity AMM
-│   ├── src/main.leo                  # Uniswap v3-style AMM (USDCx/ALEO, 0.3% fee)
-│   ├── frontend/                     # Swap + liquidity UI
-│   └── README.md                     # → docs/README_AMM.md
-│
-├── docs/
-│   ├── README_bot.md
-│   ├── README_oracle.md
-│   ├── README_compliance.md
-│   ├── README_darkpool.md
-│   └── README_AMM.md
+│   # Combined frontend + backend
+├── zkperp-darkpool/                  # Dark pool operator bot + React UI         → README_DARKPOOL_FE_BE.md
 │
 └── README.md                         # This file
 ```
@@ -169,13 +126,13 @@ ZKPerp/
 
 | Program | Market / Purpose | Network | Explorer |
 |---|---|---|---|
-| `zkperp_core_v27.aleo` | BTC/USDC perpetuals | Aleo Testnet | [view](https://testnet.explorer.provable.com/program/zkperp_core_v27.aleo) |
+| `zkperp_core_v29c.aleo` | BTC/USDC perpetuals | Aleo Testnet | [view](https://testnet.explorer.provable.com/program/zkperp_core_v29c.aleo) |
 | `zkperp_eth_v21.aleo` | ETH/USDC perpetuals | Aleo Testnet | [view](https://testnet.explorer.provable.com/program/zkperp_eth_v21.aleo) |
 | `zkperp_sol_v21.aleo` | SOL/USDC perpetuals | Aleo Testnet | [view](https://testnet.explorer.provable.com/program/zkperp_sol_v21.aleo) |
 | `zkperp_oracle_v3.aleo` | 2-of-3 price oracle | Aleo Testnet | [view](https://testnet.explorer.provable.com/program/zkperp_oracle_v3.aleo) |
-| `zkperp_compliance_v7.aleo` | KYC compliance gating | Aleo Testnet | [view](https://testnet.explorer.provable.com/program/zkperp_compliance_v7.aleo) |
+| `zkperp_compliance_v8b.aleo` | KYC compliance gating | Aleo Testnet | [view](https://testnet.explorer.provable.com/program/zkperp_compliance_v8b.aleo) |
 | `zkdarkpool_v8.aleo` | ZK dark pool batch auction | Aleo Testnet | [view](https://testnet.explorer.provable.com/program/zkdarkpool_v8.aleo) |
-| `zkperp_amm_v3.aleo` | CL AMM (USDCx/ALEO) | Aleo Testnet | [view](https://testnet.explorer.provable.com/program/zkperp_amm_v3.aleo) |
+| `zkperp_amm_v4.aleo` | CL AMM (USDCx/ALEO) | Aleo Testnet | [view](https://testnet.explorer.provable.com/program/zkperp_amm_v4.aleo) |
 
 ---
 
@@ -184,7 +141,7 @@ ZKPerp/
 ### 🖥 Frontend
 
 **Location:** [`frontend/`](./frontend)  
-**Docs:** [`docs/README_frontend.md`](./docs/README_frontend.md)  
+**Docs:** [`frontend/README_MAIN_FRONTEND.md`](./frontend/README_MAIN_FRONTEND.md)  
 **Live:** [zk-perp.vercel.app](https://zk-perp.vercel.app)
 
 React + Vite + TypeScript frontend deployed on Vercel. Integrates with the Shield wallet for private record management and transaction signing.
@@ -213,7 +170,7 @@ npm run dev  # http://localhost:5173
 
 | Env var | Description |
 |---|---|
-| `VITE_PROGRAM_ID_BTC` | `zkperp_core_v27.aleo` |
+| `VITE_PROGRAM_ID_BTC` | `zkperp_core_v29c.aleo` |
 | `VITE_PROGRAM_ID_ETH` | `zkperp_eth_v21.aleo` |
 | `VITE_PROGRAM_ID_SOL` | `zkperp_sol_v21.aleo` |
 | `VITE_ORACLE_PROGRAM_ID` | `zkperp_oracle_v3.aleo` |
@@ -224,7 +181,7 @@ npm run dev  # http://localhost:5173
 ### 🤖 ZKPerp Bot
 
 **Location:** [`zkperp-bot/`](./zkperp-bot)  
-**Docs:** [`docs/README_bot.md`](./docs/README_bot.md)
+**Docs:** [`zkperp-bot/README_BOT_BACKEND.md`](./zkperp-bot/README_BOT_BACKEND.md)
 
 Node.js orchestrator that keeps the protocol running. Handles oracle price updates, position liquidations, TP/SL execution, limit order execution, and pool state synchronisation.
 
@@ -251,18 +208,18 @@ node zkperp-bot-manager.mjs  # auto-restart on crash
 | `PRIVATE_KEY` | ✅ | Orchestrator Aleo private key |
 | `PROVABLE_API_KEY` | ✅ | Provable API key for DPS proving |
 | `PROVABLE_CONSUMER_ID` | ✅ | Provable consumer ID |
-| `PROGRAM_ID_BTC` | ✅ | `zkperp_core_v27.aleo` |
+| `PROGRAM_ID_BTC` | ✅ | `zkperp_core_v29c.aleo` |
 | `PROGRAM_ID_ETH` | ✅ | `zkperp_eth_v21.aleo` |
 | `PROGRAM_ID_SOL` | ✅ | `zkperp_sol_v21.aleo` |
 | `ORACLE_TOKEN` | ✅ | Shared secret matching oracle coordinator |
-| `SCANNER_START_BLOCK` | ✅ | Block height of v26 deployment |
+| `SCANNER_START_BLOCK` | ✅ | Block height of the v29c deployment |
 
 ---
 
 ### 🔮 Aleo Oracle
 
 **Location:** [`aleo-oracle/`](./aleo-oracle)  
-**Docs:** [`docs/README_oracle.md`](./docs/README_oracle.md)
+**Docs:** relay → [`zkperp-oracle/README_ORACLE_BACKEND.md`](./zkperp-oracle/README_ORACLE_BACKEND.md) · contract → [`leo/Oracle/README_LEO_ORACLE.md`](./leo/Oracle/README_LEO_ORACLE.md)
 
 Three independent relayer processes each read Chainlink feeds and submit prices directly to `zkperp_oracle_v3.aleo`. The Leo contract enforces 2-of-3 quorum on-chain — no coordinator, no single point of failure. A single compromised key cannot commit a false price.
 
@@ -306,7 +263,7 @@ npm start  # spawns Relayer-A, B, C via manager.js
 ### 🛡 Compliance Server
 
 **Location:** [`zkperp-compliance/`](./zkperp-compliance)  
-**Docs:** [`docs/README_compliance.md`](./docs/README_compliance.md)
+**Docs:** server → [`zkperp-compliance/README_COMPLIANCE_SERVER.md`](./zkperp-compliance/README_COMPLIANCE_SERVER.md) · contract → [`leo/Compliance/README_LEO_COMPLIANCE.md`](./leo/Compliance/README_LEO_COMPLIANCE.md)
 
 Privacy-preserving KYC layer. Manages the trader allowlist as a depth-10 BHP256 Merkle tree. Only the root is published on-chain — individual addresses are never revealed. Issues private `ZKPerpComplianceRecord`s that gate all trading functions.
 
@@ -316,7 +273,7 @@ Privacy-preserving KYC layer. Manages the trader allowlist as a depth-10 BHP256 
 3. Trader fetches their Merkle proof from the API
 4. Trader calls `issue_compliance(proof)` — ZK proves allowlist membership
 5. `ZKPerpComplianceRecord` issued to trader's wallet (valid ~90 days)
-6. Every trade, the record is passed as input — contract asserts `issued_under == active_root` and `!is_revoked`
+6. Every trade, the record is passed as input — `zkperp_core` asserts `!is_revoked` and `block.height <= expires_at` (the root is verified at issuance, not re-checked per trade, so existing records survive a root rotation)
 
 **Revocation** is instant via `revoke_user(address)` — no Merkle tree rotation needed.
 
@@ -330,7 +287,7 @@ npm start
 | Env var | Required | Description |
 |---|---|---|
 | `ADMIN_PRIVATE_KEY` | ✅ | Aleo deployer private key |
-| `COMPLIANCE_PROGRAM_ID` | ✅ | `zkperp_compliance_v7.aleo` |
+| `COMPLIANCE_PROGRAM_ID` | ✅ | `zkperp_compliance_v8b.aleo` |
 | `PROVABLE_API_KEY` | ✅ | For delegated proving of `update_root` |
 | `ADMIN_API_KEY` | ✅ | Secret for admin endpoints |
 | `LEO_BIN` | ✅ | Path to Leo binary (e.g. `~/.cargo/bin/leo`) |
@@ -354,7 +311,7 @@ npm start
 ### 🌑 ZK Darkpool
 
 **Location:** [`zkdarkpool/`](./zkdarkpool)  
-**Docs:** [`docs/README_darkpool.md`](./docs/README_darkpool.md)
+**Docs:** app → [`zkperp-darkpool/README_DARKPOOL_FE_BE.md`](./zkperp-darkpool/README_DARKPOOL_FE_BE.md) · contract → [`leo/Darkpool/README_LEO_DARKPOOL.md`](./leo/Darkpool/README_LEO_DARKPOOL.md)
 
 A privacy-preserving batch auction DEX on Aleo. Large orders can be matched without revealing trade details before execution. Order size, limit price, and trader identity remain private — only that a settlement occurred is visible on-chain.
 
@@ -390,7 +347,7 @@ npm install && npm run dev
 ### 📈 AMM
 
 **Location:** [`zkperp-amm/`](./zkperp-amm)  
-**Docs:** [`docs/README_AMM.md`](./docs/README_AMM.md)
+**Docs:** contract → [`leo/AMM/README_LEO_AMM.md`](./leo/AMM/README_LEO_AMM.md) · frontend → [`zkperp-amm/README_AMM_FRONTEND.md`](./zkperp-amm/README_AMM_FRONTEND.md)
 
 A Uniswap v3-style Concentrated Liquidity AMM for USDCx/ALEO with a 0.3% fee tier. LP positions are private records. Pool state (price, tick, liquidity) is public.
 
@@ -417,7 +374,8 @@ npm install && npm run dev
 |---|---|
 | Max leverage | 20× |
 | Opening fee | 0.1% of position size |
-| Liquidation threshold | 1% margin ratio |
+| Maintenance margin | 5% of notional (`MAINTENANCE_MARGIN_BPS = 50_000`) |
+| Liquidation reward | 10% of collateral (`LIQ_PENALTY_BPS = 100_000`) |
 | LP withdrawal buffer | 10% of total liquidity |
 | Oracle staleness limit | 150 blocks (≈ 5 min) |
 | Compliance record validity | ~90 days (7,776,000 blocks) |
@@ -448,11 +406,11 @@ npm install && npm run dev
 
 **Slot model — fixed record count:** Each trader holds exactly 3 records forever: 2 `PositionSlot` (long/short) + 1 `LPSlot`. Records are mutated in-place on every trade. After 1,000 trades the wallet still holds 3 records, keeping Shield wallet performance fast.
 
-**Dual-record liquidation:** `open_position` creates a `PositionSlot` (owned by trader) and a `LiquidationAuth` (owned by orchestrator). The orchestrator can liquidate without the trader being online; the trader can close without orchestrator involvement.
+**Keeper-race liquidation (1-of-N):** `open_position` creates a `PositionSlot` (owned by the trader) and mints **three** `LiquidationAuth` records — one to each keeper in `liquidator_set`. Any single keeper can liquidate an underwater position without the trader being online (they race for a deterministic reward); the trader can always close without keeper involvement. Losing keepers reclaim stale auths via `burn_liquidation_auth`.
 
 **Position commitment scheme:** Entry price, size, and collateral are hashed via BHP256 into a `PositionCommit` stored on-chain. Private witnesses are passed in `close_position` and verified against the stored hash — zero position data ever touches a public mapping.
 
-**Cross-program oracle reads:** `zkperp_core_v27` reads prices via `Mapping::get(zkperp_oracle_v3.aleo::oracle_prices, asset_id)` — a cross-program mapping read. This avoids redundant price storage and ensures the core contract always reads the latest quorum-committed price.
+**Cross-program oracle reads:** `zkperp_core_v29c` reads prices via `Mapping::get(zkperp_oracle_v3.aleo::oracle_prices, asset_id)` — a cross-program mapping read. This avoids redundant price storage and ensures the core contract always reads the latest quorum-committed price.
 
 **Per-market programs:** Three separate programs (`zkperp_btc`, `zkperp_eth`, `zkperp_sol`) are required by the privacy model. A shared `market_id` in `finalize` would be public and leak which market a trader is using — eliminating a key privacy property.
 
@@ -526,7 +484,7 @@ npm start
 ### Deploy a contract
 
 ```bash
-cd contracts/zkperp_core_v27
+cd contracts/zkperp_core_v29c
 leo build
 leo deploy \
   --private-key $PRIVATE_KEY \
@@ -562,7 +520,7 @@ pm2 startup  # persist across reboots
 **Required Vercel env vars:**
 
 ```
-VITE_PROGRAM_ID_BTC=zkperp_core_v27.aleo
+VITE_PROGRAM_ID_BTC=zkperp_core_v29c.aleo
 VITE_PROGRAM_ID_ETH=zkperp_eth_v21.aleo
 VITE_PROGRAM_ID_SOL=zkperp_sol_v21.aleo
 VITE_ORACLE_PROGRAM_ID=zkperp_oracle_v3.aleo
@@ -606,7 +564,7 @@ These constraints were discovered through production deployments and are documen
 - **Frontend:** [zk-perp.vercel.app](https://zk-perp.vercel.app)
 - **Whitepaper:** [zkperp-whitepaper-v5.html](https://hwdeboer1977.github.io/ZKPerp/zkperp-whitepaper-v5.html)
 - **GitHub:** [github.com/hwdeboer1977/ZKPerp](https://github.com/hwdeboer1977/ZKPerp)
-- **Explorer (BTC):** [testnet.explorer.provable.com/program/zkperp_core_v27.aleo](https://testnet.explorer.provable.com/program/zkperp_core_v27.aleo)
+- **Explorer (BTC):** [testnet.explorer.provable.com/program/zkperp_core_v29c.aleo](https://testnet.explorer.provable.com/program/zkperp_core_v29c.aleo)
 - **Explorer (Oracle):** [testnet.explorer.provable.com/program/zkperp_oracle_v3.aleo](https://testnet.explorer.provable.com/program/zkperp_oracle_v3.aleo)
 - **Explorer (Darkpool):** [testnet.explorer.provable.com/program/zkdarkpool_v8.aleo](https://testnet.explorer.provable.com/program/zkdarkpool_v8.aleo)
 - **Shield Wallet:** [shieldwallet.xyz](https://www.shieldwallet.xyz/)

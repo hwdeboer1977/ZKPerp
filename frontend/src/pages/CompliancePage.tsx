@@ -9,7 +9,7 @@ import { TransactionStatus } from '@/components/TransactionStatus';
 import { useCompliance } from '@/hooks/useCompliance';
 
 const COMPLIANCE_API = (import.meta as any).env?.VITE_COMPLIANCE_API || '';
-const COMPLIANCE_PROGRAM_ID = 'zkperp_compliance_v7.aleo';
+const COMPLIANCE_PROGRAM_ID = 'zkperp_compliance_v8b.aleo';
 const EXPIRY_BLOCKS = 7_776_000; // ~90 days
 const ALEO_API = 'https://api.explorer.provable.com/v1/testnet';
 
@@ -339,7 +339,7 @@ export function CompliancePage() {
           A private Aleo record issued by{' '}
           <code className="text-zkperp-accent text-xs bg-zkperp-dark px-1.5 py-0.5 rounded">{COMPLIANCE_PROGRAM_ID}</code>{' '}
           after successful KYC verification. Passed as an input to every gated trading function in{' '}
-          <code className="text-zkperp-accent text-xs bg-zkperp-dark px-1.5 py-0.5 rounded">zkperp_core_v27.aleo</code>.
+          <code className="text-zkperp-accent text-xs bg-zkperp-dark px-1.5 py-0.5 rounded">zkperp_core_v29c.aleo</code>.
         </p>
         <div className="bg-zkperp-dark rounded-lg border border-zkperp-border p-4 text-xs font-mono mb-4">
           <p className="text-gray-500 mb-3">record ZKPerpComplianceRecord {'{'}</p>
@@ -353,7 +353,7 @@ export function CompliancePage() {
         <p className="text-sm text-gray-400 leading-relaxed">
           The core program reads <code className="text-zkperp-accent text-xs">issued_under</code> and <code className="text-zkperp-accent text-xs">expires_at</code> directly from the record in every gated function,
           then asserts them against on-chain mappings in <code className="text-zkperp-accent text-xs">
-zkperp_compliance_v7.aleo</code>.
+zkperp_compliance_v8b.aleo</code>.
           Three conditions must pass: root matches, not revoked, not expired.
         </p>
       </div>

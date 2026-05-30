@@ -217,6 +217,26 @@ export function TradingWidget({
     setTriggerPriceInput('');
   }, [pair]);
 
+
+  // Fetch the set of liquidators (we have 3 liquidators now)
+  async function fetchLiquidatorSet(): Promise<[string, string, string]> {
+  const base = `https://api.explorer.provable.com/v1/testnet/program/${PROGRAM_ID}/mapping/liquidator_set`;
+
+  const [k0, k1, k2] = await Promise.all(
+    ['0u8', '1u8', '2u8'].map(async (idx) => {
+      const res = await fetch(`${base}/${idx}`);
+      const raw = (await res.json()) as string | null;          // "aleo1..." or null
+      const addr = raw ? raw.replace(/"/g, '').trim() : null;
+      if (!addr || !addr.startsWith('aleo1')) {
+        throw new Error(`liquidator_set[${idx}] is unset on-chain — admin must run set_liquidator(${idx}, …)`);
+      }
+      return addr;
+    })
+  );
+
+  return [k0, k1, k2];
+}
+
   // ─── burn handler ──────────────────────────────────────────────────────────
 
   const handleBurnStaleSlot = useCallback(async (
@@ -276,10 +296,12 @@ export function TradingWidget({
     try {
       const nonce = generateNonce();
 
-      const orchestratorRes = await fetch(
-        `https://api.explorer.provable.com/v1/testnet/program/${PROGRAM_ID}/mapping/roles/1u8`
-      );
-      const orchestrator = (await orchestratorRes.json()).replace(/"/g, '');
+      // const orchestratorRes = await fetch(
+      //   `https://api.explorer.provable.com/v1/testnet/program/${PROGRAM_ID}/mapping/roles/1u8`
+      // );
+      // const orchestrator = (await orchestratorRes.json()).replace(/"/g, '');
+
+      const [keeper0, keeper1, keeper2] = await fetchLiquidatorSet();
 
       const usdcToken = usdcTokens.find(t => t.amount >= collateral);
       if (!usdcToken) {
@@ -309,7 +331,9 @@ export function TradingWidget({
         maxSlippage.toString() + 'u64',
         nonce,
         address,
-        orchestrator,
+        keeper0,
+        keeper1,
+        keeper2,
         merkleProof,
         pairConfig.oracleMappingKey,
       ];

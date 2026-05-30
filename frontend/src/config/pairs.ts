@@ -24,7 +24,7 @@ export const PAIRS: Record<PairId, PairConfig> = {
     id: 'btc',
     label: 'BTC/USDC',
     baseAsset: 'BTC',
-    programId: import.meta.env.VITE_PROGRAM_ID_BTC ?? 'zkperp_core_v27.aleo',
+    programId: import.meta.env.VITE_PROGRAM_ID_BTC ?? 'zkperp_core_v29c.aleo',
     oracleMappingKey: '1field',   // was '0field'
     poolMappingKey: '0field',
     defaultPrice: BigInt(6_742_000_000_000),

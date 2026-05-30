@@ -15,7 +15,7 @@ export interface LPSlotRecord {
 }
 
 // programId is now a required parameter — callers pass pairConfig.programId
-// so BTC LP records from zkperp_core_v27.aleo never bleed into the ETH page.
+// so BTC LP records from zkperp_core_v29c.aleo never bleed into the ETH page.
 export function useLPTokens(programId: string) {
   const { address, requestRecords, decrypt } = useWallet();
 

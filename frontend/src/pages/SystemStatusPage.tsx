@@ -6,7 +6,7 @@ const EXPLORER = 'https://api.explorer.provable.com/v1/testnet';
 const ORACLE_PROGRAM = 'zkperp_oracle_v3.aleo';
 
 const PAIRS = [
-  { id: 'BTC/USDC', program: 'zkperp_core_v27.aleo',     emoji: '₿', oracleKey: '1field' },
+  { id: 'BTC/USDC', program: 'zkperp_core_v29c.aleo',     emoji: '₿', oracleKey: '1field' },
   { id: 'ETH/USDC', program: 'zkperp_core_eth_v27.aleo', emoji: 'Ξ', oracleKey: '2field' },
   { id: 'SOL/USDC', program: 'zkperp_core_sol_v27.aleo', emoji: '◎', oracleKey: '3field' },
 ];

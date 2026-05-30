@@ -12,4 +12,21 @@ export default defineConfig({
   define: {
     'process.env': {},
   },
+  server: {
+    proxy: {
+      // Compliance / backend server on :3001
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+      // Aleo explorer — dodges browser CORS. Browser hits same-origin
+      // /aleo-api/..., Vite forwards to api.explorer.provable.com server-side.
+    '/aleo-api': {
+      target: 'https://api.provable.com',
+      changeOrigin: true,
+      secure: true,
+      rewrite: (p) => p.replace(/^\/aleo-api/, '/v2'),
+    },
+    },
+  },
 })

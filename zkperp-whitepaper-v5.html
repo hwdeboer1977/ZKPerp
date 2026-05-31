@@ -307,8 +307,8 @@ import zkperp_oracle_v3.aleo;</pre>
         <tr><td>Maintenance margin</td><td><code>MAINTENANCE_MARGIN_BPS = 50_000</code> (5% of notional, per-million divisor)</td><td>Equity below this is liquidatable; computed in-circuit from verified params + verified oracle</td></tr>
         <tr><td>Liquidation reward</td><td><code>LIQ_PENALTY_BPS = 100_000</code> (10% of collateral, per-million divisor)</td><td>Deterministic; paid to the winning keeper in <code>liquidate()</code></td></tr>
         <tr><td>LP withdrawal buffer</td><td>10% of total liquidity</td><td>On-chain in <code>finalize_remove_liquidity</code></td></tr>
-        <tr><td>Oracle staleness limit</td><td>150 blocks ≈ 5 min</td><td>Checked in open, close, and liquidate finalize blocks</td></tr>
-        <tr><td>Compliance validity</td><td>~90 days (7,776,000 blocks)</td><td>Asserted in every trader function finalize</td></tr>
+        <tr><td>Oracle staleness limit</td><td>150 blocks (≈ 5 min at ~2 s/block)</td><td>Checked in open, close, and liquidate finalize blocks</td></tr>
+        <tr><td>Compliance validity</td><td>7,776,000 blocks (≈ 180 days at ~2 s/block)</td><td>Asserted in every trader function finalize</td></tr>
         <tr><td>Price decimals</td><td>8 ($69,000 = 6,900,000,000,000u64)</td><td>All Leo math uses integer arithmetic</td></tr>
       </table>
     </div>
@@ -362,7 +362,7 @@ import zkperp_oracle_v3.aleo;</pre>
     </div>
 
     <h3>Slot Direction Binding (PositionSlot only)</h3>
-    <p><code>slot_id</code> is bound to direction inside <code>open_position</code>: slot 0 is reserved for longs, slot 1 for shorts. A trader may therefore hold at most one long and one short position concurrently across all markets — a BTC long and an ETH long cannot coexist, since both require slot 0. This is a deliberate v1 tradeoff: bounded record count and post-liquidation UX in exchange for limited cross-market concurrency. Future versions with orderbook matching will use per-position records to remove this constraint.</p>
+    <p>Within a single market program, each trader holds <strong>two <code>PositionSlot</code> records</strong>, distinguished by a <code>slot_id</code> field: the <code>slot_id = 0</code> record holds longs, the <code>slot_id = 1</code> record holds shorts. <code>open_position</code> asserts the record's <code>slot_id</code> matches the trade direction (<code>is_long ? 0u8 : 1u8</code>). A trader can therefore hold at most one long and one short position <strong>per market</strong> concurrently — they cannot, for example, open two BTC longs at once, since both would require that program's single <code>slot_id = 0</code> record. Because BTC, ETH, and SOL are deployed as separate programs, each with its own slot records and LP pool, this is <em>not</em> a cross-market limit: a BTC long and an ETH long coexist freely. This is a deliberate v1 tradeoff: bounded record count and post-liquidation UX in exchange for one-position-per-direction-per-market. Future versions with orderbook matching will use per-position records to remove even this per-market constraint.</p>
 
     <h3>Liquidation UX</h3>
     <p>On liquidation, the winning keeper's <code>liquidate()</code> transition consumes its LiquidationAuth and mints a fresh empty PositionSlot directly to the trader's address. The trader's <em>old</em> filled PositionSlot remains in their wallet as harmless dust — any attempt to use it reverts at finalize because <code>active_position_ids</code> no longer contains the position ID — but a clean empty slot is immediately available for the next trade. No user action is required after liquidation.</p>
@@ -415,11 +415,11 @@ available = total_liquidity
     </div>
 
     <h3>Why Long OI and Short OI Are Not Netted</h3>
-    <p>Both sides are locked independently and summed — they do not net off. A book with $5M long and $5M short appears balanced, but in a correlated market shock both sides can move simultaneously against the pool. Netting would dramatically understate the true capital requirement.</p>
+    <p>Both sides are locked independently and summed — they do not net off. Each market is its own program with its own LP pool, so within a pool the long and short open interest are always the <em>same</em> asset; the reason they are not netted is the independence of the positions, not cross-market exposure. Positions settle asynchronously and at the trader's choosing — a winning position can close and be paid before the opposing side moves, is liquidated, or round-trips back to breakeven — so the pool cannot assume one side's losses bankroll the other side's gains. Leverage compounds this asymmetry: a losing position's contribution to the pool is capped at its collateral (it is liquidated at the maintenance margin), while the pool's payout to a winning position is bounded only by available liquidity. A $5M-long / $5M-short book therefore looks balanced but is not a hedge from the pool's perspective; netting would assume an offset the protocol does not enforce and would understate the true capital requirement.</p>
 
     <div class="callout amber">
       <div class="callout-title">Documented Tradeoff — OI Trust Assumption</div>
-      <p>Because position parameters are private witnesses inside the ZK proof, they cannot be passed to <code>finalize</code> without becoming public on-chain. The orchestrator computes OI off-chain from the open positions it tracks and submits via <code>update_pool_state</code>. A malicious orchestrator can manipulate OI — affecting LP withdrawal limits — but <strong>cannot steal trader funds</strong>, which are protected by the commitment scheme (§7). See §13 for the full architectural analysis.</p>
+      <p>Because position parameters are private witnesses inside the ZK proof, the per-position sizes needed to compute open interest and net PnL cannot reach <code>finalize</code> without becoming public on-chain. The orchestrator (<code>roles[1u8]</code>) computes these aggregates off-chain and writes them via <code>update_pool_state</code> and <code>update_net_pnl</code>. The trust assumption is broader than OI alone: <code>update_pool_state</code> overwrites the <em>entire</em> <code>PoolState</code> from unverified inputs — <code>total_liquidity</code>, <code>total_lp_tokens</code>, and <code>accumulated_fees</code> as well as the two OI figures. A malicious orchestrator can therefore distort LP withdrawal limits, and by inflating <code>total_liquidity</code> or skewing <code>total_lp_tokens</code> let one LP withdraw a disproportionate share of the pool — harming <em>other LPs</em> — or deny service by deflating liquidity so closes and withdrawals fail their solvency check. What it <strong>cannot</strong> do is inflate an individual trader's payout — close, take-profit, stop-loss, and liquidation each recompute the position from its on-chain commitment (§7) — or move more than the pool's real USDCx balance, which the token contract enforces independently. The honest summary: the orchestrator is trusted for <em>all</em> pool accounting, not merely OI; trader position payouts and the pool's real balance are not at its mercy. Because <code>add_liquidity</code> and <code>remove_liquidity</code> already maintain <code>total_liquidity</code> and <code>total_lp_tokens</code> on-chain, two hardenings are planned (§15): first, restrict <code>update_pool_state</code> to the genuinely off-chain aggregates (OI and net PnL); second, place those remaining writes behind a <em>k</em>-of-<em>n</em> orchestrator quorum — the same on-chain pattern <code>zkperp_oracle_v3.aleo</code> uses for prices — reducing trust from a single key to a threshold. This is defense-in-depth, not full verification: the aggregates are still computed off-chain. See §13 for the full architectural analysis.</p>
     </div>
   </div>
 </div>
@@ -430,7 +430,7 @@ available = total_liquidity
       <span class="section-num">§5</span>
       <h2>Liquidation Architecture <span class="wave-new">Updated v28</span></h2>
     </div>
-    <p>Liquidation is the hardest unsolved problem in any privacy-preserving perpetual DEX. Positions are private records readable only by their owner — yet a liquidator must be able to act on them without the trader being online. ZKPerp solves this with a <strong>keeper-auth pattern</strong>: every <code>open_position()</code> mints <strong>three <code>LiquidationAuth</code> records</strong> atomically — one to each keeper in the admin-managed <code>liquidator_set</code> — and any single keeper can liquidate using its own record without ever touching the trader's slot.</p>
+    <p>Liquidation is the hardest unsolved problem in any privacy-preserving perpetual DEX. Positions are private records readable only by their owner — yet a liquidator must be able to act on them without the trader being online. ZKPerp solves this with a <strong>keeper-auth pattern</strong>: every <code>open_position()</code> mints <strong>three <code>LiquidationAuth</code> records</strong> atomically — one to each keeper in the admin-managed <code>liquidator_set</code> — and any single keeper can liquidate using its own record without ever touching the trader's slot. The N-keeper set buys <strong>liveness and censorship-resistance, not trust for correctness</strong>: because any single keeper can act, up to N−1 keepers may be offline or decline without halting liquidations, and a keeper that withholds merely cedes the reward to another. No keeper is trusted to act honestly — correctness is enforced on-chain regardless of which keeper submits, since the finalize gates (commitment match, a fresh 2-of-3 oracle price, and a genuine below-maintenance-margin check) make wrongful liquidation impossible. This contrasts with the orchestrator quorum of §4, which distributes trust for aggregates the chain cannot verify; here the chain already verifies everything, so the keeper set need only provide liveness.</p>
 
     <figure class="diagram">
       <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 407.297 235.42" role="img" aria-label="ZKPerp 1-of-N keeper liquidation architecture">
@@ -4019,7 +4019,7 @@ assert(pool.total_liquidity >= payout);               // Gate 3: solvency</pre>
     </div>
 
     <h3>Cross-Program Price Reads</h3>
-    <p><code>zkperp_core_v29c</code> reads prices directly from the oracle mapping inside <code>finalize</code> — no additional trust assumption:</p>
+    <p><code>zkperp_core_v29c</code> reads prices directly from the oracle mapping inside <code>finalize</code> — no additional trust assumption. Freshness is enforced as <code>price_age = block.height − timestamp ≤ 150</code> (≈ 5 min); age is measured in <em>blocks</em> rather than seconds because <code>finalize</code> has no trusted wall-clock, only <code>block.height</code> — so the relayer writes the current Aleo block height (fetched from the Provable API) into <code>PriceData.timestamp</code>, not a Unix time:</p>
     <pre>
 // In finalize_open_position — cross-program mapping read
 let price_data: zkperp_oracle_v3.aleo::PriceData =
@@ -4034,11 +4034,6 @@ assert(slippage &lt;= max_slippage);</pre>
     <div class="callout">
       <div class="callout-title">Slippage Is User-Controlled</div>
       <p><code>max_slippage</code> is a <strong>private trader input</strong>, not a protocol constant. It protects the trader from front-run-induced bad fills at the user's chosen tolerance. The protocol does not impose a system-wide slippage cap — a trader who passes <code>u64::MAX</code> effectively disables their own slippage check. Position safety against bad fills is the trader's responsibility; the protocol guarantees only that whatever bound the trader sets is enforced on-chain.</p>
-    </div>
-
-    <div class="callout amber">
-      <div class="callout-title">Critical: Timestamp is Block Height, Not Unix Time</div>
-      <p>The <code>timestamp</code> field in <code>PriceData</code> must be an Aleo block height (currently ~15.6M), not a Unix timestamp (~1.7B). The contract computes <code>price_age = block.height - timestamp</code> as a u32. A Unix timestamp would cause u32 underflow, making <code>price_age</code> a huge number and failing the staleness assertion on every trade. The oracle relayer fetches the current block height from the Provable API before each submission.</p>
     </div>
 
     <h3>Chainlink Feed Configuration</h3>
@@ -4060,7 +4055,7 @@ assert(slippage &lt;= max_slippage);</pre>
 
     <div class="callout">
       <div class="callout-title">Path to Stronger Guarantees</div>
-      <p>The ideal architecture is a single transaction carrying a co-signed report with signatures verified inside Leo's finalize — making the quorum check part of the ZK proof rather than a role-check. This requires a <code>verify_schnorr(pk, msg, sig)</code> opcode. Leo does not expose this yet. When Aleo ships lower-level signature verification primitives, the oracle can be upgraded to single-transaction FROST threshold Schnorr with no changes to consuming contracts.</p>
+      <p>Today, quorum is a <em>role-check across transactions</em>: each relayer submits separately, the program authenticates <code>self.caller</code> against the registered oracle addresses, and votes accumulate in <code>price_proposals</code> until 2-of-3 match. The stronger design is a <em>single</em> transaction carrying a co-signed price report whose signatures are verified inside <code>finalize</code> — so "2-of-3 agreed" becomes a fact proven by the ZK proof itself rather than reconstructed from a sequence of on-chain writes, removing the multi-transaction accumulation surface (and the same-block races the staggered submission currently works around). Leo already verifies <em>native Aleo-account</em> Schnorr signatures (<code>signature.verify</code>); what it does not yet expose is the general / secp256k1 signature verification needed here (see §15). When Aleo ships those lower-level primitives, the oracle can move to a single-transaction threshold scheme — e.g. FROST threshold Schnorr, where a <em>k</em>-of-<em>n</em> set jointly produces one signature against one group key — verified in-circuit, with <strong>no changes to consuming contracts</strong> (<code>zkperp_core</code> reads only the <code>oracle_prices</code> mapping, not the submission path). One caveat: this hardens how relayers <em>agree</em>, not the data itself — all relayers still read the same Chainlink feed, so the feed remains the price-trust root either way. The same primitive would, however, also allow verifying Chainlink's own signed reports directly in-circuit, which would remove the relayer layer entirely — a stronger end state than threshold-signing among relayers.</p>
     </div>
   </div>
 </div>
@@ -4083,7 +4078,7 @@ REGISTRATION (once per user)
   4. User fetches Merkle proof from backend API
   5. User calls issue_compliance(proof) on zkperp_compliance_v8b.aleo
      → ZK proof: "I am a leaf in the tree whose root matches compliance_root"
-     → Receives private ZKPerpComplianceRecord in wallet (valid ~90 days)
+     → Receives private ZKPerpComplianceRecord in wallet (valid up to 7,776,000 blocks ≈ 180 days)
 
 TRADING (every action)
   6. User passes ZKPerpComplianceRecord as input to open_position / add_liquidity / etc.
@@ -4097,10 +4092,10 @@ TRADING (every action)
 record ZKPerpComplianceRecord {
     owner:        address,  // private — only holder can spend
     issued_under: field,    // Merkle root active at issuance
-    expires_at:   u32,      // block height of expiry (~90 days)
+    expires_at:   u32,      // expiry block height (max +7,776,000 blocks ≈ 180 days @ ~2s)
 }</pre>
 
-    <p>The record lives in the user's wallet and is re-used on every trade for up to ~90 days (the maximum value of <code>expires_at</code> enforced in <code>issue_compliance</code>'s finalize). It is returned unchanged as a transition output, so trading never consumes it. Because <code>zkperp_core</code> checks only <code>revoked</code> and <code>expires_at</code> at trade time — never re-asserting <code>issued_under</code> against the live root — an existing record stays valid even after the admin rotates the Merkle root. This is deliberate: re-checking the root per trade would invalidate every active trader the moment a new user registers. Re-issuance is therefore needed only when the record <strong>expires</strong> or after the holder is <strong>revoked and later reinstated</strong>. The <code>issued_under</code> field is retained purely as audit provenance (which allowlist epoch the record was minted under).</p>
+    <p>The record lives in the user's wallet and is re-used on every trade for up to 7,776,000 blocks (≈ 180 days at ~2 s/block) — the maximum value of <code>expires_at</code> &minus; <code>block.height</code> enforced in <code>issue_compliance</code>'s finalize. It is returned unchanged as a transition output, so trading never consumes it. Because <code>zkperp_core</code> checks only <code>revoked</code> and <code>expires_at</code> at trade time — never re-asserting <code>issued_under</code> against the live root — an existing record stays valid even after the admin rotates the Merkle root. This is deliberate: re-checking the root per trade would invalidate every active trader the moment a new user registers. Re-issuance is therefore needed only when the record <strong>expires</strong> or after the holder is <strong>revoked and later reinstated</strong>. The <code>issued_under</code> field is retained purely as audit provenance (which allowlist epoch the record was minted under).</p>
 
     <p>Note: the <code>verify_compliance</code> transition exposed by <code>zkperp_compliance_v8b.aleo</code> does perform a full root match, and is available for external programs that want a single-call gate — but <code>zkperp_core</code> does not call it, reading <code>revoked</code> / <code>expires_at</code> directly in its own finalize instead.</p>
 
@@ -4186,20 +4181,27 @@ Phase 4: On-chain Settlement → settle_match() ZK proof enforces price constrai
     </div>
 
     <h3>Privacy Model</h3>
+    <p>The dark pool's privacy guarantee is against the <em>public and peer</em> surface — the surface front-running needs — not against the operator. At order time, <code>submit_order</code> issues an <code>OrderAuth</code> record <em>owned by the operator</em>, and in Aleo a record's owner decrypts it; the operator therefore sees the full order (size, limit price, direction, asset, and trader identity), which it must in order to compute the uniform clearing price off-chain. What no one — operator or public — can do is settle outside the signed limit prices or move funds, both of which are ZK-enforced on-chain.</p>
     <div class="table-wrap">
       <table>
         <tr><th>What</th><th>Visible to</th><th>Notes</th></tr>
-        <tr><td>Order size</td><td>Nobody</td><td>Encrypted in OrderAuth record</td></tr>
-        <tr><td>Limit price</td><td>Nobody</td><td>Encrypted in OrderAuth record</td></tr>
-        <tr><td>Trader address</td><td>Nobody</td><td>Owner field is private</td></tr>
-        <tr><td>Clearing price</td><td>Nobody</td><td>Private transition input, not a finalize argument</td></tr>
-        <tr><td>Fill size</td><td>Nobody</td><td>Private transition input</td></tr>
-        <tr><td>Order direction</td><td>Operator only</td><td>From OperatorOrderRef</td></tr>
-        <tr><td>Asset ID</td><td>Operator only</td><td>From OperatorOrderRef</td></tr>
-        <tr><td>Fee accrued (vault total)</td><td>Everyone</td><td>On-chain <code>fee_vault</code> mapping</td></tr>
-        <tr><td>Order nonces (consumed)</td><td>Everyone</td><td>Finalize — double-fill prevention</td></tr>
+        <tr><td>Order size</td><td>Operator</td><td>Carried in <code>OrderAuth</code> (operator-owned → operator decrypts); needed for off-chain matching</td></tr>
+        <tr><td>Limit price</td><td>Operator</td><td>Carried in <code>OrderAuth</code>; needed to compute the clearing price</td></tr>
+        <tr><td>Trader address</td><td>Operator</td><td><code>user</code> field in <code>OrderAuth</code> / <code>OperatorOrderRef</code></td></tr>
+        <tr><td>Order direction</td><td>Operator</td><td><code>OrderAuth</code> / <code>OperatorOrderRef</code></td></tr>
+        <tr><td>Asset ID</td><td>Operator</td><td><code>OrderAuth</code> / <code>OperatorOrderRef</code></td></tr>
+        <tr><td>Clearing price</td><td>Operator-chosen; both parties via <code>FillReceipt</code></td><td>Private transition input — never public on-chain (and bounded by both limit prices)</td></tr>
+        <tr><td>Fill size</td><td>Operator-chosen; both parties via <code>FillReceipt</code></td><td>Private transition input — never public on-chain</td></tr>
+        <tr><td>Anything about pending orders, to other traders / MEV bots</td><td>Nobody</td><td>No order is public before or after settlement — this is the anti-front-running property</td></tr>
+        <tr><td>Fee-vault total</td><td>Everyone</td><td>On-chain <code>fee_vault</code> mapping</td></tr>
+        <tr><td>Consumed order nonces</td><td>Everyone</td><td>Finalize — double-fill prevention</td></tr>
         <tr><td>That a settlement occurred</td><td>Everyone</td><td>On-chain transaction</td></tr>
       </table>
+    </div>
+
+    <div class="callout amber">
+      <div class="callout-title">Operator Trust — Analogous to the §13 OI Orchestrator</div>
+      <p>The operator is trusted with full order contents (it must decrypt them to match orders), exactly as the perp orchestrator is trusted with open interest. The trust is bounded the same way: the operator cannot settle outside the limit prices, cannot move more than the escrowed amount, and cannot fabricate a fill against a consumed or expired order — all ZK-enforced in <code>settle_match</code>. Its residual power is censorship (declining to match an order), mitigated by order expiry and user-initiated <code>cancel_order</code> / <code>cancel_and_refund_asset</code>. Sealing order contents from the operator as well would require in-circuit matching over committed orders — open research, not in v8.</p>
     </div>
 
     <h3>Live Testnet Results</h3>
@@ -4245,6 +4247,7 @@ amountOut  = L × (sqrtBefore − sqrtAfter) / Q64
 // swap_sell (ALEO → USDCx, price increases)
 sqrtAfter  = sqrtBefore + amountIn_net × Q64 / L
 amountOut  = L × (sqrtAfter − sqrtBefore) × Q64 / (sqrtAfter × sqrtBefore)</pre>
+    <p>These closed forms are evaluated <em>client-side by the frontend</em>, and the resulting amounts, final price, and step data are submitted by the <strong>trader</strong>, who signs the transaction with their own wallet. There is no backend or privileged operator — the caller is the trader. Since the trader chooses and signs these inputs (and nothing compels them to use the frontend's honest values), the contract treats them as untrusted and <strong>verifies the result against the curve</strong> in <code>finalize</code>: output paid out is capped at the curve value for the supplied price move, and input collected is floored at the curve minimum, both computed from the on-chain liquidity. A trader therefore cannot extract more (or pay less) than the price move justifies, regardless of what they submit.</p>
 
     <h3>Leo 4.0 Constraints in the AMM</h3>
     <div class="table-wrap">
@@ -4259,13 +4262,24 @@ amountOut  = L × (sqrtAfter − sqrtBefore) × Q64 / (sqrtAfter × sqrtBefore)<
     </div>
 
     <div class="callout amber">
+      <div class="callout-title">Swap Verification — Trader-Signed, Contract-Verified <span class="wave-new">v5</span></div>
+      <p>The AMM has <strong>no orchestrator or backend</strong>. A trader connects their wallet on the frontend, the frontend builds the swap, and the trader signs and submits it themselves — so the caller is the trader and every swap parameter (amounts, final price, step data) is trader-supplied. Because nothing prevents a trader from signing a transaction with hand-crafted inputs, the contract is the <em>only</em> thing protecting the pool and must verify every swap against the curve. The deployed <code>v4</code> fails to do this for single-range (non-tick-crossing) swaps — the terminal output check is disabled, so <strong>any trader can sign a <code>swap_buy</code> with <code>total_amount_in = 1</code> and <code>total_amount_out =</code> the whole reserve and drain the pool permissionlessly</strong>. The in-progress <code>zkperp_amm_v5.aleo</code> rewrite is designed to close this: all amounts are forced through a verified terminal segment with output capped and input floored against the curve on both legs, and the 4-step tick-crossing path is retained but gated off pending audit. <code>v5</code> is not yet validated on-chain (see Implementation Status below). LP <code>mint</code>/<code>burn</code> and swap amounts are public <code>finalize</code> arguments.</p>
+    </div>
+
+    <div class="callout red">
+      <div class="callout-title">Implementation Status — First Concentrated-Liquidity Attempt, Hardening In Progress <span class="wave-new">v5</span></div>
+      <p>This is a first attempt at concentrated liquidity on Aleo. The deployed <code>zkperp_amm_v4.aleo</code> is <strong>functional</strong> — <code>initialize_pool</code>, <code>mint_position</code>, <code>burn_position</code>, and swaps all execute end-to-end on testnet — but it carries <strong>serious security issues that are the priority for the next update</strong> and it should not be used with real funds. The most severe: for single-range (non-tick-crossing) swaps the terminal output check is disabled, so a trader can sign a <code>swap_buy</code> with <code>total_amount_in = 1</code> and <code>total_amount_out =</code> the entire reserve and drain the pool permissionlessly. Related gaps: <code>mint_position</code> / <code>burn_position</code> do not derive the required deposit / permitted payout from liquidity (an LP can mint disproportionate liquidity for a small deposit, or withdraw more than a position is worth), the declared final tick is unconstrained, and per-step fees are mis-accrued.</p>
+      <p>A hardened rewrite (<code>v5</code>) is in progress and addresses these: the terminal segment is always verified with output capped and input floored against the curve on both legs, the final tick is pinned to the final price via an in-circuit <code>sqrt_ratio_at_tick</code>, deposits and payouts are derived from liquidity, and per-step fee accrual is corrected. Two limitations remain open in <code>v5</code> and gate any production use: amount math runs in inline u128, which caps the safe envelope (position ticks within ±88,440, per-position liquidity ≤ 2<sup>55</sup>) — lifting it requires a verified 256-bit <code>mul_div</code> (Uniswap's <code>FullMath.mulDiv</code> equivalent) — and the multi-tick crossing path plus rounding-tolerance calibration await devnet validation and a third-party audit. Until then the AMM is a research prototype, not a usable venue.</p>
+    </div>
+
+    <div class="callout amber">
       <div class="callout-title">Privacy Note</div>
       <p>Swap amounts on the AMM are public — they appear as finalize arguments. For large private trades, use <code>zkdarkpool_v8.aleo</code> (batch auctions) instead. The AMM and dark pool serve complementary use cases: the AMM for continuous liquidity provision, the dark pool for institutional sealed-bid settlement.</p>
     </div>
 
     <div class="callout">
       <div class="callout-title">Further Reading</div>
-      <p>The AMM is maintained as a standalone subproject alongside ZKPerp. For full contract internals — Q64 fixed-point math, tick crossing, the credits.aleo integration, and the orchestrator's role in pre-computing swap steps — see <a href="https://github.com/hwdeboer1977/ZKPerp/blob/main/zkperp-amm/README.md">zkperp-amm/README.md</a> on GitHub.</p>
+      <p>The AMM is maintained as a standalone subproject alongside ZKPerp. For full contract internals — Q64 fixed-point math, tick crossing, the credits.aleo integration, and how the frontend pre-computes swap steps — see <a href="https://github.com/hwdeboer1977/ZKPerp/blob/main/zkperp-amm/README.md">zkperp-amm/README.md</a> on GitHub.</p>
     </div>
   </div>
 </div>
@@ -4339,7 +4353,7 @@ Live test: ~81 USDC bridged successfully in under 15 minutes</pre>
 
     <div class="callout green">
       <div class="callout-title">Bounded Trust Assumption</div>
-      <p>The orchestrator can manipulate <code>long_open_interest</code> and <code>short_open_interest</code>, which affects LP withdrawal limits via the safety buffer check in <code>remove_liquidity</code>. It cannot steal trader funds — payouts are fully protected by the commitment scheme (§7). The orchestrator's write surface is limited to OI and oracle prices. No existing privacy-preserving perpetual DEX on any chain derives OI atomically from private position data, because doing so requires making that data public.</p>
+      <p>The orchestrator writes <code>long_open_interest</code> and <code>short_open_interest</code>, which affect LP withdrawal limits via the safety-buffer check in <code>remove_liquidity</code>. As detailed in §4, <code>update_pool_state</code> currently also lets it overwrite <code>total_liquidity</code>, <code>total_lp_tokens</code>, and <code>accumulated_fees</code>, so the practical write surface is <em>all</em> pool accounting plus net PnL — but <strong>not</strong> oracle prices, which are governed separately by the 2-of-3 quorum in <code>zkperp_oracle_v3.aleo</code>. What the orchestrator cannot do is inflate an individual trader's payout (close, TP, SL, and liquidation each recompute the position from its on-chain commitment, §7) or move more than the pool's real USDCx balance, which the token contract enforces. Only OI is genuinely architecture-bound (sizes are private witnesses, per the table above); <code>total_liquidity</code> and <code>total_lp_tokens</code> are already tracked on-chain and need not be orchestrator-writable, so scoping <code>update_pool_state</code> down to OI + net PnL and placing those behind a quorum is a planned hardening (§15). No existing privacy-preserving perpetual DEX on any chain derives OI atomically from private position data, because doing so requires making that data public.</p>
     </div>
   </div>
 </div>
@@ -4357,18 +4371,19 @@ Live test: ~81 USDC bridged successfully in under 15 minutes</pre>
       <table>
         <tr><th>Item</th><th>Status</th><th>Notes</th></tr>
         <tr><td>USDCx Token Integration</td><td><span class="tag tag-green">✅ Resolved</span></td><td>All collateral flows use real private token transfers via test_usdcx_stablecoin.aleo</td></tr>
-        <tr><td>Record Accumulation</td><td><span class="tag tag-green">✅ Resolved</span></td><td>Slot model: wallet holds exactly 3 records forever</td></tr>
+        <tr><td>Record Accumulation</td><td><span class="tag tag-green">✅ Resolved</span></td><td>Slot model: wallet holds exactly 3 records per market program (2 PositionSlots + 1 LPSlot), forever</td></tr>
         <tr><td>Dual-Record Liquidation</td><td><span class="tag tag-green">✅ Resolved</span></td><td>LiquidationAuth pattern fully implemented and live</td></tr>
         <tr><td>Single Oracle Point of Failure</td><td><span class="tag tag-green">✅ Resolved</span></td><td>On-chain 2-of-3 quorum via zkperp_oracle_v3.aleo — no coordinator</td></tr>
         <tr><td>Inflated Payout Attack (close)</td><td><span class="tag tag-green">✅ Resolved</span></td><td>BHP256 position commitment scheme in v26 — payout fully verified in finalize</td></tr>
         <tr><td>Unverified Liquidation Parameters</td><td><span class="tag tag-green">✅ Resolved</span></td><td>v28 — LiquidationAuth fields commitment-checked; margin computed in-circuit from live oracle</td></tr>
         <tr><td>KYC / Compliance</td><td><span class="tag tag-green">✅ Resolved</span></td><td>zkperp_compliance_v8b.aleo — BHP256 Merkle allowlist, circuit-level enforcement</td></tr>
         <tr><td>ZK Dark Pool</td><td><span class="tag tag-green">✅ Resolved</span></td><td>zkdarkpool_v8.aleo — batch auction, live on testnet</td></tr>
-        <tr><td>Concentrated Liquidity AMM</td><td><span class="tag tag-green">✅ Resolved</span></td><td>zkperp_amm_v4.aleo — Uniswap v3-style, USDCx/ALEO with full credits.aleo integration</td></tr>
+        <tr><td>Concentrated Liquidity AMM</td><td><span class="tag tag-amber">⚠ Prototype</span></td><td>zkperp_amm_v4.aleo — Uniswap v3-style USDCx/ALEO with full credits.aleo integration; functional on testnet but carries an open swap-invariant pool-drain risk (see §11, §15). Hardened v5 in progress, not yet validated.</td></tr>
         <tr><td>2M Variable Limit (single contract)</td><td><span class="tag tag-green">✅ Resolved</span></td><td>Split into _core (market orders) + _orders (limit orders) contracts</td></tr>
-        <tr><td>Trusted OI Aggregation</td><td><span class="tag tag-amber">⚠ Documented Tradeoff</span></td><td>Architecturally impossible to fix without leaking trade sizes on-chain — see §13</td></tr>
-        <tr><td>Single Orchestrator</td><td><span class="tag tag-amber">⚠ Open</span></td><td>One wallet controls liquidations and order execution. Multi-orchestrator rotation planned.</td></tr>
-        <tr><td>Non-Transferable Compliance Admin</td><td><span class="tag tag-amber">⚠ Open</span></td><td>v7 admin is fixed at deploy time (no <code>set_admin</code>). v8 will add multisig/governance-gated admin rotation.</td></tr>
+        <tr><td>Trusted pool-state aggregation</td><td><span class="tag tag-amber">⚠ Documented Tradeoff</span></td><td>OI itself is architecture-bound (private sizes cannot enter public state — §13); the broader <code>update_pool_state</code> write surface (liquidity, LP tokens) is fixable — hardening planned in §15</td></tr>
+        <tr><td>Single Orchestrator</td><td><span class="tag tag-amber">⚠ Open</span></td><td>One wallet (<code>roles[1u8]</code>) controls TP/SL order execution and pool-state aggregation. Liquidation is <em>not</em> orchestrator-run — it is 1-of-N keepers from the admin-managed <code>liquidator_set</code> (§5). Multi-orchestrator rotation and the §15 pool-state hardening are planned.</td></tr>
+        <tr><td>Non-Transferable Compliance Admin</td><td><span class="tag tag-amber">⚠ Open</span></td><td>The compliance admin is fixed at deploy time — <code>v8b</code> has no <code>set_admin</code>. A future version will add multisig / governance-gated admin rotation.</td></tr>
+        <tr><td>AMM Swap-Invariant Verification</td><td><span class="tag tag-amber">⚠ Open</span></td><td>The deployed <code>v4</code> disables the single-range terminal output check, so a non-tick-crossing swap's output is not bound to the curve — a permissionless pool-drain risk (also affects <code>mint</code>/<code>burn</code> amount derivation and final-tick consistency). The in-progress <code>zkperp_amm_v5.aleo</code> is designed to harden this: output capped + input floored against the curve on both legs, final tick pinned via in-circuit <code>sqrt_ratio_at_tick</code>, deposits/payouts derived from liquidity. <code>v5</code> is not yet validated on-chain. Inline u128 math caps the safe envelope (ticks ±88,440, liquidity ≤ 2<sup>55</sup>); a verified 256-bit <code>mul_div</code>, multi-tick re-enablement, rounding calibration, and audit remain pending.</td></tr>
         <tr><td>Dark Pool Deposit-to-Order Binding</td><td><span class="tag tag-amber">⚠ Documented Tradeoff</span></td><td>Sell-side deposits bound to seller by address + asset_id, not by order nonce. Operator picks which deposit settles which order. Stronger nonce-binding planned.</td></tr>
         <tr><td>No Funding Rate</td><td><span class="tag tag-amber">⚠ Open</span></td><td>Flat borrow rate model. Dynamic funding rates planned for mainnet.</td></tr>
         <tr><td>No Partial Close</td><td><span class="tag tag-amber">⚠ Open</span></td><td>Positions must be closed in full. Partial close is architecturally supported by the slot model.</td></tr>
@@ -4390,7 +4405,7 @@ Live test: ~81 USDC bridged successfully in under 15 minutes</pre>
     <h3>✅ Completed</h3>
     <ul>
       <li>Core perpetuals: open / close / liquidate with USDCx token integration</li>
-      <li>Slot model — 3 records, forever</li>
+      <li>Slot model — 3 records per market program (2 PositionSlots + 1 LPSlot), forever</li>
       <li>Dual-record liquidation architecture</li>
       <li>2-of-3 Chainlink oracle relay — on-chain quorum via zkperp_oracle_v3.aleo</li>
       <li>Limit orders / TP / SL — keeper executed, ZK trigger verification</li>
@@ -4411,6 +4426,7 @@ Live test: ~81 USDC bridged successfully in under 15 minutes</pre>
       <li>Verifiable performance proofs (ZK circuit) — copy trading without revealing trades</li>
       <li>Leaderboard — opt-in, privacy-preserving</li>
       <li>Multi-orchestrator rotation — reduce single-orchestrator trust assumption</li>
+      <li><strong>Pool-state write hardening (two steps):</strong> (1) restrict <code>update_pool_state</code> to the genuinely off-chain aggregates (open interest and net PnL) — <code>total_liquidity</code> and <code>total_lp_tokens</code> are already maintained on-chain by <code>add_liquidity</code>/<code>remove_liquidity</code> and should not be orchestrator-writable; (2) place the remaining OI / net-PnL writes behind a <em>k</em>-of-<em>n</em> quorum (the same pattern <code>zkperp_oracle_v3.aleo</code> already uses for prices), reducing trust from a single orchestrator key to a threshold. This is defense-in-depth, not full verification — the aggregates remain off-chain attestations.</li>
       <li>Admin controls — pause, fee update, role rotation</li>
       <li>On-chain secp256k1 oracle signature verification (when Leo exposes the opcode)</li>
     </ul>
@@ -4457,7 +4473,7 @@ Live test: ~81 USDC bridged successfully in under 15 minutes</pre>
         <tr><th>Property</th><th>Mechanism</th><th>Where Enforced</th></tr>
         <tr><td>No inflated close payout</td><td>BHP256 commitment recomputed + asserted against stored hash</td><td><code>finalize_close_position</code></td></tr>
         <tr><td>No forged liquidation parameters</td><td>BHP256 commitment recomputed from <code>LiquidationAuth</code> fields + asserted against stored hash</td><td><code>finalize_liquidate</code></td></tr>
-        <tr><td>No healthy position liquidated</td><td>Margin ratio computed in-circuit from verified params and verified oracle price; <code>margin_bps_scaled &lt; 100</code> asserted</td><td><code>finalize_liquidate</code></td></tr>
+        <tr><td>No healthy position liquidated</td><td>Equity computed in-circuit from verified params and verified oracle price; <code>equity &lt; maintenance_margin</code> asserted (maintenance margin = 5% of notional)</td><td><code>finalize_liquidate</code></td></tr>
         <tr><td>No double-close or double-liquidation</td><td><code>active_position_ids[id]</code> checked and cleared atomically</td><td><code>finalize_close_position</code>, <code>finalize_liquidate</code></td></tr>
         <tr><td>Exit / liquidation / TP / SL price must match oracle exactly</td><td><code>assert_eq(supplied_price, oracle_prices[asset_id].price)</code> + freshness assertion</td><td><code>finalize_close_position</code>, <code>finalize_liquidate</code>, <code>finalize_execute_take_profit</code>, <code>finalize_execute_stop_loss</code></td></tr>
         <tr><td>Entry price bounded by trader-set slippage</td><td><code>assert(|entry_price - oracle_price| &lt;= max_slippage)</code> with <code>max_slippage</code> as private trader input</td><td><code>finalize_open_position</code></td></tr>

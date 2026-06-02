@@ -19,7 +19,7 @@ interface ProviderProps {
 
 export function PrivateDataProvider({ children }: ProviderProps) {
   const usdcx  = useUSDCx();
-  const orders = useOrderReceipts('zkperp_core_v29c.aleo');
+  const orders = useOrderReceipts('zkperp_core_v30.aleo');
 
   return (
     <PrivateDataContext.Provider value={{ usdcx, orders }}>

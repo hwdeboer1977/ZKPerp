@@ -6,7 +6,7 @@ export type PairId = 'btc' | 'eth' | 'sol';
 
 // Oracle program — shared across all pairs
 export const ORACLE_PROGRAM_ID = 
-  import.meta.env.VITE_ORACLE_PROGRAM_ID ?? 'zkperp_oracle_v3.aleo';
+  import.meta.env.VITE_ORACLE_PROGRAM_ID ?? 'zkperp_oracle_v4.aleo';
 
 export interface PairConfig {
   id: PairId;
@@ -24,7 +24,7 @@ export const PAIRS: Record<PairId, PairConfig> = {
     id: 'btc',
     label: 'BTC/USDC',
     baseAsset: 'BTC',
-    programId: import.meta.env.VITE_PROGRAM_ID_BTC ?? 'zkperp_core_v29c.aleo',
+    programId: import.meta.env.VITE_PROGRAM_ID_BTC ?? 'zkperp_core_v30.aleo',
     oracleMappingKey: '1field',   // was '0field'
     poolMappingKey: '0field',
     defaultPrice: BigInt(6_742_000_000_000),

@@ -6,7 +6,7 @@ import 'dotenv/config'
 
 export const NETWORK          = process.env.NETWORK          ?? 'testnet'
 export const API              = process.env.API              ?? 'https://api.explorer.provable.com/v1/testnet'
-export const PROGRAM_ID       = process.env.PROGRAM_ID       ?? 'zkdarkpool_v5.aleo'
+export const PROGRAM_ID       = process.env.PROGRAM_ID       ?? 'zkdarkpool_v9.aleo'
 export const USDCX_ID         = process.env.USDCX_ID         ?? 'test_usdcx_stablecoin.aleo'
 export const OPERATOR_PK      = process.env.OPERATOR_PRIVATE_KEY ?? ''
 export const OPERATOR_VK      = process.env.OPERATOR_VIEW_KEY    ?? ''

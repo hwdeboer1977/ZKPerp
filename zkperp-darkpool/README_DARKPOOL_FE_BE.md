@@ -24,9 +24,9 @@ The deployed program ID is configured by env var in **both** components, and the
 |---|---|
 | `frontend/.env.example` | `VITE_PROGRAM_ID=zkdarkpool_v2.aleo` |
 | `frontend/src/darkpool.ts` + `main.tsx` default | `zkdarkpool_v4.aleo` |
-| `darkpool-bot/config.mjs` default | `zkdarkpool_v5.aleo` |
+| `darkpool-bot/config.mjs` default | `zkdarkpool_v9.aleo` |
 
-Set `VITE_PROGRAM_ID` (frontend) and `PROGRAM_ID` (bot) to the **actually deployed** program (per the contract docs, `zkdarkpool_v8.aleo`) and keep them identical. Don't rely on the defaults.
+Set `VITE_PROGRAM_ID` (frontend) and `PROGRAM_ID` (bot) to the **actually deployed** program (per the contract docs, `zkdarkpool_v9.aleo`) and keep them identical. Don't rely on the defaults.
 
 ---
 
@@ -53,7 +53,7 @@ It reads the wallet's records via `requestRecords` + `Unshield` (USDCx `Token` a
 **Config (`frontend/.env`):**
 
 ```env
-VITE_PROGRAM_ID=zkdarkpool_v8.aleo            # the deployed program (not the v2 in .env.example)
+VITE_PROGRAM_ID=zkdarkpool_v9.aleo            # the deployed program (not the v2 in .env.example)
 VITE_USDCX_ID=test_usdcx_stablecoin.aleo
 VITE_NETWORK=testnet
 VITE_API=https://api.explorer.provable.com/v1/testnet
@@ -121,7 +121,7 @@ OPERATOR_ADDRESS=aleo1...
 Optional (defaults shown):
 
 ```env
-PROGRAM_ID=zkdarkpool_v8.aleo                              # set to the deployed program (default is v5)
+PROGRAM_ID=zkdarkpool_v9.aleo                              # set to the deployed program (default is v5)
 USDCX_ID=test_usdcx_stablecoin.aleo
 NETWORK=testnet
 API=https://api.explorer.provable.com/v1/testnet

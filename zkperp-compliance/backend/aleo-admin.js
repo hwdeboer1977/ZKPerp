@@ -3,7 +3,7 @@ import {
 } from '@provablehq/sdk';
 
 const NETWORK_URL      = process.env.ALEO_NETWORK_URL || 'https://api.explorer.provable.com/v2';
-const PROGRAM_ID       = process.env.COMPLIANCE_PROGRAM_ID || 'zkperp_compliance_v8b.aleo';
+const PROGRAM_ID       = process.env.COMPLIANCE_PROGRAM_ID || 'zkperp_compliance_v9.aleo';
 const EXPLORER_URL     = `${NETWORK_URL}/testnet`;
 const PROVABLE_API_KEY = process.env.PROVABLE_API_KEY;
 const PROVABLE_CONSUMER_ID = process.env.PROVABLE_CONSUMER_ID;

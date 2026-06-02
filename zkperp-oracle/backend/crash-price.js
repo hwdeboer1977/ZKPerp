@@ -1,6 +1,6 @@
 /**
  * crash-price.mjs
- * Submits a fake BTC price of $50,000 to zkperp_oracle_v3.aleo
+ * Submits a fake BTC price of $50,000 to zkperp_oracle_v4.aleo
  * Used to trigger liquidation demo.
  * Run: node crash-price.mjs
  */
@@ -10,7 +10,7 @@ dotenv.config();
 
 import { submitPriceOnChain } from './shared/aleoClient.js';
 
-const ORACLE_PROGRAM = 'zkperp_oracle_v3.aleo';
+const ORACLE_PROGRAM = 'zkperp_oracle_v4.aleo';
 const BTC_ASSET_KEY  = '1field';
 const CRASH_PRICE    = 5000000000000n; // $50,000 with 8 decimals
 

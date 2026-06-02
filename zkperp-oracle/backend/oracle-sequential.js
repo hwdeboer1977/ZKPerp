@@ -25,7 +25,7 @@ import markets from './config/markets.json' with { type: 'json' };
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const ORACLE_PROGRAM = process.env.ORACLE_PROGRAM || 'zkperp_oracle_v3.aleo';
+const ORACLE_PROGRAM = process.env.ORACLE_PROGRAM || 'zkperp_oracle_v4.aleo';
 const ALEO_NETWORK   = process.env.ALEO_NETWORK   || 'testnet';
 const EXPLORER_API   = process.env.ALEO_EXPLORER_API || 'https://api.explorer.provable.com/v1';
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 300_000); // 5 min

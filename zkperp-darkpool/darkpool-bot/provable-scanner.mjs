@@ -2,8 +2,8 @@
 // provable-scanner.mjs
 // Scans for UNSPENT records only, sorted by most recent first
 // Usage:
-//   PROGRAM_ID=zkdarkpool_v5.aleo node provable-scanner.mjs
-//   PROGRAM_ID=zkdarkpool_v5.aleo SCAN_FROM=15700000 node provable-scanner.mjs
+//   PROGRAM_ID=zkdarkpool_v9.aleo node provable-scanner.mjs
+//   PROGRAM_ID=zkdarkpool_v9.aleo SCAN_FROM=15700000 node provable-scanner.mjs
 //   PROGRAM_ID=test_usdcx_stablecoin.aleo node provable-scanner.mjs
 // ============================================================
 
@@ -17,7 +17,7 @@ const CONSUMER_ID  = process.env.PROVABLE_CONSUMER_ID ?? ''
 const API_KEY      = process.env.PROVABLE_API_KEY ?? ''
 const VIEW_KEY     = process.env.OPERATOR_VIEW_KEY ?? ''
 const PRIVATE_KEY  = process.env.OPERATOR_PRIVATE_KEY ?? ''
-const PROGRAM_ID   = process.env.PROGRAM_ID   ?? 'zkdarkpool_v5.aleo'
+const PROGRAM_ID   = process.env.PROGRAM_ID   ?? 'zkdarkpool_v9.aleo'
 const SCAN_FROM    = parseInt(process.env.SCAN_FROM ?? '0')  // filter: only show records >= this block
 
 const account = PRIVATE_KEY

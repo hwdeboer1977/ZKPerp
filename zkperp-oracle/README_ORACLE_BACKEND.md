@@ -1,8 +1,8 @@
 # ZKPerp Oracle Relay (`zkperp-oracle`)
 
-Off-chain price-relay backend for ZKPerp. Three independent relayers (A, B, C) each read Chainlink feeds, normalise the price, and submit it to **`zkperp_oracle_v3.aleo`**. Quorum is enforced **on-chain** — when 2 of the 3 relayers agree on a price for an asset, the contract commits it to `oracle_prices`. There is no coordinator process and no single key that can write a price alone.
+Off-chain price-relay backend for ZKPerp. Three independent relayers (A, B, C) each read Chainlink feeds, normalise the price, and submit it to **`zkperp_oracle_v4.aleo`**. Quorum is enforced **on-chain** — when 2 of the 3 relayers agree on a price for an asset, the contract commits it to `oracle_prices`. There is no coordinator process and no single key that can write a price alone.
 
-> **Scope:** this is the relayer backend only. The on-chain quorum logic lives in `zkperp_oracle_v3.aleo` and is documented in its own README. The ZKPerp core/bot reads `oracle_prices` from that contract; it does not talk to this service directly.
+> **Scope:** this is the relayer backend only. The on-chain quorum logic lives in `zkperp_oracle_v4.aleo` and is documented in its own README. The ZKPerp core/bot reads `oracle_prices` from that contract; it does not talk to this service directly.
 
 **Stack:** Node ≥ 18, `ethers` 6 (Chainlink reads), `@provablehq/sdk` 0.10.1 (Aleo tx), `dotenv`.
 
@@ -17,7 +17,7 @@ Each relayer runs the same `relayer.js` loop independently, under its own Aleo k
 3. Fetch the current Aleo block height — used as the on-chain `timestamp`.
 4. **Dedup** — skip if the same Chainlink `roundId` was already submitted, *unless* the price is going stale on Aleo (no update in `MAX_BLOCKS_WITHOUT_UPDATE = 120` blocks ≈ 4 min).
 5. Normalise the price to 8 decimals (`normalizeTo8`).
-6. Submit `zkperp_oracle_v3.aleo/submit_price(assetKey, price, timestamp)` via **Provable DPS** (delegated proving), with a local-proving fallback.
+6. Submit `zkperp_oracle_v4.aleo/submit_price(assetKey, price, timestamp)` via **Provable DPS** (delegated proving), with a local-proving fallback.
 7. **Wait for confirmation** before moving to the next market.
 
 Markets are processed **sequentially** (BTC → ETH → SOL) and the three relayers are **staggered** (A=0s, B=60s, C=120s) so they never land `submit_price` in the same block — which would trip the contract's proposal logic. After A and B confirm, the contract reaches 2-of-3 and commits; C usually skips via dedup.
@@ -72,7 +72,7 @@ EVM_RPC_URL_ARB=https://...    # Arbitrum (SOL)
 ### Optional (defaults shown)
 
 ```env
-ORACLE_PROGRAM=zkperp_oracle_v3.aleo
+ORACLE_PROGRAM=zkperp_oracle_v4.aleo
 ALEO_NETWORK=testnet
 ALEO_EXPLORER_API=https://api.explorer.provable.com/v1
 POLL_INTERVAL_MS=120000        # 2-min cycle
@@ -114,14 +114,14 @@ node oracle-sequential.js
 Demo helper (force a price to test downstream liquidation):
 
 ```bash
-node crash-price.js    # submits BTC = $50,000 to zkperp_oracle_v3.aleo
+node crash-price.js    # submits BTC = $50,000 to zkperp_oracle_v4.aleo
 ```
 
 ---
 
 ## Notes
 
-- **On-chain quorum, off-chain relay** — this service only *submits*; the 2-of-3 agreement and the commit to `oracle_prices` happen inside `zkperp_oracle_v3.aleo`. A single compromised relayer key cannot move the price.
+- **On-chain quorum, off-chain relay** — this service only *submits*; the 2-of-3 agreement and the commit to `oracle_prices` happen inside `zkperp_oracle_v4.aleo`. A single compromised relayer key cannot move the price.
 - **Timestamp = Aleo block height** at submission (not Unix time); downstream contracts enforce staleness as `block.height - timestamp <= MAX_PRICE_AGE_BLOCKS`.
 - **Staggering matters** — if all three relayers submit in the same block the contract's proposal can reset; keep the 60s manager stagger (or use `oracle-sequential.js`).
 - Each relayer waits for tx confirmation before the next market, so a full A/B/C cycle across three markets takes a few minutes — expected, not a hang.

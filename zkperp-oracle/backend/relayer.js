@@ -23,7 +23,7 @@
  *   EVM_RPC_URL           - Ethereum RPC (for BTC/ETH feeds)
  *   EVM_RPC_URL_ARB       - Arbitrum RPC (for SOL feed)
  *   POLL_INTERVAL_MS      - polling interval (default 120000)
- *   ORACLE_PROGRAM        - zkperp_oracle_v3.aleo (default)
+ *   ORACLE_PROGRAM        - zkperp_oracle_v4.aleo (default)
  *   ALEO_EXPLORER_API     - explorer API base (default https://api.explorer.provable.com/v1)
  */
 
@@ -39,7 +39,7 @@ dotenv.config();
 const RELAYER_NAME     = process.env.RELAYER_NAME;
 const ALEO_PRIVATE_KEY = process.env.ALEO_PRIVATE_KEY;
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 120_000); // 2 min cycles
-const ORACLE_PROGRAM   = process.env.ORACLE_PROGRAM || 'zkperp_oracle_v3.aleo';
+const ORACLE_PROGRAM   = process.env.ORACLE_PROGRAM || 'zkperp_oracle_v4.aleo';
 const ALEO_NETWORK     = process.env.ALEO_NETWORK || 'testnet';
 const EXPLORER_API     = process.env.ALEO_EXPLORER_API || 'https://api.explorer.provable.com/v1';
 

@@ -131,7 +131,7 @@ async function executeWithDelegated({ buyAuth, sellAuth, depositAuth, token, cre
 
         console.log('[settler] Building proving request...')
         const provingRequest = await pm.provingRequest({
-          programName:  process.env.PROGRAM_ID ?? 'zkdarkpool_v8.aleo',
+          programName:  process.env.PROGRAM_ID ?? 'zkdarkpool_v9.aleo',
           functionName: 'settle_match',
           fee:          0.02,
           privateFee:   false,
@@ -324,7 +324,7 @@ export async function settleMatch(match) {
 
 function printInstructions() {
   console.log('\n[settler] Fill ~/ZK_Darkpool/darkpool-bot/records.json:')
-  console.log(`  1. PROGRAM_ID=${process.env.PROGRAM_ID ?? 'zkdarkpool_v8.aleo'} node provable-scanner.mjs`)
+  console.log(`  1. PROGRAM_ID=${process.env.PROGRAM_ID ?? 'zkdarkpool_v9.aleo'} node provable-scanner.mjs`)
   console.log('     → find OrderAuth (buy), OrderAuth (sell), DepositAuth')
   console.log('  2. PROGRAM_ID=test_usdcx_stablecoin.aleo node provable-scanner.mjs')
   console.log('     → find Token (amount > 0) and Credentials')

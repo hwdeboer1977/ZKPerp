@@ -87,7 +87,7 @@ Each handler builds the Leo inputs in `amm.ts`, attaches the Merkle proof where 
 | `mint_position` | Liquidity | both a USDCx `Token` and an ALEO `credits` record (+ Merkle proof) |
 | `burn_position` | Burn | the LP position record; returns USDCx + ALEO payouts |
 
-> Single-range swaps are quoted and built entirely client-side. Multi-tick-crossing swaps require step amounts from the off-chain orchestrator (`zkcl-amm-bot.mjs`), documented with the contract/bot — not part of this app.
+> The UI quotes and builds **single-range swaps** entirely client-side. Multi-tick-crossing swaps would need per-step amounts computed off-chain; that off-chain step-builder does not exist in this project yet, so multi-tick swaps aren't supported by the app.
 
 ---
 

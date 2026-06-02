@@ -193,7 +193,7 @@ On first start: builds the Merkle tree (slow — one `leo run` per address). Eve
 |---|---|---|
 | `ADMIN_PRIVATE_KEY` | ✓ | Aleo private key of the program deployer |
 | `ALEO_NETWORK_URL` | ✓ | `https://api.explorer.provable.com/v2` |
-| `COMPLIANCE_PROGRAM_ID` | ✓ | `zkperp_compliance_v8b.aleo` |
+| `COMPLIANCE_PROGRAM_ID` | ✓ | `zkperp_compliance_v9.aleo` |
 | `ADMIN_API_KEY` | ✓ | Secret for admin endpoints |
 | `PROVABLE_API_KEY` | ✓ | Provable API key for delegated proving |
 | `PROVABLE_CONSUMER_ID` | ✓ | Provable consumer ID |
@@ -245,7 +245,7 @@ On first start: builds the Merkle tree (slow — one `leo run` per address). Eve
 
 ## On-chain Program
 
-**`zkperp_compliance_v8b.aleo`** — deployed on Aleo testnet. (`v8b` is the fixed redeploy of `v8`; Aleo programs are immutable, so the fix shipped under a new program ID.)
+**`zkperp_compliance_v9.aleo`** — deployed on Aleo testnet. (`v8b` is the fixed redeploy of `v8`; Aleo programs are immutable, so the fix shipped under a new program ID.)
 
 ### Mappings
 
@@ -272,10 +272,10 @@ An `@custom constructor()` runs once at deploy time and writes `self.program_own
 
 ### How `zkperp_core` consumes compliance
 
-`verify_compliance` is exposed for external programs that want a single-call gate. `zkperp_core_v29c` itself does **not** call it — to avoid an extra transition per trade, core imports `zkperp_compliance_v8b.aleo` and reads its mappings directly inside its own finalize blocks:
+`verify_compliance` is exposed for external programs that want a single-call gate. `zkperp_core_v30` itself does **not** call it — to avoid an extra transition per trade, core imports `zkperp_compliance_v9.aleo` and reads its mappings directly inside its own finalize blocks:
 
 ```leo
-let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v8b.aleo::revoked, caller, false);
+let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v9.aleo::revoked, caller, false);
 assert(!is_revoked);
 assert(block.height <= cr.expires_at);
 ```

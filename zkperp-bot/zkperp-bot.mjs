@@ -4,9 +4,9 @@
  * ZKPerp Liquidation + Order Execution Bot v14
  * ====================================
  *
- * Oracle price updates are now handled by zkperp_oracle_v3.aleo directly.
+ * Oracle price updates are now handled by zkperp_oracle_v4.aleo directly.
  * This bot no longer calls update_price or receives POST /oracle/update.
- * Price is read from zkperp_oracle_v3.aleo::oracle_prices on every liquidation tick.
+ * Price is read from zkperp_oracle_v4.aleo::oracle_prices on every liquidation tick.
  *
  * All transaction proving is delegated to Provable's TEE-backed Delegated Proving Service.
  *
@@ -21,7 +21,7 @@
  *   VIEW_KEY               - Orchestrator view key (for record scanning)
  *   PROVABLE_CONSUMER_ID   - Provable API consumer ID
  *   PROVABLE_API_KEY       - Provable API key
- *   ORACLE_PROGRAM_ID      - Oracle program (default: zkperp_oracle_v3.aleo)
+ *   ORACLE_PROGRAM_ID      - Oracle program (default: zkperp_oracle_v4.aleo)
  *   ASSET_ID               - BTC_USD | ETH_USD | SOL_USD
  *   API_PORT               - HTTP port (default: 3001)
  *   FRONTEND_ORIGIN        - CORS origin (default: http://localhost:5173)
@@ -61,7 +61,7 @@ const CONFIG = {
   // SOL bot: PROGRAM_ID=zkperp_sol_v26.aleo  ASSET_ID=SOL_USD
   programId:       process.env.PROGRAM_ID,
   assetId:         process.env.ASSET_ID,
-  oracleProgramId: process.env.ORACLE_PROGRAM_ID || 'zkperp_oracle_v3.aleo',
+  oracleProgramId: process.env.ORACLE_PROGRAM_ID || 'zkperp_oracle_v4.aleo',
   network:         process.env.NETWORK    || 'testnet',
   networkId:       process.env.NETWORK_ID || '1',
 
@@ -82,14 +82,14 @@ const CONFIG = {
   // are now enforced and derived on-chain — see MAINTENANCE_MARGIN_BPS / LIQ_PENALTY_BPS.
 };
 
-// Oracle asset key mapping — matches zkperp_oracle_v3.aleo markets.json
+// Oracle asset key mapping — matches zkperp_oracle_v4.aleo markets.json
 const ORACLE_ASSET_KEYS = {
   'BTC_USD': '1field',
   'ETH_USD': '2field',
   'SOL_USD': '3field',
 };
 
-// ── On-chain constants (must match zkperp_core_v29c.aleo) ───────
+// ── On-chain constants (must match zkperp_core_v30.aleo) ───────
 const PRICE_PRECISION        = 100_000_000_000n; // 1e11
 const MAINTENANCE_MARGIN_BPS = 50_000n;          // 5% of notional → liquidation threshold
 const LIQ_PENALTY_BPS        = 100_000n;         // 10% of collateral → keeper reward (on-chain derived)
@@ -218,7 +218,7 @@ async function fetchJsonPost(url, body) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ORACLE PRICE — reads from zkperp_oracle_v3.aleo
+// ORACLE PRICE — reads from zkperp_oracle_v4.aleo
 // ═══════════════════════════════════════════════════════════════
 
 async function getCurrentOraclePriceFromChain() {
@@ -237,7 +237,7 @@ async function getCurrentOraclePriceFromChain() {
 // HTTP API SERVER
 // ═══════════════════════════════════════════════════════════════
 
-// Mirrors zkperp_core_v29c.aleo::liquidate finalize exactly so the dashboard and
+// Mirrors zkperp_core_v30.aleo::liquidate finalize exactly so the dashboard and
 // the chain agree on what is liquidatable. PnL uses PRICE_PRECISION=1e11, the
 // maintenance margin is 5% of notional (MAINTENANCE_MARGIN_BPS=50_000), and the
 // reward is collateral * 10% (LIQ_PENALTY_BPS=100_000) — all computed on-chain.
@@ -1030,7 +1030,7 @@ function parsePendingOrderFromPlaintext(plaintext) {
 // LIQUIDATION
 // ═══════════════════════════════════════════════════════════════
 
-// Mirrors zkperp_core_v29c.aleo::liquidate finalize step 4 exactly:
+// Mirrors zkperp_core_v30.aleo::liquidate finalize step 4 exactly:
 //   equity = collateral + raw_pnl;  liquidatable iff equity < 5% of notional.
 function calculateMarginRatio(position, price) {
   const { isLong, size, collateral, entryPrice } = position;
@@ -1127,7 +1127,7 @@ async function liquidationTick() {
   isProcessing = true;
 
   try {
-    // Read current price from zkperp_oracle_v3.aleo
+    // Read current price from zkperp_oracle_v4.aleo
     const onChainPrice = await getCurrentOraclePriceFromChain();
     if (onChainPrice) {
       currentOraclePrice = onChainPrice;
@@ -1403,8 +1403,8 @@ async function main() {
   console.log('');
   console.log('╔════════════════════════════════════════════════════════════╗');
   console.log('║  ZKPerp Liquidation + Order Bot v15                        ║');
-  console.log('║  Core: zkperp_core_v29c.aleo (1-of-3 keeper race)         ║');
-  console.log('║  Oracle: zkperp_oracle_v3.aleo (2-of-3 Chainlink quorum)  ║');
+  console.log('║  Core: zkperp_core_v30.aleo (1-of-3 keeper race)         ║');
+  console.log('║  Oracle: zkperp_oracle_v4.aleo (2-of-3 Chainlink quorum)  ║');
   console.log('╚════════════════════════════════════════════════════════════╝');
   console.log('');
   log('BOT', `Program:         ${CONFIG.programId}`);

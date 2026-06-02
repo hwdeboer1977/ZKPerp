@@ -41,3 +41,5 @@ __pycache__/
 voice/venv/
 voice/lib/
 lib/
+leo/AMM/node*
+leo/AMM_devnet/

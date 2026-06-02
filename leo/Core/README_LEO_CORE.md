@@ -1,4 +1,4 @@
-# ZKPerp Core (`zkperp_core_v29c.aleo`)
+# ZKPerp Core (`zkperp_core_v30.aleo`)
 
 The core settlement contract for **ZKPerp**, a privacy-first perpetuals DEX on Aleo. It custodies trader collateral, opens and closes leveraged positions against an LP pool, runs take-profit / stop-loss orders, and liquidates underwater positions. Position parameters (size, entry price, collateral, direction) are never written to public state — only a **commitment hash** is stored on-chain, so the network can verify a position's lifecycle without learning its contents.
 
@@ -7,8 +7,8 @@ This program depends on three companion programs:
 | Import | Role |
 | --- | --- |
 | `test_usdcx_stablecoin.aleo` | The USDCx collateral token (private/public transfers, compliance records). |
-| `zkperp_compliance_v8b.aleo` | KYC/compliance gate — every trader action checks a `ZKPerpComplianceRecord`. |
-| `zkperp_oracle_v3.aleo` | Price feed. Prices are committed only after a **2-of-3 oracle quorum** agrees, and reads enforce a staleness guard. |
+| `zkperp_compliance_v9.aleo` | KYC/compliance gate — every trader action checks a `ZKPerpComplianceRecord`. |
+| `zkperp_oracle_v4.aleo` | Price feed. Prices are committed only after a **2-of-3 oracle quorum** agrees, and reads enforce a staleness guard. |
 
 ---
 
@@ -18,9 +18,9 @@ This program depends on three companion programs:
 
 **Slot-based accounting.** Each trader holds two `PositionSlot` records (slot `0u8` for longs, `1u8` for shorts) created once via `initialize_slots`. A slot is either empty or holds one open position. LPs hold an `LPSlot`.
 
-**Oracle-gated prices.** Every price-sensitive `finalize` reads `zkperp_oracle_v3.aleo::oracle_prices`, asserts the supplied price equals the committed oracle price, and asserts the price is no older than `MAX_PRICE_AGE_BLOCKS` (150 blocks ≈ 5 min). The oracle itself only publishes a price after a 2-of-3 node quorum.
+**Oracle-gated prices.** Every price-sensitive `finalize` reads `zkperp_oracle_v4.aleo::oracle_prices`, asserts the supplied price equals the committed oracle price, and asserts the price is no older than `MAX_PRICE_AGE_BLOCKS` (150 blocks ≈ 5 min). The oracle itself only publishes a price after a 2-of-3 node quorum.
 
-**Compliance on every trader action.** Trader-facing functions take a `ZKPerpComplianceRecord` and assert in `finalize` that the caller isn't revoked and that the record hasn't expired. The record is unforgeable — only `zkperp_compliance_v8b.aleo::issue_compliance` can mint it, and that function already verified the trader's Merkle-set membership against the active root at issuance time — so requiring the record as a typed input *is* the membership check. The core deliberately does **not** re-assert the record's `issued_under` against the live compliance root: doing so would invalidate every existing trader whenever a new user registers and rotates the root. Keeper/orchestrator functions (`liquidate`, `update_pool_state`, `update_net_pnl`) are exempt, since they aren't trader actions.
+**Compliance on every trader action.** Trader-facing functions take a `ZKPerpComplianceRecord` and assert in `finalize` that the caller isn't revoked and that the record hasn't expired. The record is unforgeable — only `zkperp_compliance_v9.aleo::issue_compliance` can mint it, and that function already verified the trader's Merkle-set membership against the active root at issuance time — so requiring the record as a typed input *is* the membership check. The core deliberately does **not** re-assert the record's `issued_under` against the live compliance root: doing so would invalidate every existing trader whenever a new user registers and rotates the root. Keeper/orchestrator functions (`liquidate`, `update_pool_state`, `update_net_pnl`) are exempt, since they aren't trader actions.
 
 ---
 
@@ -137,7 +137,7 @@ Because positions are private, only a holder of the position **preimage** can co
 
 ## Deployment & test sequence
 
-1. Deploy `zkperp_core_v29c.aleo` (companion programs must already be deployed).
+1. Deploy `zkperp_core_v30.aleo` (companion programs must already be deployed).
 2. `set_liquidator` × 3 to register keepers `0`, `1`, `2`.
 3. Fund the LP pool via `add_liquidity`.
 4. A trader runs `initialize_slots`, then `open_position` — this mints three `LiquidationAuth` records, one to each keeper.

@@ -19,7 +19,7 @@ struct MerkleProof {
     path: [MerkleNode; 10],
 }
 
-program zkperp_compliance_v8b.aleo {
+program zkperp_compliance_v9.aleo {
 
     record ZKPerpComplianceRecord {
         owner:        address,
@@ -32,10 +32,14 @@ program zkperp_compliance_v8b.aleo {
     mapping admin: u8 => address;
     mapping issued_nullifiers: field => bool;
 
+
+    // NOT UPGRADABLE
     @custom
     constructor() {
-        Mapping::set(admin, 0u8, self.program_owner);
+        assert_eq(self.edition, 0u16);          // permanently non-upgradeable
+        Mapping::set(admin, 0u8, self.program_owner);     // deployer = admin, atomic, no frontrun
     }
+
 
     fn update_root(public new_root: field) -> Final {
         let caller: address = self.caller;

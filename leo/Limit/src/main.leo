@@ -2,7 +2,7 @@
 //
 // Separate program from core to keep the 32-call-per-transaction limit manageable.
 // Traders place limit orders here; the orchestrator bot executes them when price
-// crosses the trigger. Price reads come from zkperp_oracle_v3.aleo.
+// crosses the trigger. Price reads come from zkperp_oracle_v4.aleo.
 //
 // Flow:
 //   1. Trader calls place_limit_order — records intent, reserves PositionSlot
@@ -14,8 +14,8 @@
 // Compliance required on place and cancel. Execution is orchestrator-only.
 
 import test_usdcx_stablecoin.aleo;
-import zkperp_compliance_v8b.aleo;
-import zkperp_oracle_v3.aleo;
+import zkperp_compliance_v9.aleo;
+import zkperp_oracle_v4.aleo;
 
 struct LimitOrderIdInput {
     trader: address,
@@ -24,10 +24,11 @@ struct LimitOrderIdInput {
     asset_id: field,
 }
 
-program zkperp_limit_v26.aleo {
+program zkperp_limit_v30.aleo {
 
     @custom
     constructor() {
+        assert_eq(self.edition, 0u16);          // permanently non-upgradeable
         Mapping::set(roles, 0u8, self.program_owner); // admin
         Mapping::set(roles, 1u8, self.program_owner); // orchestrator
     }
@@ -75,7 +76,7 @@ program zkperp_limit_v26.aleo {
     // ══════════════════════════════════════════════════════════════
 
     fn place_limit_order(
-        cr: zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord,
+        cr: zkperp_compliance_v9.aleo::ZKPerpComplianceRecord,
         token: test_usdcx_stablecoin.aleo::Token,
         public asset_id: field,
         private is_long: bool,
@@ -85,7 +86,7 @@ program zkperp_limit_v26.aleo {
         merkle_proof: [test_usdcx_stablecoin.aleo::MerkleProof; 2],
         private orchestrator: address,
         nonce: field,
-    ) -> (zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord, LimitOrderReceipt, ExecLimitAuth, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
+    ) -> (zkperp_compliance_v9.aleo::ZKPerpComplianceRecord, LimitOrderReceipt, ExecLimitAuth, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
         assert(size_usdc >= 100u64);
         let collateral_u64: u64 = collateral as u64;
         let leverage_scaled: u64 = (size_usdc * 100u64) / collateral_u64;
@@ -140,9 +141,9 @@ program zkperp_limit_v26.aleo {
 
         return (cr, receipt, auth, usdcx_compliance, change_token, final {
             // ── Compliance check ──
-            let active_root: field = Mapping::get(zkperp_compliance_v8b.aleo::compliance_root, 0u8);
+            let active_root: field = Mapping::get(zkperp_compliance_v9.aleo::compliance_root, 0u8);
             assert_eq(cr_issued_under, active_root);
-            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v8b.aleo::revoked, caller, false);
+            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v9.aleo::revoked, caller, false);
             assert(!is_revoked);
             assert(block.height <= cr_expires_at);
             // ── End compliance ──
@@ -153,8 +154,8 @@ program zkperp_limit_v26.aleo {
             let expected_orch: address = Mapping::get(roles, 1u8);
             assert_eq(orchestrator, expected_orch);
             // ── Oracle staleness check ──
-            let price_data: zkperp_oracle_v3.aleo::PriceData =
-                Mapping::get(zkperp_oracle_v3.aleo::oracle_prices, asset_id);
+            let price_data: zkperp_oracle_v4.aleo::PriceData =
+                Mapping::get(zkperp_oracle_v4.aleo::oracle_prices, asset_id);
             assert(block.height - price_data.timestamp <= MAX_PRICE_AGE_BLOCKS);
             // ── End oracle check ──
             Mapping::set(pending_limit_orders, order_id, true);
@@ -188,8 +189,8 @@ program zkperp_limit_v26.aleo {
         return (usdcx_compliance, collateral_token, final {
             transfer_final.run();
             // ── Oracle price trigger check ──
-            let price_data: zkperp_oracle_v3.aleo::PriceData =
-                Mapping::get(zkperp_oracle_v3.aleo::oracle_prices, auth.asset_id);
+            let price_data: zkperp_oracle_v4.aleo::PriceData =
+                Mapping::get(zkperp_oracle_v4.aleo::oracle_prices, auth.asset_id);
             assert(block.height - price_data.timestamp <= MAX_PRICE_AGE_BLOCKS);
             // Long limit: execute when price <= trigger (buying the dip)
             // Short limit: execute when price >= trigger (selling the top)
@@ -214,9 +215,9 @@ program zkperp_limit_v26.aleo {
     // ══════════════════════════════════════════════════════════════
 
     fn cancel_limit_order(
-        cr: zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord,
+        cr: zkperp_compliance_v9.aleo::ZKPerpComplianceRecord,
         receipt: LimitOrderReceipt,
-    ) -> (zkperp_compliance_v8b.aleo::ZKPerpComplianceRecord, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
+    ) -> (zkperp_compliance_v9.aleo::ZKPerpComplianceRecord, test_usdcx_stablecoin.aleo::ComplianceRecord, test_usdcx_stablecoin.aleo::Token, Final) {
         assert_eq(self.signer, receipt.owner);
 
         let cr_issued_under: field = cr.issued_under;
@@ -233,9 +234,9 @@ program zkperp_limit_v26.aleo {
 
         return (cr, usdcx_compliance, refund_token, final {
             // ── Compliance check ──
-            let active_root: field = Mapping::get(zkperp_compliance_v8b.aleo::compliance_root, 0u8);
+            let active_root: field = Mapping::get(zkperp_compliance_v9.aleo::compliance_root, 0u8);
             assert_eq(cr_issued_under, active_root);
-            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v8b.aleo::revoked, caller, false);
+            let is_revoked: bool = Mapping::get_or_use(zkperp_compliance_v9.aleo::revoked, caller, false);
             assert(!is_revoked);
             assert(block.height <= cr_expires_at);
             // ── End compliance ──

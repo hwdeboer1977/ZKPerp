@@ -11,10 +11,11 @@
 //   roles[2u8] = oracle node C (Aleo address)
 //   roles[3u8] = admin (can update roles)
 
-program zkperp_oracle_v3.aleo {
+program zkperp_oracle_v4.aleo {
 
     @custom
     constructor() {
+        assert_eq(self.edition, 0u16);          // permanently non-upgradeable
         Mapping::set(roles, 0u8, self.program_owner);
         Mapping::set(roles, 1u8, self.program_owner);
         Mapping::set(roles, 2u8, self.program_owner);

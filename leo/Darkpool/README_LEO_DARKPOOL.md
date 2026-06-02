@@ -4,7 +4,7 @@
 
 A dark pool is a private exchange where large orders can be matched without revealing trade details to the market before execution. ZK Darkpool implements this using Aleo's zero-knowledge proof system — order contents are encrypted on-chain, settlement is provably fair, and counterparty identity is never revealed.
 
-Live on Aleo testnet: [`zkdarkpool_v8.aleo`](https://testnet.explorer.provable.com/program/zkdarkpool_v8.aleo)
+Live on Aleo testnet: [`zkdarkpool_v9.aleo`](https://testnet.explorer.provable.com/program/zkdarkpool_v9.aleo)
 
 ---
 
@@ -40,7 +40,7 @@ Trader B (seller) →  encrypted OrderAuth  →  Operator Bot
 
 ## Architecture
 
-### Smart Contract: `zkdarkpool_v8.aleo`
+### Smart Contract: `zkdarkpool_v9.aleo`
 
 The Leo contract enforces all settlement rules as zero-knowledge proofs. The operator cannot cheat — every `settle_match` execution is verified on-chain.
 
@@ -244,7 +244,7 @@ Every BATCH_BLOCKS blocks:
 
 **Buyer-side, by design — but not yet collected on-chain.** The 0.10% protocol fee is computed as `(gross_cost × 10) / 10_000` and is *intended* to be borne by the buyer, with the seller receiving the full clearing-price-multiplied amount without deduction. Both `FillReceipt` records carry a `fee_paid` field: the buyer's shows the computed fee, the seller's is always `0u64`.
 
-⚠️ **Current contract behavior:** as of `zkdarkpool_v8.aleo`, `settle_match` does **not** actually collect the fee. The buyer is charged exactly `gross_cost` (the check is `buyer_token.amount >= gross_cost`, not `gross_cost + fee`) and the seller receives exactly `gross_cost`; the `fee` value is only written to the buyer's `FillReceipt.fee_paid` and added to the `fee_vault[0u8]` counter via `accrue_fee`. No USDCx is moved to the program, so `fee_vault` is an unbacked accounting counter and `withdraw_fees` decrements it without a corresponding on-chain balance. Collecting the fee for real (charging the buyer `gross_cost + fee` and routing `fee` to the program) is a pending contract change — see Known Limitations.
+⚠️ **Current contract behavior:** as of `zkdarkpool_v9.aleo`, `settle_match` does **not** actually collect the fee. The buyer is charged exactly `gross_cost` (the check is `buyer_token.amount >= gross_cost`, not `gross_cost + fee`) and the seller receives exactly `gross_cost`; the `fee` value is only written to the buyer's `FillReceipt.fee_paid` and added to the `fee_vault[0u8]` counter via `accrue_fee`. No USDCx is moved to the program, so `fee_vault` is an unbacked accounting counter and `withdraw_fees` decrements it without a corresponding on-chain balance. Collecting the fee for real (charging the buyer `gross_cost + fee` and routing `fee` to the program) is a pending contract change — see Known Limitations.
 
 ---
 
@@ -289,7 +289,7 @@ Users can recover funds before expiry without operator cooperation: sellers call
 ## Deployment
 
 ### Contract
-- **Program ID:** `zkdarkpool_v8.aleo`
+- **Program ID:** `zkdarkpool_v9.aleo`
 - **Network:** Aleo Testnet
 - **Deploy block:** `15,681,876`
 - **Deployed:** April 10, 2026
@@ -297,7 +297,7 @@ Users can recover funds before expiry without operator cooperation: sellers call
 ### Bot
 Runs as a Node.js process. Requires:
 ```env
-PROGRAM_ID=zkdarkpool_v8.aleo
+PROGRAM_ID=zkdarkpool_v9.aleo
 OPERATOR_PRIVATE_KEY=APrivateKey1...
 OPERATOR_VIEW_KEY=AViewKey1...
 OPERATOR_ADDRESS=aleo1...
@@ -371,7 +371,7 @@ npm run build         # production build
 
 ## Known Limitations & Future Work
 
-**Stale file header** — line 3 of `main.leo` reads `zkdarkpool_v5.aleo` but the program declaration at line 64 is `zkdarkpool_v8.aleo`. Cosmetic stale comment from v5→v8 iterations, no functional impact.
+**Stale file header** — line 3 of `main.leo` reads `zkdarkpool_v9.aleo` but the program declaration at line 64 is `zkdarkpool_v9.aleo`. Cosmetic stale comment from v5→v8 iterations, no functional impact.
 
 **Fee computed but not collected** — `settle_match` computes the 0.10% fee and increments the `fee_vault[0u8]` counter, but it does not charge the buyer for it or move any USDCx to the program. The buyer pays `gross_cost`, the seller receives `gross_cost`, and `fee_vault` is therefore an unbacked counter; `withdraw_fees` decrements it without a real balance behind it. A future contract revision should assert `buyer_token.amount >= gross_cost + fee` and route `fee` to the program (or deduct it from the seller's payout) so the vault is backed by actual USDCx. The README's Fee Model section documents both the intent and the current behavior.
 

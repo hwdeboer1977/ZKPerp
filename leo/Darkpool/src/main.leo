@@ -1,6 +1,6 @@
 
 // ============================================================
-// zkdarkpool_v5.aleo — Leo 4.0
+// zkdarkpool_v9.aleo — Leo 4.0
 // Privacy-preserving batch auction dark pool
 // ============================================================
 //
@@ -61,7 +61,7 @@ final fn accrue_fee(fee: u64) {
 import test_usdcx_stablecoin.aleo;
 
 
-program zkdarkpool_v8.aleo {
+program zkdarkpool_v9.aleo {
 
 
     // --------------------------------------------------------
@@ -157,6 +157,7 @@ program zkdarkpool_v8.aleo {
     // --------------------------------------------------------
     @custom
     constructor() {
+        assert_eq(self.edition, 0u16);          // permanently non-upgradeable
         Mapping::set(roles, ROLE_ADMIN,    self.program_owner);
         Mapping::set(roles, ROLE_OPERATOR, self.program_owner);
     }

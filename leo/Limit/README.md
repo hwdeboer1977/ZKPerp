@@ -9,15 +9,15 @@ This program depends on three companion programs:
 | Import | Role |
 | --- | --- |
 | `test_usdcx_stablecoin.aleo` | The USDCx collateral token (private/public transfers, compliance records). |
-| `zkperp_compliance_v8b.aleo` | KYC/compliance gate — `place` and `cancel` check a `ZKPerpComplianceRecord`. |
-| `zkperp_oracle_v3.aleo` | Price feed. Reads enforce a staleness guard and supply the trigger comparison. |
+| `zkperp_compliance_v9.aleo` | KYC/compliance gate — `place` and `cancel` check a `ZKPerpComplianceRecord`. |
+| `zkperp_oracle_v4.aleo` | Price feed. Reads enforce a staleness guard and supply the trigger comparison. |
 
 ---
 
 ## How It Works
 
 1. **Place.** The trader calls `place_limit_order`, locking USDCx collateral into the program vault. The contract issues a `LimitOrderReceipt` (to the trader, as proof) and an `ExecLimitAuth` (to the orchestrator, carrying everything needed to execute).
-2. **Monitor.** The orchestrator bot watches `zkperp_oracle_v3.aleo` prices. When the price crosses the order's `trigger_price`, it calls `execute_limit_order`.
+2. **Monitor.** The orchestrator bot watches `zkperp_oracle_v4.aleo` prices. When the price crosses the order's `trigger_price`, it calls `execute_limit_order`.
 3. **Execute.** `execute_limit_order` verifies the trigger against the fresh oracle price, refunds the escrowed collateral back to the trader as a private USDCx token, and clears the order's on-chain state. The orchestrator then opens the actual position in the target core program (`zkperp_core` / `zkperp_eth` / `zkperp_sol`) using the refunded collateral.
 4. **Cancel.** Before execution, the trader can call `cancel_limit_order` to reclaim their collateral and invalidate the order.
 
@@ -173,7 +173,7 @@ The `opening_fee` (the difference between the deposited collateral and `collater
 
 - **Program ID:** `zkperp_limit_v26.aleo`
 - **Network:** Aleo Testnet
-- Companion programs (`test_usdcx_stablecoin.aleo`, `zkperp_compliance_v8b.aleo`, `zkperp_oracle_v3.aleo`) must already be deployed.
+- Companion programs (`test_usdcx_stablecoin.aleo`, `zkperp_compliance_v9.aleo`, `zkperp_oracle_v4.aleo`) must already be deployed.
 
 The orchestrator address (`roles[1u8]`) can be operated from a different key than admin if `set_operator`-style rotation is later added; as written, both roles are seeded to the deployer and there is no rotation transition in this program.
 

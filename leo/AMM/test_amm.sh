@@ -2,12 +2,12 @@
 # leo deploy --network testnet --broadcast
 
 
-source .env && snarkos developer execute zkperp_amm_v3.aleo initialize_pool \
+source .env && snarkos developer execute zkperp_amm_v6.aleo initialize_pool \
   --private-key $PRIVATE_KEY \
   --query https://api.explorer.provable.com/v1 \
   --broadcast https://api.explorer.provable.com/v1/testnet/transaction/broadcast \
   --network 1 \
-  -- 5833372668713516032u128 -23040i32
+  -- 58333726687135158849u128 23027i32
 
   source .env && snarkos developer execute test_usdcx_stablecoin.aleo transfer_public_to_private \
   $ADDRESS \

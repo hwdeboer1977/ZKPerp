@@ -1,4 +1,4 @@
-# zkperp_amm_v4 — Concentrated Liquidity AMM on Aleo
+# zkperp_amm_v6 — Concentrated Liquidity AMM on Aleo
 
 A Uniswap v3-style Concentrated Liquidity AMM built in Leo 4.0 for the Aleo blockchain.  
 Trading pair: **USDCx / ALEO** · Fee tier: **0.3%** · Network: **Testnet**
@@ -9,7 +9,7 @@ Trading pair: **USDCx / ALEO** · Fee tier: **0.3%** · Network: **Testnet**
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    zkperp_amm_v4.aleo                    │
+│                    zkperp_amm_v6.aleo                    │
 │                                                          │
 │  Transitions (ZK-proven, private inputs)                 │
 │  ┌─────────────────┐  ┌──────────────────┐              │
@@ -23,12 +23,6 @@ Trading pair: **USDCx / ALEO** · Fee tier: **0.3%** · Network: **Testnet**
 │  │pool_state│ │ tick_info │ │ aleo_reserve │           │
 │  └──────────┘ └───────────┘ └──────────────┘           │
 └─────────────────────────────────────────────────────────┘
-         ▲
-         │ pre-computes swap steps
-┌─────────────────────┐
-│   Orchestrator      │  (zkcl-amm-bot.mjs)
-│   Node.js / REST    │  POST /quote /swap /mint /burn
-└─────────────────────┘
          ▲
 ┌─────────────────────┐
 │   React Frontend    │  (amm-app/)
@@ -45,6 +39,11 @@ Trading pair: **USDCx / ALEO** · Fee tier: **0.3%** · Network: **Testnet**
 - Tick spacing: **60** (matches Uniswap v3 0.3% pools)
 - sqrt_price stored as Q64 fixed-point: `sqrt(price) * 2^64`
 - In-range positions earn fees; out-of-range positions are 100% in one token
+
+### Admin & Upgradeability
+- **Non-upgradeable.** The `@custom` constructor asserts `self.edition == 0u16`, so any upgrade (edition > 0) is rejected on-chain. Iterating means deploying a fresh program (`v6`, …), not upgrading this one.
+- **Admin = deployer.** The constructor sets `admin_address = self.program_owner` — atomic at deploy, no front-run window. Admin-gated entry points (`initialize_pool`) check `assert_eq(self.caller, admin_address.unwrap())`.
+- The admin lives in a **`storage` variable**, not a mapping. (An earlier draft kept admin in a `roles` mapping while the constructor wrote a storage variable — the two never matched, so the admin check reverted on an unset key. Both now read/write the same `admin_address` slot.)
 
 ### Leo 4.0 Constraints & Solutions
 
@@ -67,18 +66,12 @@ step2: { tick_next: 887221, ...0... }
 step3: { tick_next: 887221, ...0... }
 ```
 
-The contract verifies: `sum(step.amount_in_step) == total_amount_in`
+The contract verifies `sum(step.amount_in_step) <= total_amount_in` (and likewise for the out and fee fields); the leftover is covered by the terminal segment after `step3`.
 
-> `TickStep` also carries `sqrt_price_next`, `liquidity_net`, and `liquidity_net_is_negative` (set per crossing by the orchestrator); only the amount fields are shown above for brevity.
+> `TickStep` also carries `sqrt_price_next`, `liquidity_net`, and `liquidity_net_is_negative` (populated per crossing when building a multi-tick swap); only the amount fields are shown above for brevity.
 
-### Orchestrator Requirement
-For tick-crossing swaps, an orchestrator must:
-1. Read `tick_info` mappings from chain
-2. Simulate tick crossings off-chain
-3. Fill step0-3 with correct amounts per crossing
-4. Submit verified inputs to the contract
-
-This is the standard ZK pattern: **prover computes off-chain, verifier checks on-chain**.
+### Multi-tick swaps (not implemented)
+A swap that crosses initialized ticks needs its per-step amounts (`step0..step3`) computed off-chain: read `tick_info` from chain, simulate the crossings, fill the steps, and submit the verified inputs. That off-chain step-builder isn't built yet, so the app only supports single-range swaps (everything in `step0`). This is the standard ZK pattern: **prover computes off-chain, verifier checks on-chain**.
 
 ---
 
@@ -106,7 +99,7 @@ fn initialize_pool(
     public initial_tick:           i32,   // initial tick
 ) -> Final
 ```
-Sets up pool state. Admin-only (`roles[0]`); can only be called once (`is_init` guard).
+Sets up pool state. Admin-only — checks `self.caller` against the `admin_address` storage variable (set to the deployer in the constructor); can only be called once (`is_init` guard).
 
 ### `mint_position`
 ```leo
@@ -139,8 +132,6 @@ Deposits USDCx (token0) and ALEO (token1) and returns an `LPPosition` record plu
 ```leo
 fn burn_position(
     position: LPPosition,         // private: LP record to burn
-    public fee_growth_inside_0: u128,
-    public fee_growth_inside_1: u128,
     public amount_0_out: u64,     // USDCx to withdraw
     public amount_1_out: u64,     // ALEO to withdraw
     public sqrt_price_x64: u128,
@@ -162,6 +153,8 @@ fn swap_buy(
     public total_amount_in:  u64,   // USDCx in (gross, includes fee)
     public total_amount_out: u64,   // ALEO out
     public total_fee:        u64,   // fee paid (0.3%)
+    public min_amount_out:   u64,   // slippage floor (revert if out < this)
+    public deadline:         u32,   // max block height for execution
     public sqrt_price_final: u128,  // price after swap
     public tick_final:       i32,
     public step0: TickStep,         // tick crossing steps (SENTINEL if unused)
@@ -185,6 +178,8 @@ fn swap_sell(
     public total_amount_in:  u64,   // ALEO in (gross, includes fee)
     public total_amount_out: u64,   // USDCx out
     public total_fee:        u64,
+    public min_amount_out:   u64,
+    public deadline:         u32,
     public sqrt_price_final: u128,
     public tick_final:       i32,
     public step0: TickStep,
@@ -203,15 +198,20 @@ The public params match `swap_buy`, but the private token inputs are mirrored: `
 
 ---
 
-## Mappings (Public State)
+## On-Chain State (Public)
 
+### Mappings (per-key / singleton-at-`0u8`)
 | Mapping | Key | Value | Description |
 |---------|-----|-------|-------------|
 | `pool_state` | `0u8` | `PoolState` | Current price, liquidity, fee accumulators |
 | `tick_info` | `field` | `TickInfo` | Per-tick liquidity net and fee growth |
 | `aleo_reserve` | `0u8` | `u64` | ALEO held by the pool |
-| `roles` | `u8` | `address` | Admin role (slot 0) |
 | `is_init` | `u8` | `bool` | Pool initialization flag |
+
+### Storage variables (singletons)
+| Variable | Type | Description |
+|----------|------|-------------|
+| `admin_address` | `address` | Admin. Set to `self.program_owner` in the constructor at deploy; read via `admin_address.unwrap()`. Replaces the former `roles` mapping. |
 
 **Tick key formula**: `(tick as i64 + 2_147_483_647i64) as u64 as field`  
 Example: tick `-30000` → key `2147453647field`
@@ -297,7 +297,6 @@ leo execute burn_position \
   --network testnet --broadcast \
   --consensus-heights 0,1,2,3,4,5,6,7,8,9,10,11,12,13 --yes \
   -- 'LP_POSITION_RECORD' \
-     '0u128' '0u128' \
      '9999999u64' '1621323u64' \
      'CURRENT_SQRT_PRICE' 'CURRENT_TICK'
 ```
@@ -306,16 +305,13 @@ leo execute burn_position \
 
 ## Known Issues & Limitations
 
-### 1. `term_diff` assert commented out
-The terminal step verification assert is disabled for single-range swaps. For tick-crossing swaps with a proper orchestrator, this should be re-enabled.
-
-### 2. Debug mappings in devnet contract
+### 1. Debug mappings in devnet contract
 `main_devnet.leo` contains `dbg_u128`, `dbg_u64`, `dbg_bool` mappings used during debugging. Remove before production deployment.
 
-### 3. Orchestrator required for tick-crossing swaps
-Swaps crossing tick boundaries require off-chain computation of step amounts. The `zkcl-amm-bot.mjs` orchestrator provides `buildSwapSteps()` for this.
+### 2. Multi-tick swaps not implemented
+Swaps crossing tick boundaries need off-chain computation of the per-step amounts; that step-builder doesn't exist yet, so only single-range swaps (everything in `step0`) work today.
 
-### 4. Max 4 tick crossings per swap
+### 3. Max 4 tick crossings per swap
 The 4-step unrolling limits crossings to 4 per transaction. Large swaps through many liquidity ranges must be split.
 
 ---
@@ -327,8 +323,6 @@ zkperp_amm/
 ├── src/
 │   ├── main.leo              # Testnet contract (with USDCx integration)
 │   └── main_devnet.leo       # Devnet contract (mock USDCx, debug mappings)
-├── orchestrator/
-│   └── zkcl-amm-bot.mjs     # REST API orchestrator
 ├── amm-app/                  # React frontend
 │   └── src/
 │       ├── App.tsx           # 3-tab UI (Swap / Liquidity / Burn)
@@ -348,3 +342,4 @@ zkperp_amm/
 5. **Q64 values overflow JavaScript `Number`** — divide by `2^32` using bigint before converting to float.
 6. **`final{}` is atomic** — if any line fails, no mapping writes occur (use debug mappings to bisect).
 7. **Private inputs are available in `final{}`** via capture — but not re-readable from mappings.
+8. **Singleton state belongs in `storage` variables** (read via `.unwrap()` / `.unwrap_or()`), not a mapping keyed at `0u8`. If you mix the two, make sure every gate reads the *same* slot the constructor writes — a constructor that sets a `storage` admin while a function checks a `roles` mapping reverts on the unset key.

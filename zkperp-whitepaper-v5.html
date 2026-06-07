@@ -132,10 +132,10 @@
     <h1>ZKPerp — Privacy-First<br><span>Perpetual Futures</span></h1>
     <p class="cover-subtitle">A zero-knowledge perpetual DEX built natively on the Aleo blockchain. Position sizes, entry prices, leverage, and PnL are cryptographically private by default — hidden from all other market participants, including the protocol itself.</p>
     <div class="cover-meta">
-      <div class="cover-meta-item"><div class="label">Protocol</div><div class="value">zkperp_core_v30.aleo · zkperp_core_eth_v29c.aleo · zkperp_core_sol_v29c.aleo · zkperp_oracle_v4.aleo · zkperp_compliance_v9.aleo · zkperp_amm_v4.aleo · zkdarkpool_v9.aleo · test_usdcx_stablecoin.aleo</div></div>
+      <div class="cover-meta-item"><div class="label">Protocol</div><div class="value">zkperp_core_v30.aleo · zkperp_core_eth_v29c.aleo · zkperp_core_sol_v29c.aleo · zkperp_oracle_v4.aleo · zkperp_compliance_v9.aleo · zkperp_amm_v6.aleo · zkdarkpool_v9.aleo · test_usdcx_stablecoin.aleo</div></div>
       <div class="cover-meta-item"><div class="label">Network</div><div class="value">Aleo Testnet</div></div>
       <div class="cover-meta-item"><div class="label">Author</div><div class="value">Henk-Wim de Boer</div></div>
-      <div class="cover-meta-item"><div class="label">Version</div><div class="value">v29c · May 2026</div></div>
+      <div class="cover-meta-item"><div class="label">Version</div><div class="value">v30 · May 2026</div></div>
     </div>
     <div class="cover-badges">
       <span class="cover-badge green">● Aleo Testnet Live</span>
@@ -143,7 +143,7 @@
       <span class="cover-badge">● Leo 4.0</span>
       <span class="cover-badge">● MIT License</span>
       <span class="cover-badge">● 2-of-3 On-Chain Oracle Quorum</span>
-      <span class="cover-badge green">● Commit-Verified Close + Liquidate (v29c)</span>
+      <span class="cover-badge green">● Commit-Verified Close + Liquidate (v30)</span>
       <span class="cover-badge green">● ZK Dark Pool Live</span>
       <span class="cover-badge green">● KYC Compliance Layer</span>
     </div>
@@ -242,40 +242,77 @@
     </div>
     <p>ZKPerp consists of six integrated layers. Each layer has a clearly defined responsibility and trust boundary.</p>
 
-    <pre>
-┌──────────────────────────────────────────────────────────────────┐
-│                 Frontend — React / TypeScript / Vercel           │
-│  Trade · Liquidity · ZK Darkpool · Portfolio · Compliance        │
-└─────────────────────────┬────────────────────────────────────────┘
-                          │ requestRecords / execute / Unshield
-                          ▼
-                  ┌───────────────┐
-                  │ Shield Wallet │  Signs txs · Unshields private records
-                  └──────┬────────┘
-                         │
-                         ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                     Aleo Testnet                                 │
-│  zkperp_core_v30  · zkperp_core_eth_v29c · zkperp_core_sol_v29c │
-│  zkperp_oracle_v4  · zkperp_compliance_v9                        │
-│  zkdarkpool_v9     · zkperp_amm_v4                               │
-│                                                                  │
-│  Private: PositionSlot · LiquidationAuth · LPSlot                │
-│           ExecTPSLAuth · ComplianceRecord · OrderAuth            │
-│  Public:  pool_state · oracle_prices · position_commits          │
-│           compliance_root · active_position_ids · pending_orders │
-└─────────────────────────┬────────────────────────────────────────┘
-                          ▲
-      liquidate · execute_tp_sl · submit_price · update_root
-                          │
-┌──────────────────────────────────────────────────────────────────┐
-│              Infrastructure — Vultr VPS (Ubuntu 24.04)           │
-│                                                                  │
-│  zkperp-bot        zkperp-oracle         compliance-server       │
-│  Orchestrator      3 independent         KYC + BHP256            │
-│  + liquidation     Chainlink relayers    Merkle tree             │
-│                    → oracle_v3.aleo                              │
-└──────────────────────────────────────────────────────────────────┘</pre>
+    <figure class="diagram">
+<svg viewBox="0 0 760 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ZKPerp system architecture: the frontend signs transactions through the Shield Wallet down to Aleo testnet programs holding private records and public mappings, while Vultr VPS services issue privileged calls back up to the chain.">
+  <defs>
+    <marker id="ap-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="#6b7280" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <!-- Frontend -->
+  <rect x="120" y="30" width="520" height="58" rx="8" fill="#e9f6fd" stroke="#38bdf8" stroke-width="1"/>
+  <text x="380" y="55" text-anchor="middle" font-family="'IBM Plex Sans',sans-serif" font-weight="600" font-size="14" fill="#0369a1">Frontend &#8212; React / TypeScript / Vercel</text>
+  <text x="380" y="75" text-anchor="middle" font-family="'IBM Plex Sans',sans-serif" font-weight="400" font-size="12.5" fill="#3d4451">Trade &#183; Liquidity &#183; ZK Darkpool &#183; Portfolio &#183; Compliance</text>
+
+  <line x1="380" y1="88" x2="380" y2="128" stroke="#6b7280" stroke-width="1.2" marker-end="url(#ap-arrow)"/>
+  <text x="402" y="112" text-anchor="start" font-family="'DM Mono',monospace" font-size="12" fill="#6b7280">requestRecords &#183; execute &#183; Unshield</text>
+
+  <!-- Shield Wallet -->
+  <rect x="240" y="130" width="280" height="52" rx="8" fill="#f5f0e8" stroke="#d8d2c6" stroke-width="1"/>
+  <text x="380" y="154" text-anchor="middle" font-family="'IBM Plex Sans',sans-serif" font-weight="600" font-size="14" fill="#0d1117">Shield Wallet</text>
+  <text x="380" y="172" text-anchor="middle" font-family="'IBM Plex Sans',sans-serif" font-weight="400" font-size="12.5" fill="#3d4451">Signs txs &#183; unshields private records</text>
+
+  <line x1="380" y1="182" x2="380" y2="214" stroke="#6b7280" stroke-width="1.2" marker-end="url(#ap-arrow)"/>
+
+  <!-- Aleo testnet container -->
+  <rect x="40" y="216" width="680" height="296" rx="12" fill="#ffffff" stroke="#e5e0d8" stroke-width="1"/>
+  <text x="380" y="240" text-anchor="middle" font-family="'IBM Plex Sans',sans-serif" font-weight="600" font-size="14" fill="#0d1117">Aleo testnet</text>
+
+  <!-- Smart contracts -->
+  <rect x="64" y="256" width="632" height="84" rx="8" fill="#e9f6fd" stroke="#7dd3fc" stroke-width="1"/>
+  <text x="380" y="277" text-anchor="middle" font-family="'IBM Plex Sans',sans-serif" font-weight="600" font-size="13" fill="#0369a1">Smart contracts</text>
+  <text x="380" y="300" text-anchor="middle" font-family="'DM Mono',monospace" font-size="12.5" fill="#0369a1">zkperp_core_v30 &#183; zkperp_core_eth_v29c &#183; zkperp_core_sol_v29c</text>
+  <text x="380" y="318" text-anchor="middle" font-family="'DM Mono',monospace" font-size="12.5" fill="#0369a1">zkperp_oracle_v4 &#183; zkperp_compliance_v9</text>
+  <text x="380" y="336" text-anchor="middle" font-family="'DM Mono',monospace" font-size="12.5" fill="#0369a1">zkdarkpool_v9 &#183; zkperp_amm_v6</text>
+
+  <!-- Private records -->
+  <rect x="64" y="350" width="632" height="66" rx="8" fill="#fdf4e7" stroke="#f0c074" stroke-width="1"/>
+  <text x="380" y="370" text-anchor="middle" font-family="'IBM Plex Sans',sans-serif" font-weight="600" font-size="13" fill="#b45309">Private records</text>
+  <text x="380" y="391" text-anchor="middle" font-family="'DM Mono',monospace" font-size="12.5" fill="#b45309">PositionSlot &#183; LiquidationAuth &#183; LPSlot</text>
+  <text x="380" y="409" text-anchor="middle" font-family="'DM Mono',monospace" font-size="12.5" fill="#b45309">ExecTPSLAuth &#183; ComplianceRecord &#183; OrderAuth</text>
+
+  <!-- Public mappings -->
+  <rect x="64" y="426" width="632" height="66" rx="8" fill="#e7f5f0" stroke="#6ee7b7" stroke-width="1"/>
+  <text x="380" y="446" text-anchor="middle" font-family="'IBM Plex Sans',sans-serif" font-weight="600" font-size="13" fill="#047857">Public mappings</text>
+  <text x="380" y="467" text-anchor="middle" font-family="'DM Mono',monospace" font-size="12.5" fill="#047857">pool_state &#183; oracle_prices &#183; position_commits</text>
+  <text x="380" y="485" text-anchor="middle" font-family="'DM Mono',monospace" font-size="12.5" fill="#047857">compliance_root &#183; active_position_ids &#183; pending_orders</text>
+
+  <!-- Privileged calls back up -->
+  <text x="380" y="536" text-anchor="middle" font-family="'DM Mono',monospace" font-size="12" fill="#6b7280">liquidate &#183; execute_tp_sl &#183; submit_price &#183; update_root</text>
+  <line x1="380" y1="572" x2="380" y2="546" stroke="#6b7280" stroke-width="1.2" marker-end="url(#ap-arrow)"/>
+
+  <!-- Infrastructure container -->
+  <rect x="40" y="574" width="680" height="132" rx="12" fill="#ffffff" stroke="#e5e0d8" stroke-width="1"/>
+  <text x="380" y="598" text-anchor="middle" font-family="'IBM Plex Sans',sans-serif" font-weight="600" font-size="14" fill="#0d1117">Infrastructure &#8212; Vultr VPS (Ubuntu 24.04)</text>
+
+  <rect x="64" y="614" width="200" height="80" rx="8" fill="#f5f0e8" stroke="#d8d2c6" stroke-width="1"/>
+  <text x="164" y="642" text-anchor="middle" font-family="'IBM Plex Sans',sans-serif" font-weight="600" font-size="13.5" fill="#0d1117">zkperp-bot</text>
+  <text x="164" y="664" text-anchor="middle" font-family="'IBM Plex Sans',sans-serif" font-weight="400" font-size="12.5" fill="#6b7280">Orchestrator</text>
+  <text x="164" y="682" text-anchor="middle" font-family="'IBM Plex Sans',sans-serif" font-weight="400" font-size="12.5" fill="#6b7280">+ liquidation</text>
+
+  <rect x="288" y="614" width="200" height="80" rx="8" fill="#f5f0e8" stroke="#d8d2c6" stroke-width="1"/>
+  <text x="388" y="642" text-anchor="middle" font-family="'IBM Plex Sans',sans-serif" font-weight="600" font-size="13.5" fill="#0d1117">zkperp-oracle</text>
+  <text x="388" y="664" text-anchor="middle" font-family="'IBM Plex Sans',sans-serif" font-weight="400" font-size="12.5" fill="#6b7280">3 Chainlink relayers</text>
+  <text x="388" y="682" text-anchor="middle" font-family="'DM Mono',monospace" font-size="12" fill="#0369a1">&#8594; oracle_v3.aleo</text>
+
+  <rect x="512" y="614" width="184" height="80" rx="8" fill="#f5f0e8" stroke="#d8d2c6" stroke-width="1"/>
+  <text x="604" y="642" text-anchor="middle" font-family="'IBM Plex Sans',sans-serif" font-weight="600" font-size="13.5" fill="#0d1117">compliance-server</text>
+  <text x="604" y="664" text-anchor="middle" font-family="'IBM Plex Sans',sans-serif" font-weight="400" font-size="12.5" fill="#6b7280">KYC + BHP256</text>
+  <text x="604" y="682" text-anchor="middle" font-family="'IBM Plex Sans',sans-serif" font-weight="400" font-size="12.5" fill="#6b7280">Merkle tree</text>
+</svg>
+      <figcaption>Figure 1. ZKPerp's layered architecture. Signed transactions flow down from the React frontend through the Shield Wallet, which unshields the user's private records before each call. The Aleo programs hold all position state &#8212; private records readable only by their owner, and public mappings carrying only commitments and aggregates. The Vultr VPS services run the privileged paths the chain cannot trigger itself: keeper liquidation, TP/SL execution, the 2-of-3 oracle submission, and compliance-root rotation.</figcaption>
+    </figure>
 
     <h3>Deployed Contracts</h3>
     <div class="table-wrap">
@@ -287,7 +324,7 @@
         <tr><td><code>zkperp_oracle_v4.aleo</code></td><td>2-of-3 on-chain quorum price oracle</td><td><span class="tag tag-green">Live</span></td></tr>
         <tr><td><code>zkperp_compliance_v9.aleo</code></td><td>KYC compliance gating</td><td><span class="tag tag-green">Live</span></td></tr>
         <tr><td><code>zkdarkpool_v9.aleo</code></td><td>ZK dark pool batch auction</td><td><span class="tag tag-green">Live</span></td></tr>
-        <tr><td><code>zkperp_amm_v4.aleo</code></td><td>Concentrated liquidity AMM (USDCx/ALEO) — standalone spot subproject; hardened <code>v6</code> pending deploy</td><td><span class="tag tag-amber">Prototype</span></td></tr>
+        <tr><td><code>zkperp_amm_v6.aleo</code></td><td>Concentrated liquidity AMM (USDCx/ALEO) — standalone spot subproject; demo-grade, pending on-chain validation</td><td><span class="tag tag-amber">Prototype</span></td></tr>
         <tr><td><code>test_usdcx_stablecoin.aleo</code></td><td>Official Aleo testnet stablecoin</td><td><span class="tag tag-blue">Official</span></td></tr>
       </table>
     </div>
@@ -299,17 +336,19 @@ import zkperp_compliance_v9.aleo;
 import zkperp_oracle_v4.aleo;</pre>
 
     <h3>Protocol Parameters</h3>
+    <p>Each parameter is enforced either <em>in-circuit</em> — proven in the transition body, which can read the trader's private inputs but not on-chain mappings — or in <em>finalize</em>, executed on-chain by validators against public mapping state. Values derived from private inputs are bound into a BHP256 commitment in-circuit and re-checked on-chain on the close and liquidation paths; values that depend on live pool or oracle state are necessarily computed and asserted in finalize.</p>
     <div class="table-wrap">
       <table>
-        <tr><th>Parameter</th><th>Value</th><th>Enforced</th></tr>
-        <tr><td>Max leverage</td><td>20×</td><td>On-chain assertion in <code>open_position</code></td></tr>
-        <tr><td>Opening fee</td><td>0.10% of position size</td><td>Deducted from collateral in finalize</td></tr>
-        <tr><td>Maintenance margin</td><td><code>MAINTENANCE_MARGIN_BPS = 50_000</code> (5% of notional, per-million divisor)</td><td>Equity below this is liquidatable; computed in-circuit from verified params + verified oracle</td></tr>
-        <tr><td>Liquidation reward</td><td><code>LIQ_PENALTY_BPS = 100_000</code> (10% of collateral, per-million divisor)</td><td>Deterministic; paid to the winning keeper in <code>liquidate()</code></td></tr>
-        <tr><td>LP withdrawal buffer</td><td>10% of total liquidity</td><td>On-chain in <code>finalize_remove_liquidity</code></td></tr>
-        <tr><td>Oracle staleness limit</td><td>150 blocks (≈ 5 min at ~2 s/block)</td><td>Checked in open, close, and liquidate finalize blocks</td></tr>
-        <tr><td>Compliance validity</td><td>7,776,000 blocks (≈ 180 days at ~2 s/block)</td><td>Asserted in every trader function finalize</td></tr>
-        <tr><td>Price decimals</td><td>8 ($69,000 = 6,900,000,000,000u64)</td><td>All Leo math uses integer arithmetic</td></tr>
+        <tr><th>Parameter</th><th>Value</th><th>Where enforced</th></tr>
+        <tr><td>Max leverage</td><td>20× &mdash; <code>(size × 100) / collateral ≤ 2000</code></td><td>In-circuit assertion in <code>open_position</code> (bare literal <code>2000u64</code>, no named constant)</td></tr>
+        <tr><td>Minimum position size</td><td><code>size ≥ 100</code> (smallest <code>size_usdc</code>)</td><td>In-circuit assertion in <code>open_position</code></td></tr>
+        <tr><td>Opening fee</td><td>0.10% of position size (<code>size × OPENING_FEE_BPS / 1_000_000</code>, <code>OPENING_FEE_BPS = 1_000</code>)</td><td>Computed in-circuit; the net <code>collateral_after_fee</code> is bound into the position commitment, then commit-checked on-chain on close/liquidate</td></tr>
+        <tr><td>Maintenance margin</td><td><code>MAINTENANCE_MARGIN_BPS = 50_000</code> (5% of notional, per-million divisor)</td><td>Equity below this is liquidatable. Equity computed in-circuit; <code>maint_margin</code> and the <code>equity &lt; maint_margin</code> assertion run on-chain in <code>finalize_liquidate</code>, over commit-verified params and a fresh oracle price</td></tr>
+        <tr><td>Liquidation reward</td><td><code>LIQ_PENALTY_BPS = 100_000</code> (10% of collateral, per-million divisor)</td><td>Deterministic, paid to the winning keeper in <code>liquidate()</code>. Computed in-circuit from <code>collateral_usdc</code>; the amount is pinned by the commit check, and pool solvency (<code>total_liquidity ≥ reward</code>) is asserted on-chain</td></tr>
+        <tr><td>LP withdrawal buffer</td><td>10% of total liquidity (<code>WITHDRAWAL_BUFFER_BPS = 100_000</code>, per-million divisor)</td><td>Computed and asserted on-chain in <code>finalize_remove_liquidity</code> (derived from live <code>pool_state</code>)</td></tr>
+        <tr><td>Oracle staleness limit</td><td>150 blocks (≈ 5 min at ~2 s/block, <code>MAX_PRICE_AGE_BLOCKS = 150</code>)</td><td>Asserted on-chain in every price-reading finalize: open, close, liquidate, take-profit, and stop-loss</td></tr>
+        <tr><td>Compliance validity</td><td>≤ 7,776,000 blocks (≈ 180 days at ~2 s/block)</td><td>Maximum set at issuance in <code>zkperp_compliance_v9::issue_compliance</code>; core asserts <code>block.height ≤ expires_at</code> and not-revoked in every trader-function finalize</td></tr>
+        <tr><td>Price decimals</td><td>8 (oracle encoding; $69,000 = 6,900,000,000,000)</td><td>Decimal scale set by <code>zkperp_oracle_v4</code>, not by a core constant. On-chain PnL uses integer arithmetic with divisor <code>PRICE_PRECISION = 100_000_000_000</code> (1e11)</td></tr>
       </table>
     </div>
 
@@ -2408,7 +2447,7 @@ available = total_liquidity
 </svg>
 
 
-      <figcaption>Figure 1. Keeper-auth liquidation. <code>open_position()</code> mints the trader's <code>PositionSlot</code> and three <code>LiquidationAuth</code> records (one per keeper) in one atomic transition. Either the trader closes voluntarily or any single keeper liquidates with its own auth; both paths share the same on-chain finalize gates, with two additional gates on the liquidation path.</figcaption>
+      <figcaption>Figure 2. Keeper-auth liquidation. <code>open_position()</code> mints the trader's <code>PositionSlot</code> and three <code>LiquidationAuth</code> records (one per keeper) in one atomic transition. Either the trader closes voluntarily or any single keeper liquidates with its own auth; both paths share the same on-chain finalize gates, with two additional gates on the liquidation path.</figcaption>
     </figure>
 
     <h3>Keeper-Auth Architecture (1-of-N)</h3>
@@ -2433,24 +2472,26 @@ available = total_liquidity
 
     <pre>
 // In the transition body (private witnesses)
+// entry_price / size_usdc / collateral_usdc / is_long are private inputs;
+// position_id is taken from the keeper's auth record.
+let position_id: field = auth.position_id;
 let recomputed_commit: field = BHP256::hash_to_field(PositionCommit {
-    entry_price:     auth.entry_price,
-    size_usdc:       auth.size_usdc,
-    collateral_usdc: auth.collateral_usdc,
-    is_long:         auth.is_long,
-    position_id:     auth.position_id,
+    entry_price:     entry_price,
+    size_usdc:       size_usdc,
+    collateral_usdc: collateral_usdc,
+    is_long:         is_long,
+    position_id:     position_id,
 });
 
-let raw_pnl: i64 = auth.is_long
-    ? (oracle_price as i64 - auth.entry_price as i64) * auth.size_usdc as i64 / PRICE_PRECISION as i64
-    : (auth.entry_price as i64 - oracle_price as i64) * auth.size_usdc as i64 / PRICE_PRECISION as i64;
+let raw_pnl: i64 = is_long
+    ? (exit_price as i64 - entry_price as i64) * size_usdc as i64 / PRICE_PRECISION as i64
+    : (entry_price as i64 - exit_price as i64) * size_usdc as i64 / PRICE_PRECISION as i64;
 
-let remaining_margin: i64   = auth.collateral_usdc as i64 + raw_pnl;
-let maintenance_margin: i64 = (auth.size_usdc * MAINTENANCE_MARGIN_BPS / 1_000_000u64) as i64;
-assert(remaining_margin &lt; maintenance_margin);  // MAINTENANCE_MARGIN_BPS = 50_000 -> 5%
+let equity_i64: i64 = collateral_usdc as i64 + raw_pnl;     // equity = collateral + PnL
 
-// Reward is deterministic, derived from verified collateral (not caller-supplied)
-let liquidator_reward: u64 = auth.collateral_usdc * LIQ_PENALTY_BPS / 1_000_000u64; // 100_000 -> 10%
+// Reward is deterministic, derived from collateral (not caller-supplied).
+// collateral_usdc is pinned by the commit check below, so it cannot be inflated.
+let liquidator_reward: u64 = collateral_usdc * LIQ_PENALTY_BPS / 1_000_000u64; // 100_000 -> 10%
 
 // In finalize{} — gates enforced on-chain
 let stored_id: field      = Mapping::get(active_position_ids, position_id);
@@ -2458,10 +2499,16 @@ assert_eq(stored_id, position_id);                              // replay protec
 let stored_commit: field  = Mapping::get(position_commits, position_id);
 assert_eq(recomputed_commit, stored_commit);                    // Gate 1: commitment
 let price_data            = Mapping::get(zkperp_oracle_v4.aleo::oracle_prices, asset_id);
-assert_eq(oracle_price, price_data.price);                      // Gate 2a: oracle match
+assert_eq(exit_price, price_data.price);                        // Gate 2a: oracle match
 assert(block.height - price_data.timestamp &lt;= MAX_PRICE_AGE_BLOCKS); // Gate 2b: freshness
+let maint_margin: i64     = (size_usdc * MAINTENANCE_MARGIN_BPS / 1_000_000u64) as i64;
+assert(equity_i64 &lt; maint_margin);                           // Gate 4: underwater (MARGIN_BPS = 50_000 -> 5%)
+let s0: address = Mapping::get(liquidator_set, 0u8);
+let s1: address = Mapping::get(liquidator_set, 1u8);
+let s2: address = Mapping::get(liquidator_set, 2u8);
+assert((caller == s0) || (caller == s1) || (caller == s2));     // Gate 5: caller in liquidator_set
 let pool: PoolState       = Mapping::get(pool_state, 0field);
-assert(pool.total_liquidity >= liquidator_reward as u64);       // Gate 3: solvency</pre>
+assert(pool.total_liquidity >= liquidator_reward);              // Gate 3: solvency</pre>
 
     <h3>Verification Gates Across Both Paths</h3>
     <div class="table-wrap">
@@ -2479,12 +2526,12 @@ assert(pool.total_liquidity >= liquidator_reward as u64);       // Gate 3: solve
     <h3>Liquidation Formula (computed in-circuit, asserted on-chain)</h3>
     <pre>
 pnl = is_long
-  ? size × (oracle_price − entry_price) / entry_price
-  : size × (entry_price − oracle_price) / entry_price
+  ? size × (exit_price − entry_price) / PRICE_PRECISION
+  : size × (entry_price − exit_price) / PRICE_PRECISION
 
-remaining_margin   = collateral + pnl                       // pnl may be negative
+equity             = collateral + pnl                       // pnl may be negative
 maintenance_margin = size × MAINTENANCE_MARGIN_BPS / 1_000_000   // 50_000 -> 5%
-assert(remaining_margin &lt; maintenance_margin)               // reverts if healthy
+assert(equity &lt; maintenance_margin)                         // reverts if healthy
 
 liquidator_reward  = collateral × LIQ_PENALTY_BPS / 1_000_000    // 100_000 -> 10% of collateral</pre>
 
@@ -2571,7 +2618,7 @@ Mapping::set(position_commits, position_id, commit)</pre>
     <ul>
       <li><strong>close_position</strong>: trader supplies the parameters directly. Three additional gates: oracle price match, oracle freshness, pool solvency. Payout is computed entirely from verified inputs — no user-supplied payout figure is trusted at any point.</li>
       <li><strong>liquidate</strong>: a keeper supplies the parameters via its <code>LiquidationAuth</code> record's fields, which were set at <code>open_position</code> time and bound inside the auth record. The recomputed commitment must still match. Additional gates: oracle price match, oracle freshness, equity below maintenance margin (5%), and caller ∈ <code>liquidator_set</code>.</li>
-      <li><strong>execute_take_profit / execute_stop_loss</strong>: orchestrator supplies parameters via the <code>ExecTPSLAuth</code> record fields set at order placement. Same commitment recomputation, plus oracle match and trigger-condition gates.</li>
+      <li><strong>execute_take_profit / execute_stop_loss</strong>: orchestrator supplies the parameters (with <code>is_long</code> and <code>position_id</code> taken from the <code>ExecTPSLAuth</code> record set at order placement). Same commitment recomputation, plus oracle price match, oracle freshness, an order-pending check, execution-nonce replay protection, and pool solvency. The trigger <em>direction</em> is validated on-chain at placement (<code>place_take_profit</code> / <code>place_stop_loss</code> assert the trigger sits on the correct side of entry); execution does <em>not</em> re-check that the oracle price has crossed the trigger — the orchestrator is trusted to fire only when it has.</li>
     </ul>
 
     <pre>
@@ -4003,7 +4050,7 @@ assert(pool.total_liquidity >= payout);               // Gate 3: solvency</pre>
 </svg>
 
 
-      <figcaption>Figure 2. On-chain 2-of-3 oracle quorum. All three relayers read the same Chainlink feeds and submit under their own Aleo keys; redundancy is at the signer level, not the data source. Staggered, wait-for-confirm submission avoids same-block finalize races, and the feed survives one relayer being offline. <code>zkperp_oracle_v4.aleo</code> writes <code>oracle_prices</code> only when 2-of-3 agree per asset.</figcaption>
+      <figcaption>Figure 3. On-chain 2-of-3 oracle quorum. All three relayers read the same Chainlink feeds and submit under their own Aleo keys; redundancy is at the signer level, not the data source. Staggered, wait-for-confirm submission avoids same-block finalize races, and the feed survives one relayer being offline. <code>zkperp_oracle_v4.aleo</code> writes <code>oracle_prices</code> only when 2-of-3 agree per asset.</figcaption>
     </figure>
 
     <p>Each relayer independently reads <strong>all three</strong> Chainlink feeds — BTC/USD and ETH/USD on Ethereum mainnet, SOL/USD on Arbitrum — and submits under its own Aleo private key. Relayers are staggered and wait for each transaction to confirm before the next, eliminating same-block finalize races; once 2-of-3 have confirmed, the third relayer deduplicates and skips. <code>self.caller</code> inside the program is cryptographically verified at the protocol level — it is not a trust assertion. When 2-of-3 relayers submit the same price for the same asset, the Leo program atomically writes it to <code>oracle_prices</code>.</p>
@@ -4154,6 +4201,8 @@ Phase 3: Off-chain Matching  → Operator computes uniform clearing price P*
                                P* = argmax Σ buy_qty(≥P) = Σ sell_qty(≤P)
 Phase 4: On-chain Settlement → settle_match() ZK proof enforces price constraints</pre>
 
+    <p>The batching itself — the submission window, its close, and the choice of which orders enter a batch — is coordinated <em>off-chain</em> by the operator. The contract holds no batch or window state: it settles individual matched pairs, and the <code>batch_root</code> passed into <code>settle_match</code> is operator-supplied metadata recorded in each <code>FillReceipt</code>, not validated on-chain. What the chain guarantees is per-settlement (price bounds, escrow, nonce, expiry), not the integrity of the batch as a whole.</p>
+
     <h3>The Operator-Auth Record Pattern</h3>
     <p>Previous dark pool designs required off-chain record transfer: the operator needed to receive the user's order record via an encrypted API call. v5 eliminates this using the same pattern as ZKPerp's liquidation architecture:</p>
     <ul>
@@ -4171,6 +4220,7 @@ Phase 4: On-chain Settlement → settle_match() ZK proof enforces price constrai
       <li><code>deposit_auth.amount >= fill_size</code> — sufficient escrowed collateral</li>
       <li>Both order expiries respected — <code>block.height &lt;= buy_expiry</code> and <code>block.height &lt;= sell_expiry</code> at finalize time</li>
     </ul>
+    <p>A companion transition, <code>partial_fill()</code>, settles a match for less than the full order size using the same operator-auth records and the identical finalize gates (<code>consume_nonces</code> for double-fill protection and <code>accrue_fee</code> for the fee counter), so the same constraints above apply to partial settlements.</p>
 
     <h3>Fee Model</h3>
     <p>Protocol fee is <strong>0.10% (10 bps)</strong> of gross trade value, paid <strong>buyer-side only</strong>. The seller receives the full clearing-price-multiplied amount without deduction. The fee is computed in the transition body as <code>(fill_size × clearing_price / 1_000_000) × 10 / 10_000</code> and is reflected in the buyer's <code>FillReceipt.fee_paid</code> field; the seller's receipt always shows <code>fee_paid: 0</code>.</p>
@@ -4201,7 +4251,7 @@ Phase 4: On-chain Settlement → settle_match() ZK proof enforces price constrai
 
     <div class="callout amber">
       <div class="callout-title">Operator Trust — Analogous to the §13 OI Orchestrator</div>
-      <p>The operator is trusted with full order contents (it must decrypt them to match orders), exactly as the perp orchestrator is trusted with open interest. The trust is bounded the same way: the operator cannot settle outside the limit prices, cannot move more than the escrowed amount, and cannot fabricate a fill against a consumed or expired order — all ZK-enforced in <code>settle_match</code>. Its residual power is censorship (declining to match an order), mitigated by order expiry and user-initiated <code>cancel_order</code> / <code>cancel_and_refund_asset</code>. Sealing order contents from the operator as well would require in-circuit matching over committed orders — open research, not in v8.</p>
+      <p>The operator is trusted with full order contents (it must decrypt them to match orders), exactly as the perp orchestrator is trusted with open interest. The trust is bounded the same way: the operator cannot settle outside the limit prices, cannot move more than the escrowed amount, and cannot fabricate a fill against a consumed or expired order — all ZK-enforced in <code>settle_match</code>. Its residual power is censorship (declining to match an order), mitigated by order expiry and user-initiated <code>cancel_order</code> / <code>cancel_and_refund_asset</code>. Sealing order contents from the operator as well would require in-circuit matching over committed orders — open research, not implemented as of v9.</p>
     </div>
 
     <h3>Live Testnet Results</h3>
@@ -4228,7 +4278,7 @@ Phase 4: On-chain Settlement → settle_match() ZK proof enforces price constrai
     </div>
     <p>Alongside the perpetuals protocol, the project maintains a <strong>standalone spot DEX</strong>: <code>zkperp_amm</code>, a Uniswap v3-style Concentrated Liquidity AMM for the USDCx/ALEO pair with a 0.3% fee tier. It is a separate subproject and is <em>not</em> the perpetuals liquidity engine — perps liquidity is the slot-record LP pool with the withdrawal guard (see LP Pool Design). The AMM exists to bootstrap spot USDCx/ALEO depth and to exercise the <code>credits.aleo</code> integration end-to-end. LP positions are private records; pool state (price, tick, liquidity) is public — full AMM privacy is architecturally impossible because price discovery requires public state.</p>
 
-    <p>Both legs of every transition move real assets. USDCx flows through <code>test_usdcx_stablecoin.aleo</code>'s private token interface; native ALEO flows through <code>credits.aleo</code>'s <code>transfer_private_to_public</code> and <code>transfer_public_to_private</code> functions. <code>mint_position</code> and <code>swap_sell</code> consume a private <code>credits.aleo::credits</code> record from the caller; <code>burn_position</code> and <code>swap_buy</code> mint one in return. The previous version tracked ALEO in a mapping counter without any matching <code>credits.aleo</code> call, leaving the ALEO leg accounted for only on paper.</p>
+    <p>Both legs of every transition move real assets. USDCx flows through <code>test_usdcx_stablecoin.aleo</code>'s private token interface; native ALEO flows through <code>credits.aleo</code>'s <code>transfer_private_to_public</code> and <code>transfer_public_to_private</code> functions. <code>mint_position</code> and <code>swap_sell</code> consume a private <code>credits.aleo::credits</code> record from the caller; <code>burn_position</code> and <code>swap_buy</code> mint one in return, so both legs settle as real on-chain transfers rather than a mapping counter.</p>
 
     <h3>Key Parameters</h3>
     <ul>
@@ -4263,13 +4313,13 @@ amountOut  = L × (sqrtAfter − sqrtBefore) × Q64 / (sqrtAfter × sqrtBefore)<
 
     <div class="callout amber">
       <div class="callout-title">Swap Verification — Trader-Signed, Contract-Verified <span class="wave-new">v6</span></div>
-      <p>The AMM has <strong>no orchestrator or backend</strong>. A trader connects their wallet on the frontend, the frontend builds the swap, and the trader signs and submits it themselves — so the caller is the trader and every swap parameter (amounts, final price, step data) is trader-supplied. Because nothing prevents a trader from signing hand-crafted inputs, the contract is the <em>only</em> thing protecting the pool and must verify every swap against the curve. The original prototype (<code>v4</code>) did not do this for single-range (non-tick-crossing) swaps — the terminal output check was disabled, which left a permissionless pool-drain path. The hardened code (<code>zkperp_amm_v6.aleo</code>) closes it: all amounts are forced through a verified terminal segment with output capped and input floored against the curve on both legs, and the 4-step tick-crossing path is retained but gated off pending audit. This hardening is implemented but <strong>not yet validated on-chain</strong> (see Implementation Status below). LP <code>mint</code>/<code>burn</code> and swap amounts are public <code>finalize</code> arguments.</p>
+      <p>The AMM has <strong>no orchestrator or backend</strong>: the trader's own wallet builds and signs every swap, so all swap parameters (amounts, final price, per-step data) are trader-supplied and untrusted. The contract is therefore the <em>sole</em> arbiter and verifies every swap against the curve in <code>finalize</code>. Up to four unrolled tick-crossing steps plus a terminal segment are each checked the same way — output capped at the curve value and required input floored against it, both derived from the on-chain liquidity (outputs floored, inputs ceiled, no tolerance band). The final tick is pinned to the final price via an in-circuit <code>sqrt_ratio_at_tick</code>, and per-step fees accrue through the <code>fee_growth_global</code> pattern. A trader cannot extract more (or pay less) than the price move justifies, whatever they submit. LP <code>mint</code>/<code>burn</code> and swap amounts are public <code>finalize</code> arguments. The build is demo-grade and not yet validated on-chain (see Implementation Status below).</p>
     </div>
 
     <div class="callout red">
       <div class="callout-title">Implementation Status — Hardened, Pending On-Chain Validation <span class="wave-new">v6</span></div>
-      <p>Concentrated liquidity on Aleo started as a prototype, <code>zkperp_amm_v4.aleo</code>, which ran end-to-end on testnet (<code>initialize_pool</code>, <code>mint_position</code>, <code>burn_position</code>, swaps) but carried real security gaps and was never meant for real funds. The most severe: for single-range (non-tick-crossing) swaps the terminal output check was disabled, leaving a permissionless pool-drain path. Related gaps — <code>mint_position</code>/<code>burn_position</code> did not derive the required deposit / permitted payout from liquidity (an LP could mint disproportionate liquidity for a small deposit, or withdraw more than a position is worth), the declared final tick was unconstrained, and per-step fees were mis-accrued.</p>
-      <p>The hardened rewrite addresses all of these: the terminal segment is always verified with output capped and input floored against the curve on both legs, the final tick is pinned to the final price via an in-circuit <code>sqrt_ratio_at_tick</code>, deposits and payouts are derived from liquidity, and per-step fee accrual is corrected. The first hardened deployment (<code>v5</code>) reached testnet but could not initialize: its constructor seeded the admin into a <code>storage</code> variable while <code>initialize_pool</code> still checked a leftover <code>roles</code> mapping that nothing populated, so the init <code>finalize</code> reverted. <code>zkperp_amm_v6.aleo</code> fixes that — both the write and the check use the same admin slot — and is deploy-ready, pending on-chain validation. Two limitations still gate production: amount math runs in inline u128, which caps the safe envelope (position ticks within ±88,440, per-position liquidity ≤ 2<sup>55</sup>) — lifting it requires a verified 256-bit <code>mul_div</code> (Uniswap's <code>FullMath.mulDiv</code> equivalent) — and the multi-tick crossing path plus rounding-tolerance calibration await devnet validation and a third-party audit. Until then the AMM remains a research prototype, not a usable venue.</p>
+      <p><code>zkperp_amm_v6.aleo</code> verifies every swap and LP action against the curve: the terminal segment and each tick-crossing step cap output and floor required input against on-chain liquidity, the final tick is pinned to the final price via an in-circuit <code>sqrt_ratio_at_tick</code>, <code>mint_position</code>/<code>burn_position</code> deposits and payouts are derived from liquidity, and per-step fees accrue through <code>fee_growth_global</code>. The threat model is client-side proving: the trader/LP supplies every public input, so the contract treats them as untrusted and is the sole arbiter.</p>
+      <p>Two limitations gate production. Amount math runs in inline <code>u128</code>, so the contract is provably safe only inside a bounded envelope — position ticks within <strong>±88,440</strong> and per-position liquidity <strong>≤ 2<sup>55</sup></strong>; outside it, a multiply aborts the proof or reverts the transaction (funds are never lost — only liveness is limited). Lifting the envelope to the full ±443,636 tick range requires a verified 256-bit <code>mul_div</code> (the equivalent of Uniswap's <code>FullMath.mulDiv</code>). The build is demo-grade and has not been compiler-verified or run through its full test suite in this environment; the multi-tick path and rounding-tolerance calibration await devnet validation and a third-party audit. Until then the AMM is a research prototype, not a usable venue.</p>
     </div>
 
     <div class="callout amber">
@@ -4378,12 +4428,12 @@ Live test: ~81 USDC bridged successfully in under 15 minutes</pre>
         <tr><td>Unverified Liquidation Parameters</td><td><span class="tag tag-green">✅ Resolved</span></td><td>v28 — LiquidationAuth fields commitment-checked; margin computed in-circuit from live oracle</td></tr>
         <tr><td>KYC / Compliance</td><td><span class="tag tag-green">✅ Resolved</span></td><td>zkperp_compliance_v9.aleo — BHP256 Merkle allowlist, circuit-level enforcement</td></tr>
         <tr><td>ZK Dark Pool</td><td><span class="tag tag-green">✅ Resolved</span></td><td>zkdarkpool_v9.aleo — batch auction, live on testnet</td></tr>
-        <tr><td>Concentrated Liquidity AMM</td><td><span class="tag tag-amber">⚠ Prototype</span></td><td>zkperp_amm — Uniswap v3-style USDCx/ALEO, a standalone spot subproject. The <code>v4</code> prototype was functional on testnet but had a swap-invariant pool-drain gap (see §11, §15); the hardened rewrite closes it and <code>zkperp_amm_v6.aleo</code> is deploy-ready, pending on-chain validation.</td></tr>
+        <tr><td>Concentrated Liquidity AMM</td><td><span class="tag tag-amber">⚠ Prototype</span></td><td>zkperp_amm — Uniswap v3-style USDCx/ALEO, a standalone spot subproject. <code>zkperp_amm_v6.aleo</code> verifies every swap against the curve (output capped, required input floored, final tick pinned); demo-grade, pending on-chain validation and a third-party audit (see §11).</td></tr>
         <tr><td>2M Variable Limit (single contract)</td><td><span class="tag tag-green">✅ Resolved</span></td><td>Split into _core (market orders) + _orders (limit orders) contracts</td></tr>
         <tr><td>Trusted pool-state aggregation</td><td><span class="tag tag-amber">⚠ Documented Tradeoff</span></td><td>OI itself is architecture-bound (private sizes cannot enter public state — §13); the broader <code>update_pool_state</code> write surface (liquidity, LP tokens) is fixable — hardening planned in §15</td></tr>
         <tr><td>Single Orchestrator</td><td><span class="tag tag-amber">⚠ Open</span></td><td>One wallet (<code>roles[1u8]</code>) controls TP/SL order execution and pool-state aggregation. Liquidation is <em>not</em> orchestrator-run — it is 1-of-N keepers from the admin-managed <code>liquidator_set</code> (§5). Multi-orchestrator rotation and the §15 pool-state hardening are planned.</td></tr>
         <tr><td>Non-Transferable Compliance Admin</td><td><span class="tag tag-amber">⚠ Open</span></td><td>The compliance admin is fixed at deploy time — <code>v8b</code> has no <code>set_admin</code>. A future version will add multisig / governance-gated admin rotation.</td></tr>
-        <tr><td>AMM Swap-Invariant Verification</td><td><span class="tag tag-amber">⚠ Open</span></td><td>The <code>v4</code> prototype disabled the single-range terminal output check, so a non-tick-crossing swap's output was not bound to the curve — a permissionless pool-drain path (also affecting <code>mint</code>/<code>burn</code> amount derivation and final-tick consistency). The hardened code closes this: output capped + input floored against the curve on both legs, final tick pinned via in-circuit <code>sqrt_ratio_at_tick</code>, deposits/payouts derived from liquidity. <code>zkperp_amm_v6.aleo</code> is deploy-ready but not yet validated on-chain. Inline u128 math caps the safe envelope (ticks ±88,440, liquidity ≤ 2<sup>55</sup>); a verified 256-bit <code>mul_div</code>, multi-tick re-enablement, rounding calibration, and audit remain pending.</td></tr>
+        <tr><td>AMM Swap-Invariant Verification</td><td><span class="tag tag-amber">⚠ Pending validation</span></td><td><code>zkperp_amm_v6.aleo</code> binds every swap to the curve on both legs — output capped, required input floored, final tick pinned via in-circuit <code>sqrt_ratio_at_tick</code>, deposits/payouts derived from liquidity — across up to four tick-crossing steps plus a terminal segment. Not yet validated on-chain: inline u128 math caps the safe envelope (ticks ±88,440, liquidity ≤ 2<sup>55</sup>), and a verified 256-bit <code>mul_div</code>, rounding calibration, and audit remain pending.</td></tr>
         <tr><td>Dark Pool Deposit-to-Order Binding</td><td><span class="tag tag-amber">⚠ Documented Tradeoff</span></td><td>Sell-side deposits bound to seller by address + asset_id, not by order nonce. Operator picks which deposit settles which order. Stronger nonce-binding planned.</td></tr>
         <tr><td>No Funding Rate</td><td><span class="tag tag-amber">⚠ Open</span></td><td>Flat borrow rate model. Dynamic funding rates planned for mainnet.</td></tr>
         <tr><td>No Partial Close</td><td><span class="tag tag-amber">⚠ Open</span></td><td>Positions must be closed in full. Partial close is architecturally supported by the slot model.</td></tr>
@@ -4412,10 +4462,10 @@ Live test: ~81 USDC bridged successfully in under 15 minutes</pre>
       <li>LP pool with on-chain withdrawal guard</li>
       <li>BTC, ETH, SOL markets — separate programs per market (privacy model constraint)</li>
       <li>Position commitment scheme — eliminates inflated-payout attack vector (v26)</li>
-      <li>Commitment verification extended to the liquidation path — margin computed in-circuit (v28)</li>
+      <li>Commitment verification extended to the liquidation path — equity computed in-circuit, margin asserted on-chain in finalize (v28)</li>
       <li>KYC compliance layer — BHP256 Merkle tree, circuit-level enforcement</li>
       <li>ZK Dark Pool — batch auction with uniform clearing price</li>
-      <li>Concentrated Liquidity AMM (prototype) — Uniswap v3-style USDCx/ALEO; hardened <code>v6</code> pending validation</li>
+      <li>Concentrated Liquidity AMM — Uniswap v3-style USDCx/ALEO (<code>zkperp_amm_v6.aleo</code>); demo-grade, pending on-chain validation</li>
       <li>Portfolio, compliance, and system status pages</li>
       <li>ETH → Aleo bridge tested (xReserve, ~15 min)</li>
       <li>Contract split: _core + _orders (resolves 2M variable limit)</li>
@@ -4523,7 +4573,7 @@ Live test: ~81 USDC bridged successfully in under 15 minutes</pre>
         <a href="https://testnet.explorer.provable.com/program/zkperp_core_sol_v29c.aleo">zkperp_core_sol_v29c.aleo</a>
         <a href="https://testnet.explorer.provable.com/program/zkperp_oracle_v4.aleo">zkperp_oracle_v4.aleo</a>
         <a href="https://testnet.explorer.provable.com/program/zkperp_compliance_v9.aleo">zkperp_compliance_v9.aleo</a>
-        <a href="https://testnet.explorer.provable.com/program/zkperp_amm_v4.aleo">zkperp_amm_v4.aleo</a>
+        <a href="https://testnet.explorer.provable.com/program/zkperp_amm_v6.aleo">zkperp_amm_v6.aleo</a>
         <a href="https://testnet.explorer.provable.com/program/zkdarkpool_v9.aleo">zkdarkpool_v9.aleo</a>
         <a href="https://testnet.explorer.provable.com/program/test_usdcx_stablecoin.aleo">test_usdcx_stablecoin.aleo</a>
       </div>
@@ -4542,7 +4592,7 @@ Live test: ~81 USDC bridged successfully in under 15 minutes</pre>
       </div>
     </div>
     <div class="footer-bottom">
-      ZKPerp · MIT License · Aleo Testnet · v29c · May 2026
+      ZKPerp · MIT License · Aleo Testnet · v30 · May 2026
     </div>
   </div>
 </div>

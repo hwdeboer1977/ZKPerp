@@ -665,8 +665,8 @@ export default function App() {
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
           <div className="mb-8">
             <h2 className="text-2xl font-bold text-white tracking-tight">ZK <span className="text-cyan-400">Darkpool</span></h2>
-            <h2>Sellers must (1) mint test records, (2) deposit in escrow and (3) place sell order</h2>
             <p className="text-slate-400 text-sm mt-1">Uniform clearing price batch auction · ZK-encrypted orders · 0.10% fee</p>
+            <p className="text-xs text-slate-500 mt-2">Sellers: (1) mint test records, (2) deposit in escrow, (3) place a sell order.</p>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

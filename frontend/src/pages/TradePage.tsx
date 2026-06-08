@@ -192,7 +192,7 @@ export function TradePage({ pair, currentPrice, oracleSet, onPriceChange }: Prop
             <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center">📋</div>
             <h3 className="font-semibold text-white">Compliance Ready</h3>
           </div>
-          <p className="text-sm text-gray-400">Every deposit generates a <span className="text-white font-medium">ComplianceRecord</span> — a private ZK receipt linking your transaction to a verified Merkle proof. Privacy without sacrificing auditability.</p>
+          <p className="text-sm text-gray-400">Trading requires a <span className="text-white font-medium">ZKPerpComplianceRecord</span> — a private ZK credential proving membership in the KYC allowlist, issued once and reused on every trade. Privacy without sacrificing auditability.</p>
         </div>
       </div>
 

@@ -152,7 +152,7 @@ export function SystemStatusPage({ currentPrice, poolLiquidity, longOI, shortOI 
               <h3 className="font-semibold text-white mb-3">🔒 Privacy Architecture</h3>
               <div className="space-y-2 text-sm text-gray-400">
                 <p><span className="text-zkperp-accent font-medium">PositionSlot</span> — private record owned by the trader. Holds entry price, size, direction, and collateral. Only the trader can decrypt it.</p>
-                <p><span className="text-zkperp-accent font-medium">LiquidationAuth</span> — private record owned by the orchestrator. Contains the same position data so the bot can monitor and liquidate without the trader being online.</p>
+                <p><span className="text-zkperp-accent font-medium">LiquidationAuth</span> — private records owned by the keepers (one per keeper in the liquidator_set). Each carries the same position data so any single keeper can recompute the commitment and liquidate without the trader being online.</p>
                 <p><span className="text-zkperp-accent font-medium">Slot model</span> — each trader has exactly 2 slots (long + short), issued once. Slots are mutated in place — no record accumulation regardless of trading frequency.</p>
               </div>
             </div>
@@ -170,7 +170,7 @@ export function SystemStatusPage({ currentPrice, poolLiquidity, longOI, shortOI 
             <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-5">
               <h3 className="font-semibold text-white mb-3">💧 LP Pool Design</h3>
               <div className="space-y-2 text-sm text-gray-400">
-                <p>Single-sided USDC pool. LPs deposit USDC and receive LP tokens. The pool acts as direct counterparty to all traders.</p>
+                <p>Single-sided USDCx pool. LPs deposit USDCx and receive LP tokens. The pool acts as direct counterparty to all traders.</p>
                 <p><span className="text-zkperp-accent font-medium">Withdrawal guard</span> — available liquidity = total − long OI − short OI − unrealised PnL liability − 10% safety buffer. Enforced on-chain.</p>
                 <p><span className="text-zkperp-accent font-medium">Asymmetric PnL</span> — when traders are profitable the pool reserves their unrealised gains. When traders are losing, the pool does <em>not</em> count paper gains — mirrors GMX V2 design.</p>
                 <p><span className="text-zkperp-accent font-medium">OI locking</span> — long and short OI are locked independently (no netting), ensuring the pool can always pay out both sides.</p>
@@ -190,9 +190,9 @@ export function SystemStatusPage({ currentPrice, poolLiquidity, longOI, shortOI 
             <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-5">
               <h3 className="font-semibold text-white mb-3">⚡ How Liquidations Work</h3>
               <div className="space-y-2 text-sm text-gray-400">
-                <p><span className="text-zkperp-accent font-medium">Dual-record design</span> — every <code className="text-xs bg-zkperp-dark px-1 rounded">open_position</code> creates two private records: a <span className="text-white">PositionSlot</span> owned by the trader, and a <span className="text-white">LiquidationAuth</span> owned by the orchestrator. This lets the bot liquidate without the trader being online — and without ever seeing the trader's private key.</p>
-                <p><span className="text-zkperp-accent font-medium">Threshold</span> — a position is liquidatable when its margin ratio falls below 1% of position size. The on-chain program verifies this; the bot cannot liquidate healthy positions.</p>
-                <p><span className="text-zkperp-accent font-medium">Reward</span> — the liquidator earns 0.5% of position size. Anyone can liquidate using the manual lookup below — not just the bot.</p>
+                <p><span className="text-zkperp-accent font-medium">Dual-record design</span> — every <code className="text-xs bg-zkperp-dark px-1 rounded">open_position</code> creates a <span className="text-white">PositionSlot</span> owned by the trader plus one <span className="text-white">LiquidationAuth</span> per keeper (three, one for each member of the liquidator_set). This lets any single keeper liquidate without the trader being online — and without ever seeing the trader's private key.</p>
+                <p><span className="text-zkperp-accent font-medium">Threshold</span> — a position is liquidatable when its margin ratio falls below the 5% maintenance margin (of notional size). The on-chain program verifies this; keepers cannot liquidate healthy positions.</p>
+                <p><span className="text-zkperp-accent font-medium">Reward</span> — the liquidator earns 10% of the position's collateral. Any keeper in the liquidator_set can liquidate — a 1-of-N race, not a single bot.</p>
               </div>
             </div>
             <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-5">
@@ -201,9 +201,9 @@ export function SystemStatusPage({ currentPrice, poolLiquidity, longOI, shortOI 
                 <p>The bot runs on Render and polls the oracle price every ~30 seconds. On each tick it:</p>
                 <ol className="space-y-1 list-none">
                   {[
-                    'Decrypts all LiquidationAuth records using the orchestrator view key',
+                    'Decrypts its LiquidationAuth records using the keeper view key',
                     'Computes margin ratio for each position at the current oracle price',
-                    'Submits on-chain liquidations for any position below 1% margin',
+                    'Submits on-chain liquidations for any position below the 5% maintenance margin',
                     'Updates net_unrealised_pnl so the LP pool withdrawal guard stays accurate',
                   ].map((s, i) => (
                     <li key={i} className="flex gap-2">
@@ -222,17 +222,17 @@ export function SystemStatusPage({ currentPrice, poolLiquidity, longOI, shortOI 
               <div className="space-y-2 text-sm text-gray-400">
                 <p>The orchestrator bot runs continuously and handles three automated tasks:</p>
                 <p><span className="text-zkperp-accent font-medium">Oracle updates</span> — receives BTC/ETH/SOL prices from the 2-of-3 Chainlink quorum relay and pushes on-chain via <code className="text-xs">update_price</code> when deviation exceeds 1%. Falls back to public APIs if no fresh quorum is available.</p>
-                <p><span className="text-zkperp-accent font-medium">Liquidations</span> — decrypts LiquidationAuth records and submits <code className="text-xs">liquidate()</code> when margin ratio &lt; 1%.</p>
+                <p><span className="text-zkperp-accent font-medium">Liquidations</span> — decrypts LiquidationAuth records and submits <code className="text-xs">liquidate()</code> when margin ratio &lt; 5%.</p>
                 <p><span className="text-zkperp-accent font-medium">TP/SL &amp; limit orders</span> — monitors PendingOrder records and executes when trigger conditions are met.</p>
               </div>
             </div>
             <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-5">
               <h3 className="font-semibold text-white mb-3">📐 Formula</h3>
               <div className="space-y-2 text-sm text-gray-400">
-                <p>A position is liquidatable when its <strong className="text-white">margin ratio drops below 1%</strong> of position size.</p>
+                <p>A position is liquidatable when its <strong className="text-white">margin ratio drops below the 5% maintenance margin</strong> of position size.</p>
                 <p><code className="text-zkperp-accent text-xs bg-zkperp-dark px-1 rounded block mt-1 mb-1">remaining = collateral + unrealised_PnL</code></p>
                 <p><code className="text-zkperp-accent text-xs bg-zkperp-dark px-1 rounded block mb-1">margin_ratio = remaining / size × 100</code></p>
-                <p>The liquidator earns <strong className="text-white">0.5%</strong> of position size as reward.</p>
+                <p>The liquidator earns <strong className="text-white">10%</strong> of the position's collateral as reward.</p>
               </div>
             </div>
           </div>
@@ -290,12 +290,12 @@ export function SystemStatusPage({ currentPrice, poolLiquidity, longOI, shortOI 
                   <span className="text-sm font-medium text-white">On-chain ZK Signature Verification</span>
                 </div>
                 <div className="space-y-3 text-sm text-gray-400">
-                  <p>The quorum check moves fully on-chain: the Leo program verifies Ed25519 signatures from all relayers and accepts a price update only when <strong className="text-white">⌈2N/3⌉ signatures agree</strong> within a tolerance band (e.g. ±0.5%). The coordinator becomes stateless — it only aggregates and routes, with no trust assumption.</p>
+                  <p>The quorum check moves fully on-chain: the Leo program verifies secp256k1 signatures from all relayers and accepts a price update only when <strong className="text-white">⌈2N/3⌉ signatures agree</strong> within a tolerance band (e.g. ±0.5%). The coordinator becomes stateless — it only aggregates and routes, with no trust assumption.</p>
 
                   <div className="grid md:grid-cols-3 gap-3 mt-4">
                     {[
                       { icon: '📡', title: 'Price Sources', body: 'Each oracle pulls from a different data source — Chainlink Data Streams, Pyth Network, Binance, Coinbase — so no single feed can corrupt the price.' },
-                      { icon: '✍️', title: 'Ed25519 Signatures', body: 'Oracles sign their price + timestamp off-chain. The Leo program verifies all signatures on-chain and checks the median price falls within the tolerance band.' },
+                      { icon: '✍️', title: 'secp256k1 Signatures', body: 'Oracles sign their price + timestamp off-chain. The Leo program verifies all signatures on-chain and checks the median price falls within the tolerance band.' },
                       { icon: '🔐', title: 'ZK Proof of Consensus', body: 'Aleo\'s ZK execution means the quorum check itself is a verifiable proof — anyone can verify that exactly 2/3 oracles agreed, without seeing their private keys.' },
                     ].map(({ icon, title, body }) => (
                       <div key={title} className="bg-zkperp-dark rounded-lg p-3 border border-zkperp-border">

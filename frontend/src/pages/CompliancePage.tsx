@@ -317,7 +317,7 @@ export function CompliancePage() {
             },
             {
               step: '3', icon: '🔍', title: 'Gated Trading',
-              body: 'Every trade, deposit, and order checks your record in-circuit. If revoked or expired, the transaction fails. No identity is ever revealed on-chain.',
+              body: 'Every trade, deposit, and order checks your record on-chain. If revoked or expired, the transaction fails. No identity is ever revealed on-chain.',
             },
           ].map(({ step, icon, title, body }) => (
             <div key={step} className="bg-zkperp-dark rounded-xl border border-zkperp-border p-4">
@@ -351,10 +351,9 @@ export function CompliancePage() {
           <p className="text-gray-500 mt-2">{'}'}</p>
         </div>
         <p className="text-sm text-gray-400 leading-relaxed">
-          The core program reads <code className="text-zkperp-accent text-xs">issued_under</code> and <code className="text-zkperp-accent text-xs">expires_at</code> directly from the record in every gated function,
-          then asserts them against on-chain mappings in <code className="text-zkperp-accent text-xs">
-zkperp_compliance_v9.aleo</code>.
-          Three conditions must pass: root matches, not revoked, not expired.
+          The core program reads <code className="text-zkperp-accent text-xs">expires_at</code> from the record and checks the <code className="text-zkperp-accent text-xs">revoked</code> mapping in <code className="text-zkperp-accent text-xs">
+zkperp_compliance_v9.aleo</code> in every gated function.
+          Two conditions must pass: not revoked, and not expired. The Merkle root is verified once at issuance — <code className="text-zkperp-accent text-xs">issued_under</code> is kept on the record as provenance, not re-checked per trade.
         </p>
       </div>
 

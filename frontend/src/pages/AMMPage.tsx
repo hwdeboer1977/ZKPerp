@@ -61,7 +61,7 @@ export function AMMPage() {
             { step: '1', title: 'Choose a price range', body: 'LPs select a lower and upper tick defining the price band where their liquidity is active. Tighter ranges earn more fees but require active management.' },
             { step: '2', title: 'Deposit USDCx and ALEO', body: 'The AMM calculates the required token amounts based on the current price and chosen range. Both tokens are deposited in the correct ratio.' },
             { step: '3', title: 'Earn 0.3% swap fees', body: 'Every swap that passes through your active range pays a 0.3% fee, split proportionally among all in-range LPs by their liquidity share.' },
-            { step: '4', title: 'Withdraw anytime', body: 'Burn your LP position record to reclaim your tokens plus any accrued fees. Positions are fully non-custodial — the contract holds no admin keys.' },
+            { step: '4', title: 'Withdraw anytime', body: 'Burn your LP position record to reclaim your tokens plus any accrued fees. Positions are fully non-custodial — only you can burn your position record to withdraw.' },
           ].map(({ step, title, body }) => (
             <div key={step} className="flex gap-4">
               <div className="w-7 h-7 rounded-full bg-zkperp-accent/20 border border-zkperp-accent/40 flex items-center justify-center flex-shrink-0 text-xs font-bold text-zkperp-accent">
@@ -109,9 +109,9 @@ export function AMMPage() {
 
       {/* Testnet reference */}
       <div className="bg-zkperp-card rounded-xl border border-zkperp-border p-6 mb-6">
-        <h3 className="font-semibold text-white mb-2">Live on Aleo Testnet</h3>
+        <h3 className="font-semibold text-white mb-2">Demo-grade — Aleo Testnet Prototype</h3>
         <p className="text-sm text-gray-400 mb-3">
-          The AMM contract (<code className="text-zkperp-accent text-xs px-1 bg-zkperp-dark rounded">zkperp_amm_v3.aleo</code>) is deployed and active on Aleo testnet. Swap USDCx for ALEO, provide liquidity in a custom range, and burn positions to withdraw.
+          The AMM contract (<code className="text-zkperp-accent text-xs px-1 bg-zkperp-dark rounded">zkperp_amm_v6.aleo</code>) is deployed on Aleo testnet as a demo-grade prototype — pending on-chain validation and a third-party audit. You can swap USDCx for ALEO, provide liquidity in a custom range, and burn positions to withdraw, but it's intended for exploration and testing, not real funds.
         </p>
         <a
           href="https://github.com/hwdeboer1977/ZKPerp"

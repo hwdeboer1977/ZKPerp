@@ -1,4 +1,4 @@
-// ZKPerp Core v29c — oracle reads from zkperp_oracle_v4.aleo
+// ZKPerp Core v30 — oracle reads from zkperp_oracle_v4.aleo
 //
 // Price reads are cross-program calls to zkperp_oracle_v4.aleo::oracle_prices.
 // Prices are only committed there after 2-of-3 independent oracle nodes agree.

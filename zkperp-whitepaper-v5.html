@@ -4455,57 +4455,82 @@ Live test: ~81 USDC bridged successfully in under 15 minutes</pre>
     <h3>✅ Completed</h3>
     <ul>
       <li>Core perpetuals: open / close / liquidate with USDCx token integration</li>
-      <li>Slot model — 3 records per market program (2 PositionSlots + 1 LPSlot), forever</li>
+      <li>Slot model — 3 records per market program (2 PositionSlots + 1 LPSlot)</li>
       <li>Dual-record liquidation architecture</li>
-      <li>2-of-3 Chainlink oracle relay — on-chain quorum via zkperp_oracle_v4.aleo</li>
+      <li>2-of-3 Chainlink oracle relay — on-chain quorum (<code>zkperp_oracle_v4.aleo</code>)</li>
       <li>Limit orders / TP / SL — keeper executed, ZK trigger verification</li>
       <li>LP pool with on-chain withdrawal guard</li>
       <li>BTC, ETH, SOL markets — separate programs per market (privacy model constraint)</li>
-      <li>Position commitment scheme — eliminates inflated-payout attack vector (v26)</li>
-      <li>Commitment verification extended to the liquidation path — equity computed in-circuit, margin asserted on-chain in finalize (v28)</li>
-      <li>KYC compliance layer — BHP256 Merkle tree, circuit-level enforcement</li>
-      <li>ZK Dark Pool — batch auction with uniform clearing price</li>
-      <li>Concentrated Liquidity AMM — Uniswap v3-style USDCx/ALEO (<code>zkperp_amm_v6.aleo</code>); demo-grade, pending on-chain validation</li>
-      <li>Portfolio, compliance, and system status pages</li>
-      <li>ETH → Aleo bridge tested (xReserve, ~15 min)</li>
-      <li>Contract split: _core + _orders (resolves 2M variable limit)</li>
+      <li>Position commitment scheme — closes the inflated-payout vector (v26)</li>
+      <li>Commitment verification on the liquidation path — margin asserted on-chain in finalize (v28)</li>
+      <li>KYC compliance — BHP256 Merkle allowlist, circuit-level enforcement</li>
+      <li>ZK Dark Pool — batch auction, uniform clearing price</li>
+      <li>Concentrated Liquidity AMM — Uniswap v3-style USDCx/ALEO (<code>zkperp_amm_v6.aleo</code>), demo-grade</li>
+      <li>Portfolio, compliance, and status pages</li>
     </ul>
 
     <h3>📋 Next</h3>
     <ul>
-      <li>Verifiable performance proofs (ZK circuit) — copy trading without revealing trades</li>
-      <li>Leaderboard — opt-in, privacy-preserving</li>
-      <li>Multi-orchestrator rotation — reduce single-orchestrator trust assumption</li>
-      <li><strong>Pool-state write hardening (two steps):</strong> (1) restrict <code>update_pool_state</code> to the genuinely off-chain aggregates (open interest and net PnL) — <code>total_liquidity</code> and <code>total_lp_tokens</code> are already maintained on-chain by <code>add_liquidity</code>/<code>remove_liquidity</code> and should not be orchestrator-writable; (2) place the remaining OI / net-PnL writes behind a <em>k</em>-of-<em>n</em> quorum (the same pattern <code>zkperp_oracle_v4.aleo</code> already uses for prices), reducing trust from a single orchestrator key to a threshold. This is defense-in-depth, not full verification — the aggregates remain off-chain attestations.</li>
+      <li>Verifiable performance proofs (ZK) — copy trading without revealing trades</li>
+      <li>Privacy-preserving leaderboard (opt-in)</li>
+      <li>Improved website UX — trading interface, onboarding, wallet/Shield connection</li>
+      <li>Multi-orchestrator rotation — reduce single-orchestrator trust</li>
+      <li>Pool-state write hardening — restrict <code>update_pool_state</code> to OI / net-PnL, then move those behind a <em>k</em>-of-<em>n</em> quorum</li>
       <li>Admin controls — pause, fee update, role rotation</li>
-      <li>On-chain secp256k1 oracle signature verification (when Leo exposes the opcode)</li>
+      <li>On-chain secp256k1 oracle signature verification</li>
+      <li>Shared core library (<code>zkperp_lib</code>) — commit hashing, PnL, margin, compliance gate, oracle read; markets become thin wrappers</li>
+      <li>Standardize fixed-point conventions across core / dark pool / AMM</li>
+      <li>AMM hardening — devnet validation, 256-bit <code>mul_div</code>, rounding calibration</li>
     </ul>
 
     <h3>📋 Phase 2 — Testnet Mature</h3>
     <ul>
-      <li>Trustless ZK PnL aggregation — ZK proof over LiquidationAuth records</li>
+      <li>Trustless ZK PnL aggregation</li>
       <li>Dynamic funding rates — longs pay shorts when long OI &gt; short OI</li>
-      <li>Partial close support</li>
+      <li>Partial close + order updates</li>
       <li>LP withdrawal cooldowns</li>
       <li>Privacy copy trading</li>
+      <li>Explore per-position records — removes one-position-per-direction-per-market; orderbook prerequisite</li>
+      <li>Compliance admin rotation — multisig / governance-gated <code>set_admin</code></li>
     </ul>
 
-    <h3>🔐 Phase 3 — Security</h3>
+    <h3>🔬 Phase 3 — ZK Orderbook</h3>
     <ul>
-      <li>Formal Leo contract verification</li>
-      <li>Third-party security audit</li>
+      <li>ZK CLOB on the dark-pool primitives (sealed orders, operator-auth, <code>settle_match</code> / <code>partial_fill</code>)</li>
+      <li>In-circuit order matching — seal order contents from the operator (open research)</li>
+      <li>Frequent batch auctions — MEV / front-running resistance</li>
+      <li>Price-time priority via ZK proofs</li>
+    </ul>
+
+    <h3>💸 Phase 4 — Money Markets &amp; Vaults</h3>
+    <ul>
+      <li>Private borrowing / lending — perp commitment + 1-of-N keeper pattern for loan liquidation, index-snapshot interest accrual</li>
+      <li>ERC-4626-style tokenized vaults — standard yield-bearing shares over the LP pool / AMM (Aleo tokenized-vault ARC)</li>
+      <li>Verifiable vault solvency — provable assets / shares without exposing per-depositor flows (FROST + Pedersen)</li>
+      <li>LP-collateralized leverage — vault shares → lending → perps (ZKPrime direction)</li>
+    </ul>
+
+    <h3>🔐 Phase 5 — Security &amp; Audit</h3>
+    <ul>
+      <li>Formal Leo verification — circuit soundness + in-circuit ↔ finalize boundaries</li>
+      <li>Verify key properties — commitment-binding, compliance nullifier non-reuse, oracle quorum</li>
+      <li>Third-party ZK circuit audit — soundness + completeness, covering lending and vault paths</li>
+      <li>AMM swap-invariant audit</li>
       <li>Bug bounty program</li>
       <li>Extended oracle quorum (5-of-7)</li>
     </ul>
 
-    <h3>🚀 Phase 4 — Mainnet</h3>
+    <h3>🚀 Phase 6 — Mainnet &amp; Go-to-Market</h3>
     <ul>
-      <li>Aleo Mainnet deployment</li>
-      <li>Native Chainlink/Pyth integration (if Aleo supported)</li>
+      <li>Guarded mainnet — position / notional caps, gated on audit sign-off</li>
+      <li>Full Aleo mainnet deployment</li>
+      <li>Liquidity bootstrapping — market-maker partnership + LP incentives</li>
+      <li>Institutional lane — KYC-gated dark-pool settlement; MiCA / FATF positioning</li>
+      <li>Distribution — frontend / venue partner integration</li>
+      <li>Native Chainlink / Pyth integration (if Aleo-supported)</li>
       <li>Cross-margin / portfolio margin</li>
       <li>Mobile application</li>
       <li>DAO governance</li>
-      <li>Institutional dark pool access</li>
     </ul>
   </div>
 </div>
@@ -4529,8 +4554,8 @@ Live test: ~81 USDC bridged successfully in under 15 minutes</pre>
         <tr><td>Entry price bounded by trader-set slippage</td><td><code>assert(|entry_price - oracle_price| &lt;= max_slippage)</code> with <code>max_slippage</code> as private trader input</td><td><code>finalize_open_position</code></td></tr>
         <tr><td>No unauthorized oracle update</td><td>Role check: only registered nodes can submit; 2-of-3 required</td><td><code>finalize_submit_price</code></td></tr>
         <tr><td>No LP over-withdrawal</td><td>Full guard formula checked; tx reverts if breached</td><td><code>finalize_remove_liquidity</code></td></tr>
-        <tr><td>No stale price trade</td><td><code>block.height - timestamp &lt;= 150</code></td><td><code>finalize_open_position</code>, <code>finalize_close_position</code>, <code>finalize_liquidate</code></td></tr>
-        <tr><td>Compliance gating</td><td>issued_under, revoked, expires_at all asserted</td><td>Every trader finalize function</td></tr>
+        <tr><td>No stale price trade</td><td><code>block.height - timestamp &lt;= 150</code></td><td><code>finalize_open_position</code>, <code>finalize_close_position</code>, <code>finalize_liquidate</code>, <code>finalize_execute_take_profit</code>, <code>finalize_execute_stop_loss</code></td></tr>
+        <tr><td>Compliance gating</td><td><code>revoked</code> and <code>expires_at</code> asserted (<code>issued_under</code> retained as provenance, not re-checked at trade time)</td><td>Every trader finalize function</td></tr>
         <tr><td>Dark pool price constraints</td><td>buy_limit ≥ clearing ≥ sell_limit, ZK enforced</td><td><code>finalize_settle_match</code></td></tr>
       </table>
     </div>
@@ -4538,9 +4563,9 @@ Live test: ~81 USDC bridged successfully in under 15 minutes</pre>
     <h3>What the Keeper / Orchestrator Cannot Do</h3>
     <ul>
       <li>Steal trader funds — payouts and rewards are computed from the verified commitment hash, not a bot-supplied figure</li>
-      <li>Liquidate a healthy position — margin condition computed in-circuit from BHP256-verified params and live oracle price, asserted in finalize</li>
+      <li>Liquidate a healthy position — equity computed in-circuit from BHP256-verified params; the maintenance-margin threshold and the <code>equity &lt; maint_margin</code> assertion run on-chain in finalize, against a fresh oracle price</li>
       <li>Forge LiquidationAuth fields — recomputed commitment must equal the hash stored at <code>open_position</code></li>
-      <li>Execute a TP/SL when trigger not met — oracle condition verified in finalize</li>
+      <li>Execute a TP/SL at a fabricated or stale price — the execution price must equal the fresh oracle price (<code>finalize_execute_take_profit</code> / <code>finalize_execute_stop_loss</code>). Note: the trigger <em>direction</em> is asserted at placement, but execution does not re-check that the price crossed the trigger — the orchestrator is trusted to fire only when it has</li>
       <li>Execute an order for a closed position — <code>active_position_ids</code> check</li>
       <li>Read the trader's <code>PositionSlot</code> — the orchestrator does not own this record</li>
     </ul>

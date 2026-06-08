@@ -203,7 +203,7 @@ export function AdminPage() {
           </div>
 
           <div className="bg-zkperp-dark rounded-lg p-4">
-            <p className="text-sm text-gray-400 mb-2">Price Impact Preview</p>
+            <p className="text-sm text-gray-400 mb-2">Price Change Preview</p>
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <span className="text-gray-500">Current:</span>
@@ -256,16 +256,16 @@ export function AdminPage() {
               <span className="text-white">0.1%</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-400">Liquidation Threshold</span>
-              <span className="text-white">1% margin</span>
+              <span className="text-gray-400">Maintenance Margin</span>
+              <span className="text-white">5% of notional</span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-400">Liquidation Reward</span>
-              <span className="text-white">0.5%</span>
+              <span className="text-white">10% of collateral</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-400">Max OI Ratio</span>
-              <span className="text-white">80% of liquidity</span>
+              <span className="text-gray-400">LP Withdrawal Buffer</span>
+              <span className="text-white">10% of liquidity</span>
             </div>
           </div>
         </div>
@@ -280,7 +280,7 @@ export function AdminPage() {
               </div>
             ))}
             <div>
-              <p className="text-gray-400 mb-1">Mock USDC</p>
+              <p className="text-gray-400 mb-1">USDCx</p>
               <code className="text-xs text-zkperp-accent break-all">test_usdcx_stablecoin.aleo</code>
             </div>
             <div>
